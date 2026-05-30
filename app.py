@@ -169,7 +169,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 col4.metric("Z-Score (20-day MA)", f"{z_score:.2f} σ")
                 col5.metric("Skewness (Asimetri Harga)", f"{val_skew:.2f}")
 
-              st.subheader("📍 Statistical Support & Resistance (Volatility Bands)")
+                st.subheader("📍 Statistical Support & Resistance (Volatility Bands)")
                 p1, p2, p3, p4 = st.columns(4)
                 p1.metric("Resistance 2 (R2 - 2σ)", f"Rp {r2:,.0f}".replace(",", "."))
                 p2.metric("Resistance 1 (R1 - 1σ)", f"Rp {r1:,.0f}".replace(",", "."))
