@@ -231,8 +231,10 @@ if st.button("JALANKAN QUANT ENGINE"):
                 mo4.metric("Z-Score (20D)", f"{z_score:+.2f}σ")
                 st.divider()
                 
-                # --- SECTION 3: PIVOT & S/R ---
+                # --- SECTION 3: PIVOT & S/R (POSISI BARU BREAKOUT STATUS) ---
                 st.header("🎯 Pivot & S/R")
+                st.write(f"**Breakout Status (Res20):** `{breakout_status}`") # <-- Pindah ke sini
+                
                 p1, p2, p3, p4, p5 = st.columns(5)
                 p1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
                 p2.metric("Resistance 1 (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
@@ -241,9 +243,8 @@ if st.button("JALANKAN QUANT ENGINE"):
                 p5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
                 st.divider()
 
-                # --- SECTION 4: PREDIKSI & TRADING PLAN (UPDATED) ---
+                # --- SECTION 4: PREDIKSI & TRADING PLAN ---
                 st.header("🔮 Prediksi & Trading Plan")
-                st.write(f"**Breakout Status (Res20):** `{breakout_status}`")
                 
                 tp1, tp2, tp3, tp4 = st.columns(4)
                 tp1.metric("Signal V12", signal_v12)
