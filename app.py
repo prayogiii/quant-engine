@@ -108,20 +108,6 @@ if st.button("JALANKAN QUANT ENGINE"):
                 # Rumus Parkinson Volatility
                 log_hl = np.log(df['High'] / df['Low']).tail(20) ** 2
                 parkinson_vol = float(np.sqrt(log_hl.mean() / (4 * np.log(2))) * np.sqrt(252) * 100)
-                
-                # Penentuan Market Regime Berdasarkan Trend & Volatilitas
-                ema_20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
-                ema_50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
-                
-                if harga_terakhir > ema_20 and harga_terakhir > ema_50:
-                    regime_status = "BULLISH MOMENTUM"
-                    ihsg_status = "RISK-ON 🔥"
-                elif harga_terakhir < ema_20 and harga_terakhir < ema_50:
-                    regime_status = "BEARISH ACCUMULATION"
-                    ihsg_status = "RISK-OFF 🚨"
-                else:
-                    regime_status = "CHOPPY / SIDEWAYS"
-                    ihsg_status = "NEUTRAL ⚖️"
 
                 # ==========================================
                 # B. MOMENTUM & MEAN-REVERSION
@@ -134,6 +120,52 @@ if st.button("JALANKAN QUANT ENGINE"):
                 ma_20_close = float(df['Close'].tail(20).mean())
                 std_20_close = float(df['Close'].tail(20).std())
                 z_score = (harga_terakhir - ma_20_close) / std_20_close if std_20_close > 0 else 0.0
+
+                # ==========================================
+                # C. ENGINE KLASIFIKASI REGIME (9-STATES)
+                # ==========================================
+                ema_20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+                ema_50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
+                
+                # Mengukur persentase kerapatan/gap antara EMA 20 dan EMA 50
+                ema_gap = (abs(ema_20 - ema_50) / ema_50) * 100
+                
+                # ─── LOGIKA ATURAN KUANTITATIF 9 REGIME ───
+                if harga_terakhir > ema_20 and ema_20 > ema_50:
+                    if mom_5d > 6.0 or z_score > 1.5:
+                        regime_status = "Strong Bullish Momentum 🚀"
+                        ihsg_status = "RISK-ON 🔥"
+                    else:
+                        regime_status = "Bullish Momentum 📈"
+                        ihsg_status = "RISK-ON 🔥"
+                        
+                elif harga_terakhir < ema_20 and ema_20 < ema_50:
+                    if mom_5d < -6.0 or z_score < -1.5:
+                        regime_status = "Panic Sell ⚠️"
+                        ihsg_status = "RISK-OFF 🚨"
+                    else:
+                        regime_status = "Bearish Momentum 🔻"
+                        ihsg_status = "RISK-OFF 🚨"
+                        
+                elif harga_terakhir < ema_20 and ema_20 > ema_50:
+                    regime_status = "Bearish Distribution 📉"
+                    ihsg_status = "NEUTRAL ⚖️"
+                    
+                elif harga_terakhir > ema_20 and ema_20 < ema_50:
+                    if mom_3d > 4.0:
+                        regime_status = "Recovery 🔄"
+                        ihsg_status = "NEUTRAL ⚖️"
+                    else:
+                        regime_status = "Bullish Accumulation 🏗️"
+                        ihsg_status = "NEUTRAL ⚖️"
+                        
+                else: # Fallback area ketika harga menempel ketat di moving average
+                    if ema_gap < 1.2 or abs(z_score) < 0.8:
+                        regime_status = "Sideways ↔️"
+                        ihsg_status = "NEUTRAL ⚖️"
+                    else:
+                        regime_status = "Choppy 🌊"
+                        ihsg_status = "NEUTRAL ⚖️"
 
                 # ==========================================
                 # Perhitungan Pivot Dasar untuk S/R
@@ -231,8 +263,9 @@ if st.button("JALANKAN QUANT ENGINE"):
                 mo4.metric("Z-Score (20D)", f"{z_score:+.2f}σ")
                 st.divider()
                 
-                # --- SECTION 3: PIVOT & S/R (POSISI BARU BREAKOUT STATUS) ---
+                # --- SECTION 3: PIVOT & S/R ---
                 st.header("🎯 Pivot & S/R")
+                st.write(f"**Breakout Status (Res20):** `{breakout_status}`")
                 
                 p1, p2, p3, p4, p5 = st.columns(5)
                 p1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
@@ -240,8 +273,6 @@ if st.button("JALANKAN QUANT ENGINE"):
                 p3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
                 p4.metric("Support 1 (S1)", f"Rp {pivot_s1:,.0f}".replace(",", "."))
                 p5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
-                st.write(f"**Breakout Status (Res20):** `{breakout_status}`") # <-- Pindah ke sini
-
                 st.divider()
 
                 # --- SECTION 4: PREDIKSI & TRADING PLAN ---
