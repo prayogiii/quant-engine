@@ -32,24 +32,30 @@ st.write("Analisator Kuantitatif Saham untuk Trading Plan Objektif")
 # ==========================================
 # 2. PANEL INPUT (SIMPLE & MOBILE FRIENDLY)
 # ==========================================
-ticker_input = st.text_input(
-    "Masukkan Kode Saham IHSG (Contoh: BRMS.JK, BBRI.JK, BMRI.JK):", 
+ticker_raw = st.text_input(
+    "Masukkan Kode Saham IHSG (Contoh: BRMS, BBRI, BMRI):", 
     value=""
-).upper()
+).upper().strip()
 total_capital = st.number_input(
     "Total Modal Portofolio Anda (Rp):", 
-    min_value=0,  # Dikunci di angka 0 agar tidak bisa minus, tapi bebas isi modal kecil
+    min_value=0, 
     value=None, 
-    step=10000,   # Step diturunkan ke 10 ribu agar mudah naik-turunnya
-    placeholder="Masukkan nominal modal anda... (Bebas isi berapa saja)"
+    step=10000,   
+    placeholder="Masukkan nominal modal anda..."
 )
-# --- FITUR LIVE PREVIEW FORMAT RUPIAH ---
+
 if total_capital is not None and total_capital > 0:
-    # Mengubah format internasional (comma) menjadi format Indonesia (titik)
     rupiah_format = f"Rp {total_capital:,.0f}".replace(",", ".")
     st.markdown(f"✍️ *Terbaca:* **{rupiah_format}**")
-# ----------------------------------------
 
+# --- PROSES KODE TICKER OTOMATIS ---
+# Jika user mengetik 'BBRI', otomatis diubah jadi 'BBRI.JK'
+# Jika user sudah mengetik 'BBRI.JK', sistem tidak akan mengubahnya lagi
+if ticker_raw and not ticker_raw.endswith(".JK"):
+    ticker_input = f"{ticker_raw}.JK"
+else:
+    ticker_input = ticker_raw
+# ------------------------------------
 if st.button("JALANKAN QUANT ENGINE"):
     with st.spinner("Mengunduh data historis & memproses algoritma statistik..."):
         try:
