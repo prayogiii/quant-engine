@@ -61,7 +61,6 @@ else:
     ticker_input = ticker_raw
 # ------------------------------------
 
-# 🔥 FIX: Tombol diturunkan ke baris baru agar tidak ikut terkomentar
 if st.button("JALANKAN QUANT ENGINE"):
     # 1. VALIDASI INPUT KOSONG
     if not ticker_input:
@@ -218,7 +217,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 m3.metric("Parkinson Volatility (20D)", f"{parkinson_vol:.2f}%")
                 
                 st.markdown(f"**Metrics:** Rolling StdDev20: `{std_dev_20:.2f}%` | Model Target Distribution: `Student-T (df=5)` equivalent")
-                st.separator()
+                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
 
                 # --- SECTION 2: MOMENTUM & MEAN-REVERSION ---
                 st.header("📊 Momentum & Mean-Reversion")
@@ -227,7 +226,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 mo2.metric("Mom 5D", f"{mom_5d:+.2f}%")
                 mo3.metric("Mom 10D", f"{mom_10d:+.2f}%")
                 mo4.metric("Z-Score (20D)", f"{z_score:+.2f}σ")
-                st.separator()
+                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
 
                 # --- SECTION 3: PIVOT POINTS & TRADING PLAN ---
                 st.header("🎯 Pivot Points & Trading Plan")
@@ -245,7 +244,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 tp1.metric("SIGNAL GENERATOR", signal_v12)
                 tp2.metric("Area Entry Ideal (S1 - PP)", f"Rp {pivot_s1:,.0f} - {pp:,.0f}".replace(",", "."))
                 tp3.metric("Target Profit Terdekat (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
-                st.separator()
+                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
 
                 # --- SECTION 4: RISK ENGINE & ADVANCED METRICS ---
                 st.header("🛡️ Risk Engine & Portfolio Sizing")
@@ -255,7 +254,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 r3.metric("Beta vs IHSG", f"{beta_ihsg:.2f}x")
                 
                 st.markdown(f"**Advanced Risk Bounds:** Max Drawdown (30D): `{max_dd_30d:.2f}%` | Sharpe Ratio Est: `{sharpe_est:.2f}` | CVaR (95%): `{cvar_95:.2f}%` (Potensi risiko ekstrim harian)")
-                st.separator()
+                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
 
                 # --- SECTION 5: PROBABILITY ENGINE (MONTE CARLO) ---
                 st.header("🎲 Probability Engine (Monte Carlo 1000 Simulations)")
