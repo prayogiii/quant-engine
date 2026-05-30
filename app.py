@@ -38,10 +38,10 @@ ticker_input = st.text_input(
 ).upper()
 total_capital = st.number_input(
     "Total Modal Portofolio Anda (Rp):", 
-    min_value=1000000, 
-    value=None,  # Membuat kolom angka otomatis kosong di awal
-    step=1000000,
-    placeholder="Masukkan nominal modal anda... (Contoh: 50000000)"
+    min_value=0,  # Dikunci di angka 0 agar tidak bisa minus, tapi bebas isi modal kecil
+    value=None, 
+    step=10000,   # Step diturunkan ke 10 ribu agar mudah naik-turunnya
+    placeholder="Masukkan nominal modal anda... (Bebas isi berapa saja)"
 )
 
 if st.button("JALANKAN QUANT ENGINE"):
