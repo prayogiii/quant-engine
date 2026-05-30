@@ -136,7 +136,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 z_score = (harga_terakhir - ma_20_close) / std_20_close if std_20_close > 0 else 0.0
 
                 # ==========================================
-                # C. PIVOT POINTS & TRADING PLAN
+                # Perhitungan Pivot Dasar untuk S/R
                 # ==========================================
                 last_high = float(df['High'].iloc[-1])
                 last_low = float(df['Low'].iloc[-1])
@@ -217,7 +217,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 m3.metric("Parkinson Volatility (20D)", f"{parkinson_vol:.2f}%")
                 
                 st.markdown(f"**Metrics:** Rolling StdDev20: `{std_dev_20:.2f}%` | Model Target Distribution: `Student-T (df=5)` equivalent")
-                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
+                st.divider()
 
                 # --- SECTION 2: MOMENTUM & MEAN-REVERSION ---
                 st.header("📊 Momentum & Mean-Reversion")
@@ -226,27 +226,31 @@ if st.button("JALANKAN QUANT ENGINE"):
                 mo2.metric("Mom 5D", f"{mom_5d:+.2f}%")
                 mo3.metric("Mom 10D", f"{mom_10d:+.2f}%")
                 mo4.metric("Z-Score (20D)", f"{z_score:+.2f}σ")
-                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
+                st.divider()
 
-                # --- SECTION 3: PIVOT POINTS & TRADING PLAN ---
-                st.header("🎯 Pivot Points & Trading Plan")
+                # 🔥 MODIFIKASI TERBARU: SEPARASI SECTION 3 & 4 🔥
+                
+                # --- SECTION 3: PIVOT & S/R ---
+                st.header("🎯 Pivot & S/R")
                 p1, p2, p3, p4, p5 = st.columns(5)
                 p1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
                 p2.metric("Resistance 1 (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
                 p3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
                 p4.metric("Support 1 (S1)", f"Rp {pivot_s1:,.0f}".replace(",", "."))
                 p5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
-                
+                st.divider()
+
+                # --- SECTION 4: PREDIKSI & TRADING PLAN ---
+                st.header("🔮 Prediksi & Trading Plan")
                 st.write(f"**Breakout Status (Res20):** `{breakout_status}`")
                 
-                st.markdown("📋 **V12 Quant Trading Plan (Objective Rules):**")
                 tp1, tp2, tp3 = st.columns(3)
                 tp1.metric("SIGNAL GENERATOR", signal_v12)
                 tp2.metric("Area Entry Ideal (S1 - PP)", f"Rp {pivot_s1:,.0f} - {pp:,.0f}".replace(",", "."))
                 tp3.metric("Target Profit Terdekat (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
-                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
+                st.divider()
 
-                # --- SECTION 4: RISK ENGINE & ADVANCED METRICS ---
+                # --- SECTION 5: RISK ENGINE & ADVANCED METRICS ---
                 st.header("🛡️ Risk Engine & Portfolio Sizing")
                 r1, r2, r3 = st.columns(3)
                 r1.metric("Kelly Allocation %", f"{kelly_adj*100:.1f}% capital")
@@ -254,9 +258,9 @@ if st.button("JALANKAN QUANT ENGINE"):
                 r3.metric("Beta vs IHSG", f"{beta_ihsg:.2f}x")
                 
                 st.markdown(f"**Advanced Risk Bounds:** Max Drawdown (30D): `{max_dd_30d:.2f}%` | Sharpe Ratio Est: `{sharpe_est:.2f}` | CVaR (95%): `{cvar_95:.2f}%` (Potensi risiko ekstrim harian)")
-                st.divider()  # 🔥 FIX: Menggunakan st.divider() resmi
+                st.divider()
 
-                # --- SECTION 5: PROBABILITY ENGINE (MONTE CARLO) ---
+                # --- SECTION 6: PROBABILITY ENGINE (MONTE CARLO) ---
                 st.header("🎲 Probability Engine (Monte Carlo 1000 Simulations)")
                 pr1, pr2, pr3 = st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bullish_besok:.1f}%")
