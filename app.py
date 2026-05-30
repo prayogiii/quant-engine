@@ -108,19 +108,32 @@ if st.button("JALANKAN QUANT ENGINE"):
                 r2 = harga_terakhir * (1 + (2 * daily_vol_raw))
                 s2 = harga_terakhir * (1 - (2 * daily_vol_raw))
 
-                # --- TAMBAHAN FITUR: RES 20 & BREAKOUT DETECTOR ---
-                # Mengambil harga tertinggi dari 20 hari sebelum hari ini
+                # RES 20 & BREAKOUT DETECTOR
                 res20 = float(df['High'].iloc[-21:-1].max())
-                
-                # Logika penentuan status breakout
                 if harga_terakhir > res20:
                     breakout_status = "🔥 BREAKOUT!"
-                elif float(df['High'].iloc[-1].item()) > res20:
+                elif float(df['High'].iloc[-1]) > res20:
                     breakout_status = "⚡ Intraday Breakout (Ekor)"
                 else:
                     breakout_status = "❌ Belum Breakout"
-                # --------------------------------------------------
 
+                # --- TAMBAHAN FITUR: CLASSIC PIVOT POINTS ---
+                last_high = float(df['High'].iloc[-1])
+                last_low = float(df['Low'].iloc[-1])
+                last_close = harga_terakhir
+
+                pp = (last_high + last_low + last_close) / 3
+                pivot_r1 = (2 * pp) - last_low
+                pivot_s1 = (2 * pp) - last_high
+                pivot_r2 = pp + (last_high - last_low)
+                pivot_s2 = pp - (last_high - last_low)
+                # --- TAMBAHAN: LOGIKA ENTRY & TP PIVOT ---
+                # Entry ideal adalah area antara S1 hingga PP
+                pivot_entry_min = pivot_s1
+                pivot_entry_max = pp
+                pivot_tp1 = pivot_r1
+                pivot_tp2 = pivot_r2
+                # --------------------------------------------
                 # METRIK 4: SIGNAL ENGINE & PROBABILITAS
                 df_student_t = len(df['Return'].tail(20)) - 1
                 prob_bullish = (1 - t.cdf(0, df_student_t, loc=df['Return'].tail(20).mean(), scale=df['Return'].tail(20).std())) * 100
@@ -176,12 +189,30 @@ if st.button("JALANKAN QUANT ENGINE"):
                 p3.metric("Support 1 (S1 - 1σ)", f"Rp {s1:,.0f}".replace(",", "."))
                 p4.metric("Support 2 (S2 - 2σ)", f"Rp {s2:,.0f}".replace(",", "."))
 
-                # --- TAMPILAN BARU UNTUK BREAKOUT ENGINE ---
-                st.markdown(" ") # Kasih sedikit jarak kosong
+                # --- TAMPILAN BARU: CLASSIC PIVOT POINTS ---
+                #🎯 CLASSIC PIVOT POINTS
+                st.subheader("🎯 Classic Pivot Points (Traditional)")
+                v1, v2, v3, v4, v5 = st.columns(5)
+                v1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
+                v2.metric("Resistance 1 (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
+                v3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
+                v4.metric("Support 1 (S1)", f"Rp {pivot_s1:,.0f}".replace(",", "."))
+                v5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
+
+                # --- TAMPILAN BARU: PIVOT TRADING PLAN ---
+                st.markdown(" ") # Kasih jarak sedikit
+                st.markdown("📋 **Pivot-Based Trading Plan (Buy on Retest):**")
+                t1, t2, t3 = st.columns(3)
+                t1.metric("🎯 Area Entry Ideal", f"Rp {pivot_entry_min:,.0f} - {pivot_entry_max:,.0f}".replace(",", "."))
+                t2.metric("💰 Target Profit 1 (TP1)", f"Rp {pivot_tp1:,.0f}".replace(",", "."))
+                t3.metric("🚀 Target Profit 2 (TP2)", f"Rp {pivot_tp2:,.0f}".replace(",", "."))
+                # --------------------------------------------
+
+                # TAMPILAN UNTUK BREAKOUT ENGINE
+                st.markdown(" ") 
                 b1, b2 = st.columns(2)
                 b1.metric("20-Day High Ceiling (Res 20)", f"Rp {res20:,.0f}".replace(",", "."))
                 b2.metric("Kondisi Saham Saat Ini", breakout_status)
-                # -------------------------------------------
 
                 st.subheader("🛡️ Risk Engine (Kelly Criterion)")
                 r_col1, r_col2, r_col3 = st.columns(3)
