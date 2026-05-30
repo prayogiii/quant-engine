@@ -50,7 +50,13 @@ if st.button("JALANKAN QUANT ENGINE"):
                 df = df.dropna()
 
                 # METRIK 1: STATISTIK KUANTITATIF & VOLATILITAS
-                fast_std = df['Return'].tail(20).std() * np.sqrt(252) * 100
+                daily_vol_raw = df['Return'].tail(20).std()
+                
+                # Antisipasi jika deviasi nilainya 0 atau NaN karena data feed error
+                if pd.isna(daily_vol_raw) or daily_vol_raw == 0:
+                    daily_vol_raw = 0.02  # Fallback standar 2% per hari
+                
+                fast_std = daily_vol_raw * np.sqrt(252) * 100
                 
                 def calc_mad(x):
                     return np.median(np.abs(x - np.median(x)))
@@ -68,16 +74,14 @@ if st.button("JALANKAN QUANT ENGINE"):
                 z_score = (harga_terakhir - ma20) / std20
                 val_skew = skew(df['Return'].tail(20))
 
-                # METRIK 3: PIVOT POINTS CLASSIC
-                high_prev = df['High'].iloc[-2].item()
-                low_prev = df['Low'].iloc[-2].item()
-                close_prev = df['Close'].iloc[-2].item()
-                
-                pivot = (high_prev + low_prev + close_prev) / 3
-                r1 = (2 * pivot) - low_prev
-                s1 = (2 * pivot) - high_prev
-                r2 = pivot + (high_prev - low_prev)
-                s2 = pivot - (high_prev - low_prev)
+                # ==========================================================
+                # METRIK 3: STATISTIK SUPPORT & RESISTANCE (ANTI-GLITCH)
+                # ==========================================================
+                # Menggunakan deviasi pergerakan harga riil untuk menentukan benteng pertahanan harga
+                r1 = harga_terakhir * (1 + daily_vol_raw)
+                s1 = harga_terakhir * (1 - daily_vol_raw)
+                r2 = harga_terakhir * (1 + (2 * daily_vol_raw))
+                s2 = harga_terakhir * (1 - (2 * daily_vol_raw))
 
                 # METRIK 4: SIGNAL ENGINE & PROBABILITAS
                 df_student_t = len(df['Return'].tail(20)) - 1
@@ -127,12 +131,12 @@ if st.button("JALANKAN QUANT ENGINE"):
                 col4.metric("Z-Score (20-day MA)", f"{z_score:.2f} σ")
                 col5.metric("Skewness (Asimetri Harga)", f"{val_skew:.2f}")
 
-                st.subheader("📍 Pivot Points (Support & Resistance)")
+                st.subheader("📍 Statistical Support & Resistance (Volatility Bands)")
                 p1, p2, p3, p4 = st.columns(4)
-                p1.metric("Resistance 2 (R2)", f"Rp {r2:,.0f}")
-                p2.metric("Resistance 1 (R1)", f"Rp {r1:,.0f}")
-                p3.metric("Support 1 (S1)", f"Rp {s1:,.0f}")
-                p4.metric("Support 2 (S2)", f"Rp {s2:,.0f}")
+                p1.metric("Resistance 2 (R2 - 2σ)", f"Rp {r2:,.0f}")
+                p2.metric("Resistance 1 (R1 - 1σ)", f"Rp {r1:,.0f}")
+                p3.metric("Support 1 (S1 - 1σ)", f"Rp {s1:,.0f}")
+                p4.metric("Support 2 (S2 - 2σ)", f"Rp {s2:,.0f}")
 
                 st.subheader("🛡️ Risk Engine (Kelly Criterion)")
                 r_col1, r_col2, r_col3 = st.columns(3)
