@@ -59,8 +59,7 @@ if ticker_raw and not ticker_raw.endswith(".JK"):
     ticker_input = f"{ticker_raw}.JK"
 else:
     ticker_input = ticker_raw
-# ------------------------------------
-if st.button("JALANKAN QUANT ENGINE"):
+# ------------------------------------if st.button("JALANKAN QUANT ENGINE"):
     # 1. VALIDASI INPUT KOSONG
     if not ticker_input:
         st.warning("⚠️ Kode saham tidak boleh kosong! Silakan masukkan kode saham terlebih dahulu.")
@@ -77,33 +76,40 @@ if st.button("JALANKAN QUANT ENGINE"):
                     st.error("❌ Data saham tidak ditemukan atau kode salah.")
                     st.stop()
                 
-                # Pemrosesan Data Dasar
-                harga_terakhir = float(df['Close'].iloc[-1].item())
+                # 🔥 ANTIDOTE FIX: Meratakan kolom MultiIndex YFinance agar kembali jadi Series biasa
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+                
+                # Pemrosesan Data Dasar (Lebih aman tanpa .item())
+                harga_terakhir = float(df['Close'].iloc[-1])
                 returns = df['Close'].pct_change().dropna()
                 
                 # Try-Except untuk Fetch Data IHSG (^JKSE) guna menghitung Beta
                 try:
                     df_ihsg = yf.download("^JKSE", period="1y")
+                    if isinstance(df_ihsg.columns, pd.MultiIndex):
+                        df_ihsg.columns = df_ihsg.columns.get_level_values(0)
+                        
                     ihsg_returns = df_ihsg['Close'].pct_change().dropna()
                     combined_ret = pd.concat([returns, ihsg_returns], axis=1).dropna()
                     covariance = combined_ret.cov().iloc[0, 1]
                     ihsg_variance = combined_ret.iloc[:, 1].var()
                     beta_ihsg = covariance / ihsg_variance
                 except:
-                    beta_ihsg = 1.0  # Fallback jika jaringan internet ke Yahoo Finance IHSG glitch
+                    beta_ihsg = 1.0  # Fallback jika IHSG sedang glitch
 
                 # ==========================================
                 # A. KOSMETIK & STATISTIK VOLATILITAS (IMAGE 1)
                 # ==========================================
-                std_dev_20 = float(returns.tail(20).std() * np.sqrt(252) * 100) # Annualized StdDev
+                std_dev_20 = float(returns.tail(20).std() * np.sqrt(252) * 100)
                 
-                # Rumus Parkinson Volatility (Menggunakan High & Low)
+                # Rumus Parkinson Volatility
                 log_hl = np.log(df['High'] / df['Low']).tail(20) ** 2
                 parkinson_vol = float(np.sqrt(log_hl.mean() / (4 * np.log(2))) * np.sqrt(252) * 100)
                 
                 # Penentuan Market Regime Berdasarkan Trend & Volatilitas
-                ema_20 = df['Close'].ewm(span=20, adjust=False).mean().iloc[-1].item()
-                ema_50 = df['Close'].ewm(span=50, adjust=False).mean().iloc[-1].item()
+                ema_20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+                ema_50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
                 
                 if harga_terakhir > ema_20 and harga_terakhir > ema_50:
                     regime_status = "BULLISH MOMENTUM"
@@ -122,16 +128,16 @@ if st.button("JALANKAN QUANT ENGINE"):
                 mom_5d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-6]) - 1) * 100)
                 mom_10d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-11]) - 1) * 100)
                 
-                # Z-Score (Mengukur kejenuhan harga terhadap moving average 20 hari)
-                ma_20_close = df['Close'].tail(20).mean().item()
-                std_20_close = df['Close'].tail(20).std().item()
+                # Z-Score
+                ma_20_close = float(df['Close'].tail(20).mean())
+                std_20_close = float(df['Close'].tail(20).std())
                 z_score = (harga_terakhir - ma_20_close) / std_20_close if std_20_close > 0 else 0.0
 
                 # ==========================================
                 # C. PIVOT POINTS & TRADING PLAN
                 # ==========================================
-                last_high = float(df['High'].iloc[-1].item())
-                last_low = float(df['Low'].iloc[-1].item())
+                last_high = float(df['High'].iloc[-1])
+                last_low = float(df['Low'].iloc[-1])
                 
                 pp = (last_high + last_low + harga_terakhir) / 3
                 pivot_r1 = (2 * pp) - last_low
@@ -139,7 +145,7 @@ if st.button("JALANKAN QUANT ENGINE"):
                 pivot_r2 = pp + (last_high - last_low)
                 pivot_s2 = pp - (last_high - last_low)
                 
-                res20 = float(df['High'].iloc[-21:-1].max().item())
+                res20 = float(df['High'].iloc[-21:-1].max())
                 breakout_status = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
                 # Consensus Signal Engine Sederhana
