@@ -5,7 +5,7 @@ import numpy as np
 from scipy.stats import skew, t
 
 # ==========================================
-# 1. KONFIGURASI HALAMAN & TEMA
+# 1. KONFIGURASI HALAMAN & TEMA (UI FIX)
 # ==========================================
 st.set_page_config(
     page_title="Quant Risk Engine",
@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS untuk mempercantik tampilan di Browser HP (iOS)
+# Custom CSS untuk mempercantik tampilan di Browser HP (iOS) & Hapus Tulisan Pengganggu
 st.markdown("""
     <style>
     .main { background-color: #0f1116; color: #ffffff; }
@@ -23,12 +23,16 @@ st.markdown("""
     .stButton>button { width: 100%; background-color: #1f2937; color: white; border: 1px solid #374151; }
     .stButton>button:hover { background-color: #374151; border-color: #00ffcc; }
     h1, h2, h3 { color: #f3f4f6; }
+    
+    /* MANTRA SIHIR: Menghilangkan tulisan 'Press Enter to apply' yang nabrak di HP */
+    div[data-testid="InputInstructions"] { 
+        display: none !important; 
+    }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📊 Quant & Risk Engine Dashboard")
 st.write("Analisator Kuantitatif Saham untuk Trading Plan Objektif")
-
 # ==========================================
 # 2. PANEL INPUT (SIMPLE & MOBILE FRIENDLY)
 # ==========================================
