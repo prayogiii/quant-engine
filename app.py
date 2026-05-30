@@ -32,8 +32,17 @@ st.write("Analisator Kuantitatif Saham untuk Trading Plan Objektif")
 # ==========================================
 # 2. PANEL INPUT (SIMPLE & MOBILE FRIENDLY)
 # ==========================================
-ticker_input = st.text_input("Masukkan Kode Saham IHSG (Contoh: BRMS.JK, BBRI.JK, BMRI.JK):", "BRMS.JK").upper()
-total_capital = st.number_input("Total Modal Portofolio Anda (Rp):", min_value=1000000, value=50000000, step=1000000)
+ticker_input = st.text_input(
+    "Masukkan Kode Saham IHSG (Contoh: BRMS.JK, BBRI.JK, BMRI.JK):", 
+    value=""
+).upper()
+total_capital = st.number_input(
+    "Total Modal Portofolio Anda (Rp):", 
+    min_value=1000000, 
+    value=None,  # Membuat kolom angka otomatis kosong di awal
+    step=1000000,
+    placeholder="Masukkan nominal modal anda... (Contoh: 50000000)"
+)
 
 if st.button("JALANKAN QUANT ENGINE"):
     with st.spinner("Mengunduh data historis & memproses algoritma statistik..."):
