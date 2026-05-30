@@ -108,6 +108,19 @@ if st.button("JALANKAN QUANT ENGINE"):
                 r2 = harga_terakhir * (1 + (2 * daily_vol_raw))
                 s2 = harga_terakhir * (1 - (2 * daily_vol_raw))
 
+                # --- TAMBAHAN FITUR: RES 20 & BREAKOUT DETECTOR ---
+                # Mengambil harga tertinggi dari 20 hari sebelum hari ini
+                res20 = float(df['High'].iloc[-21:-1].max())
+                
+                # Logika penentuan status breakout
+                if harga_terakhir > res20:
+                    breakout_status = "🔥 BREAKOUT!"
+                elif float(df['High'].iloc[-1].item()) > res20:
+                    breakout_status = "⚡ Intraday Breakout (Ekor)"
+                else:
+                    breakout_status = "❌ Belum Breakout"
+                # --------------------------------------------------
+
                 # METRIK 4: SIGNAL ENGINE & PROBABILITAS
                 df_student_t = len(df['Return'].tail(20)) - 1
                 prob_bullish = (1 - t.cdf(0, df_student_t, loc=df['Return'].tail(20).mean(), scale=df['Return'].tail(20).std())) * 100
@@ -156,12 +169,19 @@ if st.button("JALANKAN QUANT ENGINE"):
                 col4.metric("Z-Score (20-day MA)", f"{z_score:.2f} σ")
                 col5.metric("Skewness (Asimetri Harga)", f"{val_skew:.2f}")
 
-                st.subheader("📍 Statistical Support & Resistance (Volatility Bands)")
+              st.subheader("📍 Statistical Support & Resistance (Volatility Bands)")
                 p1, p2, p3, p4 = st.columns(4)
-                p1.metric("Resistance 2 (R2 - 2σ)", f"Rp {r2:,.0f}")
-                p2.metric("Resistance 1 (R1 - 1σ)", f"Rp {r1:,.0f}")
-                p3.metric("Support 1 (S1 - 1σ)", f"Rp {s1:,.0f}")
-                p4.metric("Support 2 (S2 - 2σ)", f"Rp {s2:,.0f}")
+                p1.metric("Resistance 2 (R2 - 2σ)", f"Rp {r2:,.0f}".replace(",", "."))
+                p2.metric("Resistance 1 (R1 - 1σ)", f"Rp {r1:,.0f}".replace(",", "."))
+                p3.metric("Support 1 (S1 - 1σ)", f"Rp {s1:,.0f}".replace(",", "."))
+                p4.metric("Support 2 (S2 - 2σ)", f"Rp {s2:,.0f}".replace(",", "."))
+
+                # --- TAMPILAN BARU UNTUK BREAKOUT ENGINE ---
+                st.markdown(" ") # Kasih sedikit jarak kosong
+                b1, b2 = st.columns(2)
+                b1.metric("20-Day High Ceiling (Res 20)", f"Rp {res20:,.0f}".replace(",", "."))
+                b2.metric("Kondisi Saham Saat Ini", breakout_status)
+                # -------------------------------------------
 
                 st.subheader("🛡️ Risk Engine (Kelly Criterion)")
                 r_col1, r_col2, r_col3 = st.columns(3)
