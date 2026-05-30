@@ -233,7 +233,6 @@ if st.button("JALANKAN QUANT ENGINE"):
                 
                 # --- SECTION 3: PIVOT & S/R (POSISI BARU BREAKOUT STATUS) ---
                 st.header("🎯 Pivot & S/R")
-                st.write(f"**Breakout Status (Res20):** `{breakout_status}`") # <-- Pindah ke sini
                 
                 p1, p2, p3, p4, p5 = st.columns(5)
                 p1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
@@ -241,6 +240,8 @@ if st.button("JALANKAN QUANT ENGINE"):
                 p3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
                 p4.metric("Support 1 (S1)", f"Rp {pivot_s1:,.0f}".replace(",", "."))
                 p5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
+                st.write(f"**Breakout Status (Res20):** `{breakout_status}`") # <-- Pindah ke sini
+
                 st.divider()
 
                 # --- SECTION 4: PREDIKSI & TRADING PLAN ---
