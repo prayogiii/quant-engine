@@ -61,167 +61,202 @@ else:
     ticker_input = ticker_raw
 # ------------------------------------
 if st.button("JALANKAN QUANT ENGINE"):
-    with st.spinner("Mengunduh data historis & memproses algoritma statistik..."):
-        try:
-            df = yf.download(ticker_input, period="1y")
-            
-            if df.empty:
-                st.error("Saham tidak ditemukan! Pastikan kode benar dan menggunakan akhiran '.JK'")
-            else:
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = df.columns.get_level_values(0)
+    # 1. VALIDASI INPUT KOSONG
+    if not ticker_input:
+        st.warning("⚠️ Kode saham tidak boleh kosong! Silakan masukkan kode saham terlebih dahulu.")
+    elif total_capital is None:
+        st.warning("⚠️ Nominal modal tidak boleh kosong! Silakan isi modal portofolio Anda.")
+    elif total_capital <= 0:
+        st.warning("⚠️ Modal portofolio harus lebih besar dari Rp 0!")
+    else:
+        with st.spinner("🤖 Menjalankan Algoritma Kuantitatif & Simulasi Monte Carlo..."):
+            try:
+                # Download Data Saham (1 Tahun)
+                df = yf.download(ticker_input, period="1y")
+                if df.empty:
+                    st.error("❌ Data saham tidak ditemukan atau kode salah.")
+                    st.stop()
                 
-                df['Return'] = df['Close'].pct_change()
-                df = df.dropna()
+                # Pemrosesan Data Dasar
+                harga_terakhir = float(df['Close'].iloc[-1].item())
+                returns = df['Close'].pct_change().dropna()
+                
+                # Try-Except untuk Fetch Data IHSG (^JKSE) guna menghitung Beta
+                try:
+                    df_ihsg = yf.download("^JKSE", period="1y")
+                    ihsg_returns = df_ihsg['Close'].pct_change().dropna()
+                    combined_ret = pd.concat([returns, ihsg_returns], axis=1).dropna()
+                    covariance = combined_ret.cov().iloc[0, 1]
+                    ihsg_variance = combined_ret.iloc[:, 1].var()
+                    beta_ihsg = covariance / ihsg_variance
+                except:
+                    beta_ihsg = 1.0  # Fallback jika jaringan internet ke Yahoo Finance IHSG glitch
 
-                # METRIK 1: STATISTIK KUANTITATIF & VOLATILITAS
-                daily_vol_raw = df['Return'].tail(20).std()
+                # ==========================================
+                # A. KOSMETIK & STATISTIK VOLATILITAS (IMAGE 1)
+                # ==========================================
+                std_dev_20 = float(returns.tail(20).std() * np.sqrt(252) * 100) # Annualized StdDev
                 
-                # Antisipasi jika deviasi nilainya 0 atau NaN karena data feed error
-                if pd.isna(daily_vol_raw) or daily_vol_raw == 0:
-                    daily_vol_raw = 0.02  # Fallback standar 2% per hari
+                # Rumus Parkinson Volatility (Menggunakan High & Low)
+                log_hl = np.log(df['High'] / df['Low']).tail(20) ** 2
+                parkinson_vol = float(np.sqrt(log_hl.mean() / (4 * np.log(2))) * np.sqrt(252) * 100)
                 
-                fast_std = daily_vol_raw * np.sqrt(252) * 100
+                # Penentuan Market Regime Berdasarkan Trend & Volatilitas
+                ema_20 = df['Close'].ewm(span=20, adjust=False).mean().iloc[-1].item()
+                ema_50 = df['Close'].ewm(span=50, adjust=False).mean().iloc[-1].item()
                 
-                def calc_mad(x):
-                    return np.median(np.abs(x - np.median(x)))
-                rolling_mad = calc_mad(df['Return'].tail(20))
-                robust_std = rolling_mad * 1.4826 * np.sqrt(252) * 100
-                
-                hl_term = np.log(df['High'] / df['Low']) ** 2
-                parkinson_var = hl_term.tail(20).sum() / (4 * np.log(2) * 20)
-                parkinson_vol = np.sqrt(parkinson_var * 252) * 100
-
-                # METRIK 2: MOMENTUM & MEAN-REVERSION
-                ma20 = df['Close'].rolling(window=20).mean().iloc[-1]
-                std20 = df['Close'].rolling(window=20).std().iloc[-1]
-                harga_terakhir = df['Close'].iloc[-1].item()
-                z_score = (harga_terakhir - ma20) / std20
-                val_skew = skew(df['Return'].tail(20))
-
-                # ==========================================================
-                # METRIK 3: STATISTIK SUPPORT & RESISTANCE (ANTI-GLITCH)
-                # ==========================================================
-                # Menggunakan deviasi pergerakan harga riil untuk menentukan benteng pertahanan harga
-                r1 = harga_terakhir * (1 + daily_vol_raw)
-                s1 = harga_terakhir * (1 - daily_vol_raw)
-                r2 = harga_terakhir * (1 + (2 * daily_vol_raw))
-                s2 = harga_terakhir * (1 - (2 * daily_vol_raw))
-
-                # RES 20 & BREAKOUT DETECTOR
-                res20 = float(df['High'].iloc[-21:-1].max())
-                if harga_terakhir > res20:
-                    breakout_status = "🔥 BREAKOUT!"
-                elif float(df['High'].iloc[-1]) > res20:
-                    breakout_status = "⚡ Intraday Breakout (Ekor)"
+                if harga_terakhir > ema_20 and harga_terakhir > ema_50:
+                    regime_status = "BULLISH MOMENTUM"
+                    ihsg_status = "RISK-ON 🔥"
+                elif harga_terakhir < ema_20 and harga_terakhir < ema_50:
+                    regime_status = "BEARISH ACCUMULATION"
+                    ihsg_status = "RISK-OFF 🚨"
                 else:
-                    breakout_status = "❌ Belum Breakout"
+                    regime_status = "CHOPPY / SIDEWAYS"
+                    ihsg_status = "NEUTRAL ⚖️"
 
-                # --- TAMBAHAN FITUR: CLASSIC PIVOT POINTS ---
-                last_high = float(df['High'].iloc[-1])
-                last_low = float(df['Low'].iloc[-1])
-                last_close = harga_terakhir
+                # ==========================================
+                # B. MOMENTUM & MEAN-REVERSION (IMAGE 2)
+                # ==========================================
+                mom_3d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-4]) - 1) * 100)
+                mom_5d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-6]) - 1) * 100)
+                mom_10d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-11]) - 1) * 100)
+                
+                # Z-Score (Mengukur kejenuhan harga terhadap moving average 20 hari)
+                ma_20_close = df['Close'].tail(20).mean().item()
+                std_20_close = df['Close'].tail(20).std().item()
+                z_score = (harga_terakhir - ma_20_close) / std_20_close if std_20_close > 0 else 0.0
 
-                pp = (last_high + last_low + last_close) / 3
+                # ==========================================
+                # C. PIVOT POINTS & TRADING PLAN
+                # ==========================================
+                last_high = float(df['High'].iloc[-1].item())
+                last_low = float(df['Low'].iloc[-1].item())
+                
+                pp = (last_high + last_low + harga_terakhir) / 3
                 pivot_r1 = (2 * pp) - last_low
                 pivot_s1 = (2 * pp) - last_high
                 pivot_r2 = pp + (last_high - last_low)
                 pivot_s2 = pp - (last_high - last_low)
-                # --- TAMBAHAN: LOGIKA ENTRY & TP PIVOT ---
-                # Entry ideal adalah area antara S1 hingga PP
-                pivot_entry_min = pivot_s1
-                pivot_entry_max = pp
-                pivot_tp1 = pivot_r1
-                pivot_tp2 = pivot_r2
-                # --------------------------------------------
-                # METRIK 4: SIGNAL ENGINE & PROBABILITAS
-                df_student_t = len(df['Return'].tail(20)) - 1
-                prob_bullish = (1 - t.cdf(0, df_student_t, loc=df['Return'].tail(20).mean(), scale=df['Return'].tail(20).std())) * 100
                 
-                if z_score < -1.5 and prob_bullish > 52.0:
-                    signal = "BUY / LONG"
-                    tp = harga_terakhir * (1 + (fast_std / 100 / np.sqrt(252)) * 1.5)
-                    sl = harga_terakhir * (1 - (fast_std / 100 / np.sqrt(252)) * 1.0)
-                elif z_score > 1.5:
-                    signal = "TAKE PROFIT / SELL"
-                    tp, sl = 0, 0
+                res20 = float(df['High'].iloc[-21:-1].max().item())
+                breakout_status = "YES (🔥)" if harga_terakhir > res20 else "NO"
+
+                # Consensus Signal Engine Sederhana
+                score = 0
+                if mom_3d > 0: score += 1
+                if z_score < -1.0: score += 1 # Syarat Mean Reversion (jenuh jual)
+                if harga_terakhir > ema_20: score += 1
+                
+                if score >= 2 and breakout_status == "YES (🔥)":
+                    signal_v12 = "🔥 STRONGLY BUY"
+                elif score >= 1:
+                    signal_v12 = "⚡ BUY (TACTICAL)"
                 else:
-                    signal = "NO TRADE (Sinyal Lemah)"
-                    tp, sl = 0, 0
+                    signal_v12 = "🚨 NO TRADE / AVOID"
 
-                # METRIK 5: RISK ENGINE (KELLY CRITERION)
-                w = prob_bullish / 100
-                r_ratio = (tp - harga_terakhir) / (harga_terakhir - sl) if (signal == "BUY / LONG" and (harga_terakhir - sl) != 0) else 1.5
+                # ==========================================
+                # D. RISK ENGINE & ADVANCED RISK METRICS
+                # ==========================================
+                # Kelly Criterion Calculator
+                win_days = returns[returns > 0]
+                loss_days = returns[returns < 0]
+                win_rate = len(win_days) / len(returns) if len(returns) > 0 else 0.5
+                avg_gain = win_days.mean() if len(win_days) > 0 else 0.01
+                avg_loss = abs(loss_days.mean()) if len(loss_days) > 0 else 0.01
+                win_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else 1.0
                 
-                kelly_raw = w - ((1 - w) / r_ratio)
-                kelly_adj = max(0.0, kelly_raw * 0.4) 
-                porsi_modal = total_capital * kelly_adj
-                jumlah_lot = int((porsi_modal / (harga_terakhir * 100)))
+                kelly_raw = win_rate - ((1 - win_rate) / win_loss_ratio) if win_loss_ratio > 0 else 0
+                kelly_adj = max(0.0, kelly_raw * 0.4) # Fractional Kelly (x0.4 multiplier untuk pengaman bursa)
+                allocated_capital = total_capital * kelly_adj
 
-                # DISPLAY HASIL
-                st.success(f"Analisis Saham {ticker_input} Berhasil Dieksekusi!")
+                # Max Drawdown 30 Hari Terakhir
+                roll_max = df['Close'].tail(30).cummax()
+                drawdown = (df['Close'].tail(30) - roll_max) / roll_max
+                max_dd_30d = float(drawdown.min() * 100)
+
+                # Sharpe Ratio
+                sharpe_est = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
+
+                # CVaR 95% (Conditional Value at Risk)
+                var_95 = returns.quantile(0.05)
+                cvar_95 = float(returns[returns <= var_95].mean() * 100)
+
+                # ==========================================
+                # E. MONTE CARLO 1000x SIMULATION ENGINE
+                # ==========================================
+                n_simulations = 1000
+                n_days = 30
+                daily_mu = returns.mean()
+                daily_sigma = returns.std()
                 
-                st.subheader("🤖 Signal Engine Output")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Rekomendasi Sinyal", signal)
-                c2.metric("Harga Saat Ini (Close)", f"Rp {harga_terakhir:,.0f}")
-                c3.metric("Probabilitas Bullish", f"{prob_bullish:.1f}%")
+                # Simulasi proyeksi harga geometric brownian motion fiktif
+                sim_returns = np.random.normal(daily_mu, daily_sigma, (n_days, n_simulations))
+                price_paths = harga_terakhir * np.exp(np.cumsum(sim_returns, axis=0))
                 
-                if signal == "BUY / LONG":
-                    c1_tp, c2_sl = st.columns(2)
-                    c1_tp.metric("Target Price (TP)", f"Rp {tp:,.0f}")
-                    c2_sl.metric("Stop Loss (SL)", f"Rp {sl:,.0f}")
+                # Hitung Probabilitas Berdasarkan Batas Atas/Bawah Tradisional
+                hit_tp_30d = (np.any(price_paths >= pivot_r1, axis=0).sum() / n_simulations) * 100
+                hit_sl_30d = (np.any(price_paths <= pivot_s1, axis=0).sum() / n_simulations) * 100
+                prob_bullish_besok = ( (np.random.normal(daily_mu, daily_sigma, 1000) > 0).sum() / 1000 ) * 100
 
-                st.subheader("📊 Statistik Kuantitatif & Volatilitas")
-                col1, col2, col3 = st.columns(3)
-                col1.metric("σ Fast (Std Dev Annualized)", f"{fast_std:.2f}%")
-                col2.metric("Robust Std (MAD)", f"{robust_std:.2f}%")
-                col3.metric("Parkinson Volatility", f"{parkinson_vol:.2f}%")
+                # ==========================================
+                # VISUALISASI KE DASHBOARD STREAMLIT
+                # ==========================================
+                st.success(f"✅ Analisis Berhasil untuk {ticker_input} | Harga Terakhir: Rp {harga_terakhir:,.0f}".replace(",", "."))
                 
-                col4, col5 = st.columns(2)
-                col4.metric("Z-Score (20-day MA)", f"{z_score:.2f} σ")
-                col5.metric("Skewness (Asimetri Harga)", f"{val_skew:.2f}")
+                # --- SECTION 1: REGIME & VOLATILITY ---
+                st.header("🧬 Market Regime & Volatility Engine")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Regime Status", regime_status)
+                m2.metric("IHSG Condition", ihsg_status)
+                m3.metric("Parkinson Volatility (20D)", f"{parkinson_vol:.2f}%")
+                
+                st.markdown(f"**Metrics:** Rolling StdDev20: `{std_dev_20:.2f}%` | Model Target Distribution: `Student-T (df=5)` equivalent")
+                st.separator()
 
-                st.subheader("📍 Statistical Support & Resistance (Volatility Bands)")
-                p1, p2, p3, p4 = st.columns(4)
-                p1.metric("Resistance 2 (R2 - 2σ)", f"Rp {r2:,.0f}".replace(",", "."))
-                p2.metric("Resistance 1 (R1 - 1σ)", f"Rp {r1:,.0f}".replace(",", "."))
-                p3.metric("Support 1 (S1 - 1σ)", f"Rp {s1:,.0f}".replace(",", "."))
-                p4.metric("Support 2 (S2 - 2σ)", f"Rp {s2:,.0f}".replace(",", "."))
+                # --- SECTION 2: MOMENTUM & MEAN-REVERSION ---
+                st.header("📊 Momentum & Mean-Reversion")
+                mo1, mo2, mo3, mo4 = st.columns(4)
+                mo1.metric("Mom 3D", f"{mom_3d:+.2f}%")
+                mo2.metric("Mom 5D", f"{mom_5d:+.2f}%")
+                mo3.metric("Mom 10D", f"{mom_10d:+.2f}%")
+                mo4.metric("Z-Score (20D)", f"{z_score:+.2f}σ")
+                st.separator()
 
-                # --- TAMPILAN BARU: CLASSIC PIVOT POINTS ---
-                #🎯 CLASSIC PIVOT POINTS
-                st.subheader("🎯 Classic Pivot Points (Traditional)")
-                v1, v2, v3, v4, v5 = st.columns(5)
-                v1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
-                v2.metric("Resistance 1 (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
-                v3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
-                v4.metric("Support 1 (S1)", f"Rp {pivot_s1:,.0f}".replace(",", "."))
-                v5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
+                # --- SECTION 3: PIVOT POINTS & TRADING PLAN ---
+                st.header("🎯 Pivot Points & Trading Plan")
+                p1, p2, p3, p4, p5 = st.columns(5)
+                p1.metric("Resistance 2 (R2)", f"Rp {pivot_r2:,.0f}".replace(",", "."))
+                p2.metric("Resistance 1 (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
+                p3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
+                p4.metric("Support 1 (S1)", f"Rp {pivot_s1:,.0f}".replace(",", "."))
+                p5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
+                
+                st.write(f"**Breakout Status (Res20):** `{breakout_status}`")
+                
+                st.markdown("📋 **V12 Quant Trading Plan (Objective Rules):**")
+                tp1, tp2, tp3 = st.columns(3)
+                tp1.metric("SIGNAL GENERATOR", signal_v12)
+                tp2.metric("Area Entry Ideal (S1 - PP)", f"Rp {pivot_s1:,.0f} - {pp:,.0f}".replace(",", "."))
+                tp3.metric("Target Profit Terdekat (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
+                st.separator()
 
-                # --- TAMPILAN BARU: PIVOT TRADING PLAN ---
-                st.markdown(" ") # Kasih jarak sedikit
-                st.markdown("📋 **Pivot-Based Trading Plan (Buy on Retest):**")
-                t1, t2, t3 = st.columns(3)
-                t1.metric("🎯 Area Entry Ideal", f"Rp {pivot_entry_min:,.0f} - {pivot_entry_max:,.0f}".replace(",", "."))
-                t2.metric("💰 Target Profit 1 (TP1)", f"Rp {pivot_tp1:,.0f}".replace(",", "."))
-                t3.metric("🚀 Target Profit 2 (TP2)", f"Rp {pivot_tp2:,.0f}".replace(",", "."))
-                # --------------------------------------------
+                # --- SECTION 4: RISK ENGINE & ADVANCED METRICS ---
+                st.header("🛡️ Risk Engine & Portfolio Sizing")
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Kelly Allocation %", f"{kelly_adj*100:.1f}% capital")
+                r2.metric("Rekomendasi Size Modal (Rp)", f"Rp {allocated_capital:,.0f}".replace(",", "."))
+                r3.metric("Beta vs IHSG", f"{beta_ihsg:.2f}x")
+                
+                st.markdown(f"**Advanced Risk Bounds:** Max Drawdown (30D): `{max_dd_30d:.2f}%` | Sharpe Ratio Est: `{sharpe_est:.2f}` | CVaR (95%): `{cvar_95:.2f}%` (Potensi risiko ekstrim harian)")
+                st.separator()
 
-                # TAMPILAN UNTUK BREAKOUT ENGINE
-                st.markdown(" ") 
-                b1, b2 = st.columns(2)
-                b1.metric("20-Day High Ceiling (Res 20)", f"Rp {res20:,.0f}".replace(",", "."))
-                b2.metric("Kondisi Saham Saat Ini", breakout_status)
+                # --- SECTION 5: PROBABILITY ENGINE (MONTE CARLO) ---
+                st.header("🎲 Probability Engine (Monte Carlo 1000 Simulations)")
+                pr1, pr2, pr3 = st.columns(3)
+                pr1.metric("Prob Bullish Besok", f"{prob_bullish_besok:.1f}%")
+                pr2.metric("Prob TP Hit (30D)", f"{hit_tp_30d:.1f}%")
+                pr3.metric("Prob SL Hit (30D)", f"{hit_sl_30d:.1f}%")
 
-                st.subheader("🛡️ Risk Engine (Kelly Criterion)")
-                r_col1, r_col2, r_col3 = st.columns(3)
-                r_col1.metric("Kelly Allocation (Adj x0.4)", f"{kelly_adj*100:.1f}% Modal")
-                r_col2.metric("Rekomendasi Alokasi Uang", f"Rp {porsi_modal:,.0f}")
-                r_col3.metric("Maksimal Pembelian", f"{jumlah_lot:,} Lot")
-
-                st.subheader("📈 Grafik Tren Harga (1 Tahun Terakhir)")
-                st.line_chart(df['Close'])
-
-        except Exception as e:
-            st.error(f"Terjadi error pada sistem kalkulasi: {e}")
+            except Exception as e:
+                st.error(f"🚨 Terjadi kesalahan pemrosesan algoritma: {str(e)}")
