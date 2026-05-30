@@ -197,6 +197,9 @@ if st.button("JALANKAN QUANT ENGINE"):
                 daily_mu = returns.mean()
                 daily_sigma = returns.std()
                 
+                # Formula Kuantitatif Estimasi Harga Close Besok (Log-Normal Drift)
+                estimasi_close_besok = float(harga_terakhir * np.exp(daily_mu))
+                
                 sim_returns = np.random.normal(daily_mu, daily_sigma, (n_days, n_simulations))
                 price_paths = harga_terakhir * np.exp(np.cumsum(sim_returns, axis=0))
                 
@@ -227,8 +230,6 @@ if st.button("JALANKAN QUANT ENGINE"):
                 mo3.metric("Mom 10D", f"{mom_10d:+.2f}%")
                 mo4.metric("Z-Score (20D)", f"{z_score:+.2f}σ")
                 st.divider()
-
-                # 🔥 MODIFIKASI TERBARU: SEPARASI SECTION 3 & 4 🔥
                 
                 # --- SECTION 3: PIVOT & S/R ---
                 st.header("🎯 Pivot & S/R")
@@ -240,17 +241,18 @@ if st.button("JALANKAN QUANT ENGINE"):
                 p5.metric("Support 2 (S2)", f"Rp {pivot_s2:,.0f}".replace(",", "."))
                 st.divider()
 
-                # --- SECTION 4: PREDIKSI & TRADING PLAN ---
+                # --- SECTION 4: PREDIKSI & TRADING PLAN (UPDATED) ---
                 st.header("🔮 Prediksi & Trading Plan")
                 st.write(f"**Breakout Status (Res20):** `{breakout_status}`")
                 
-                tp1, tp2, tp3 = st.columns(3)
-                tp1.metric("SIGNAL GENERATOR", signal_v12)
-                tp2.metric("Area Entry Ideal (S1 - PP)", f"Rp {pivot_s1:,.0f} - {pp:,.0f}".replace(",", "."))
-                tp3.metric("Target Profit Terdekat (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
+                tp1, tp2, tp3, tp4 = st.columns(4)
+                tp1.metric("Signal V12", signal_v12)
+                tp2.metric("Estimasi Close Besok", f"Rp {estimasi_close_besok:,.0f}".replace(",", "."))
+                tp3.metric("Area Entry Ideal (S1 - PP)", f"Rp {pivot_s1:,.0f} - {pp:,.0f}".replace(",", "."))
+                tp4.metric("Target Profit Terdekat (R1)", f"Rp {pivot_r1:,.0f}".replace(",", "."))
                 st.divider()
 
-                # --- SECTION 5: RISK ENGINE & ADVANCED METRICS ---
+                # --- SECTION 5: RISK ENGINE & PORTFOLIO SIZING ---
                 st.header("🛡️ Risk Engine & Portfolio Sizing")
                 r1, r2, r3 = st.columns(3)
                 r1.metric("Kelly Allocation %", f"{kelly_adj*100:.1f}% capital")
