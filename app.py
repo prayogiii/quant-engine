@@ -33,6 +33,7 @@ st.markdown("""
 
 st.title("📊 Quant & Risk Engine Dashboard")
 st.write("Analisator Kuantitatif Saham untuk Trading Plan Objektif")
+
 # ==========================================
 # 2. PANEL INPUT (SIMPLE & MOBILE FRIENDLY)
 # ==========================================
@@ -40,6 +41,7 @@ ticker_raw = st.text_input(
     "Masukkan Kode Saham IHSG (Contoh: BRMS, BBRI, BMRI):", 
     value=""
 ).upper().strip()
+
 total_capital = st.number_input(
     "Total Modal Portofolio Anda (Rp):", 
     min_value=0, 
@@ -53,13 +55,14 @@ if total_capital is not None and total_capital > 0:
     st.markdown(f"✍️ *Terbaca:* **{rupiah_format}**")
 
 # --- PROSES KODE TICKER OTOMATIS ---
-# Jika user mengetik 'BBRI', otomatis diubah jadi 'BBRI.JK'
-# Jika user sudah mengetik 'BBRI.JK', sistem tidak akan mengubahnya lagi
 if ticker_raw and not ticker_raw.endswith(".JK"):
     ticker_input = f"{ticker_raw}.JK"
 else:
     ticker_input = ticker_raw
-# ------------------------------------if st.button("JALANKAN QUANT ENGINE"):
+# ------------------------------------
+
+# 🔥 FIX: Tombol diturunkan ke baris baru agar tidak ikut terkomentar
+if st.button("JALANKAN QUANT ENGINE"):
     # 1. VALIDASI INPUT KOSONG
     if not ticker_input:
         st.warning("⚠️ Kode saham tidak boleh kosong! Silakan masukkan kode saham terlebih dahulu.")
@@ -99,7 +102,7 @@ else:
                     beta_ihsg = 1.0  # Fallback jika IHSG sedang glitch
 
                 # ==========================================
-                # A. KOSMETIK & STATISTIK VOLATILITAS (IMAGE 1)
+                # A. KOSMETIK & STATISTIK VOLATILITAS
                 # ==========================================
                 std_dev_20 = float(returns.tail(20).std() * np.sqrt(252) * 100)
                 
@@ -122,7 +125,7 @@ else:
                     ihsg_status = "NEUTRAL ⚖️"
 
                 # ==========================================
-                # B. MOMENTUM & MEAN-REVERSION (IMAGE 2)
+                # B. MOMENTUM & MEAN-REVERSION
                 # ==========================================
                 mom_3d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-4]) - 1) * 100)
                 mom_5d = float(((df['Close'].iloc[-1] / df['Close'].iloc[-6]) - 1) * 100)
@@ -151,7 +154,7 @@ else:
                 # Consensus Signal Engine Sederhana
                 score = 0
                 if mom_3d > 0: score += 1
-                if z_score < -1.0: score += 1 # Syarat Mean Reversion (jenuh jual)
+                if z_score < -1.0: score += 1
                 if harga_terakhir > ema_20: score += 1
                 
                 if score >= 2 and breakout_status == "YES (🔥)":
@@ -164,7 +167,6 @@ else:
                 # ==========================================
                 # D. RISK ENGINE & ADVANCED RISK METRICS
                 # ==========================================
-                # Kelly Criterion Calculator
                 win_days = returns[returns > 0]
                 loss_days = returns[returns < 0]
                 win_rate = len(win_days) / len(returns) if len(returns) > 0 else 0.5
@@ -173,7 +175,7 @@ else:
                 win_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else 1.0
                 
                 kelly_raw = win_rate - ((1 - win_rate) / win_loss_ratio) if win_loss_ratio > 0 else 0
-                kelly_adj = max(0.0, kelly_raw * 0.4) # Fractional Kelly (x0.4 multiplier untuk pengaman bursa)
+                kelly_adj = max(0.0, kelly_raw * 0.4)
                 allocated_capital = total_capital * kelly_adj
 
                 # Max Drawdown 30 Hari Terakhir
@@ -184,7 +186,7 @@ else:
                 # Sharpe Ratio
                 sharpe_est = (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() > 0 else 0
 
-                # CVaR 95% (Conditional Value at Risk)
+                # CVaR 95%
                 var_95 = returns.quantile(0.05)
                 cvar_95 = float(returns[returns <= var_95].mean() * 100)
 
@@ -196,14 +198,12 @@ else:
                 daily_mu = returns.mean()
                 daily_sigma = returns.std()
                 
-                # Simulasi proyeksi harga geometric brownian motion fiktif
                 sim_returns = np.random.normal(daily_mu, daily_sigma, (n_days, n_simulations))
                 price_paths = harga_terakhir * np.exp(np.cumsum(sim_returns, axis=0))
                 
-                # Hitung Probabilitas Berdasarkan Batas Atas/Bawah Tradisional
                 hit_tp_30d = (np.any(price_paths >= pivot_r1, axis=0).sum() / n_simulations) * 100
                 hit_sl_30d = (np.any(price_paths <= pivot_s1, axis=0).sum() / n_simulations) * 100
-                prob_bullish_besok = ( (np.random.normal(daily_mu, daily_sigma, 1000) > 0).sum() / 1000 ) * 100
+                prob_bullish_besok = ((np.random.normal(daily_mu, daily_sigma, 1000) > 0).sum() / 1000) * 100
 
                 # ==========================================
                 # VISUALISASI KE DASHBOARD STREAMLIT
