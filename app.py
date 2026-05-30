@@ -43,6 +43,12 @@ total_capital = st.number_input(
     step=10000,   # Step diturunkan ke 10 ribu agar mudah naik-turunnya
     placeholder="Masukkan nominal modal anda... (Bebas isi berapa saja)"
 )
+# --- FITUR LIVE PREVIEW FORMAT RUPIAH ---
+if total_capital is not None and total_capital > 0:
+    # Mengubah format internasional (comma) menjadi format Indonesia (titik)
+    rupiah_format = f"Rp {total_capital:,.0f}".replace(",", ".")
+    st.markdown(f"✍️ *Terbaca:* **{rupiah_format}**")
+# ----------------------------------------
 
 if st.button("JALANKAN QUANT ENGINE"):
     with st.spinner("Mengunduh data historis & memproses algoritma statistik..."):
