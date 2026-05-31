@@ -6,6 +6,7 @@ from scipy.stats import skew, kurtosis, t as student_t
 from scipy.optimize import minimize
 import warnings
 import urllib.parse
+import re
 
 # ====================== FALLBACK SENTIMEN ======================
 SENTIMENT_AVAILABLE = True
@@ -55,22 +56,20 @@ st.markdown("""
     .stButton>button:hover { background-color: #374151; border-color: #00ffcc; }
     h1, h2, h3 { color: #f3f4f6; }
     div[data-testid="InputInstructions"] { display: none !important; }
-    .range-text { color: #8892b0; font-size: 12px; }
     .translated { color: #cbd5e1; font-size: 13px; }
+    .source { color: #6b7280; font-size: 11px; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro (dengan Sentimen Berita Lokal)")
-st.write("Algoritma kuantitatif + berita terkini dari Google News. Distribusi Student‑t, volatilitas adaptif, Monte Carlo.")
+st.title("📊 Quant & Risk Engine Pro (Akurasi Tinggi)")
+st.write("Algoritma kuantitatif + berita multi‑sumber. Distribusi Student‑t, volatilitas adaptif, Monte Carlo.")
 
 if not SENTIMENT_AVAILABLE:
-    st.warning("⚠️ NLTK tidak terpasang → fitur sentimen berita dinonaktifkan. "
-               "Install dengan `pip install nltk` untuk mengaktifkan kembali.")
+    st.warning("⚠️ NLTK tidak terpasang → sentimen berita tidak aktif.")
 if not RSS_AVAILABLE:
-    st.warning("⚠️ `feedparser` tidak terpasang → berita tidak bisa diambil. "
-               "Install dengan `pip install feedparser`")
+    st.warning("⚠️ `feedparser` tidak terpasang → sumber berita RSS tidak tersedia.")
 if not TRANSLATOR_AVAILABLE:
-    st.info("💡 `deep-translator` tidak terpasang → terjemahan tidak aktif.")
+    st.info("💡 `deep-translator` tidak terpasang → terjemahan otomatis tidak aktif.")
 
 # ==========================================
 # 2. PANEL INPUT
@@ -98,6 +97,89 @@ if ticker_raw and not ticker_raw.endswith(".JK"):
 else:
     ticker_input = ticker_raw
 
+# ==================== FUNGSI BANTU ====================
+def get_google_news_rss(query_str, num=5):
+    """Ambil berita dari Google News RSS (bahasa Indonesia)."""
+    if not RSS_AVAILABLE:
+        return [], "RSS tidak tersedia"
+    try:
+        encoded = urllib.parse.quote(query_str)
+        url = f"https://news.google.com/rss/search?q={encoded}&hl=id&gl=ID&ceid=ID:id"
+        feed = feedparser.parse(url)
+        entries = feed.entries[:num]
+        news = []
+        for e in entries:
+            title = e.get('title', '').strip()
+            summary = e.get('summary', '').strip()
+            # Bersihkan HTML sederhana
+            summary = re.sub('<[^<]+?>', '', summary)
+            news.append({'title': title, 'summary': summary, 'source': 'Google News RSS'})
+        return news, None
+    except Exception as e:
+        return [], str(e)
+
+def get_yahoo_search_news(query_str, num=5):
+    """Ambil berita dari Yahoo Finance Search dengan filter lokal."""
+    try:
+        search = yf.Search(query_str)
+        items = search.news or []
+        news = []
+        for item in items[:num]:
+            inner = item.get('content') or item
+            title = (inner.get('title') or inner.get('shortTitle') or 
+                     inner.get('headline') or inner.get('summary') or '')
+            summary = (inner.get('summary') or inner.get('longSummary') or 
+                       inner.get('description') or '')
+            if title:
+                news.append({'title': title, 'summary': summary, 'source': 'Yahoo Finance Search'})
+        return news, None
+    except Exception as e:
+        return [], str(e)
+
+def get_yahoo_ticker_news(ticker, num=5):
+    """Ambil berita langsung dari ticker.news (fallback terakhir)."""
+    try:
+        t = yf.Ticker(ticker)
+        items = t.news or []
+        news = []
+        for item in items[:num]:
+            inner = item.get('content') or item
+            title = (inner.get('title') or inner.get('shortTitle') or 
+                     inner.get('headline') or inner.get('summary') or '')
+            summary = (inner.get('summary') or inner.get('longSummary') or 
+                       inner.get('description') or '')
+            if title:
+                news.append({'title': title, 'summary': summary, 'source': 'Yahoo Ticker News'})
+        return news, None
+    except Exception as e:
+        return [], str(e)
+
+def filter_relevant(news_list, ticker):
+    """Hanya pertahankan berita yang mengandung ticker atau kata kunci saham."""
+    keywords = [ticker.lower(), 'saham', 'ihsg', 'bei', 'idx']
+    filtered = []
+    for n in news_list:
+        text = (n['title'] + ' ' + n['summary']).lower()
+        if any(k in text for k in keywords):
+            filtered.append(n)
+    return filtered if filtered else news_list  # fallback ke semua jika tidak ada
+
+def analyze_sentiment(text, translator):
+    """Analisis sentimen dengan VADER, terjemahkan ke Inggris jika perlu."""
+    if not SENTIMENT_AVAILABLE:
+        return 0.0
+    analyzer = SentimentIntensityAnalyzer()
+    # Deteksi apakah teks mengandung banyak karakter non-ASCII (mungkin bahasa Indonesia)
+    if any(ord(c) > 127 for c in text):
+        # Terjemahkan ke Inggris jika translator tersedia
+        if translator:
+            try:
+                text = translator.translate(text)
+            except:
+                pass  # lanjutkan dengan teks asli
+    return analyzer.polarity_scores(text)['compound']
+# =====================================================
+
 if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
     # Validasi
     if not ticker_input:
@@ -105,7 +187,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
     elif total_capital is None or total_capital <= 0:
         st.warning("⚠️ Modal portofolio harus diisi dan > Rp 0!")
     else:
-        with st.spinner("🤖 Mengunduh data harga, berita, dan menjalankan model kuantitatif..."):
+        with st.spinner("🤖 Mengunduh data harga, berita multi‑sumber, dan menjalankan model kuantitatif..."):
             try:
                 # ==========================================
                 # 3. AMBIL DATA HARGA
@@ -125,57 +207,70 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA (GOOGLE NEWS RSS)
+                # 4. MULTI‑SUMBER BERITA + SENTIMEN AKURAT
                 # ==========================================
-                avg_sentiment = 0.0
+                news_pool = []
+                errors = []
+                translator = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
+
+                # a) Google News RSS (kata kunci: ticker saham)
+                rss_news, err = get_google_news_rss(f"{ticker_raw} saham")
+                if rss_news:
+                    news_pool.extend(rss_news)
+                else:
+                    errors.append(f"RSS: {err}")
+
+                # b) Yahoo Search (kata kunci: ticker + saham)
+                ysearch_news, err = get_yahoo_search_news(f"{ticker_raw} saham")
+                if ysearch_news:
+                    news_pool.extend(ysearch_news)
+                else:
+                    errors.append(f"Yahoo Search: {err}")
+
+                # c) Yahoo Ticker News (fallback)
+                if not news_pool:
+                    yticker_news, err = get_yahoo_ticker_news(ticker_input)
+                    if yticker_news:
+                        news_pool.extend(yticker_news)
+
+                # d) Filter relevansi (jika masih banyak)
+                news_pool = filter_relevant(news_pool, ticker_raw)
+
+                # e) Ambil maks 5 berita unik
+                seen = set()
+                unique_news = []
+                for n in news_pool:
+                    key = n['title']
+                    if key not in seen:
+                        seen.add(key)
+                        unique_news.append(n)
+                    if len(unique_news) >= 5:
+                        break
+
+                # f) Analisis sentimen untuk setiap berita
+                sentiments = []
                 headlines = []
                 translated_headlines = []
-                sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
+                sources = []
+                for n in unique_news:
+                    text = f"{n['title']}. {n['summary']}" if n['summary'] else n['title']
+                    sent = analyze_sentiment(text, translator)
+                    sentiments.append(sent)
+                    headlines.append(n['title'])
+                    sources.append(n['source'])
+                    # Terjemahan opsional untuk tampilan (ke Indonesia)
+                    if TRANSLATOR_AVAILABLE and translator:
+                        try:
+                            id_text = GoogleTranslator(source='auto', target='id').translate(n['title'])
+                            translated_headlines.append(id_text)
+                        except:
+                            translated_headlines.append("")
+                    else:
+                        translated_headlines.append("")
 
-                if SENTIMENT_AVAILABLE and RSS_AVAILABLE:
-                    analyzer = SentimentIntensityAnalyzer()
-                    sentiments = []
-                    translator = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
+                avg_sentiment = np.mean(sentiments) if sentiments else 0.0
 
-                    # Query Google News RSS dalam bahasa Indonesia
-                    query = urllib.parse.quote(f"{ticker_raw} saham")
-                    rss_url = f"https://news.google.com/rss/search?q={query}&hl=id&gl=ID&ceid=ID:id"
-
-                    try:
-                        feed = feedparser.parse(rss_url)
-                        entries = feed.entries[:5]  # 5 berita teratas
-
-                        if entries:
-                            for entry in entries:
-                                title = entry.get('title', 'Tanpa Judul')
-                                summary = entry.get('summary', '')
-                                text = f"{title}. {summary}" if summary else title
-
-                                vs = analyzer.polarity_scores(text)
-                                sentiments.append(vs['compound'])
-                                headlines.append(title)
-
-                                # Terjemahan (Google News biasanya sudah Indonesia, tapi fallback tetap ada)
-                                if TRANSLATOR_AVAILABLE and title:
-                                    try:
-                                        translated = translator.translate(title)
-                                        translated_headlines.append(translated)
-                                    except:
-                                        translated_headlines.append("")
-                                else:
-                                    translated_headlines.append("")
-                            avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-                        else:
-                            headlines = ["Tidak ada berita ditemukan untuk saham ini."]
-                    except Exception as e:
-                        headlines = [f"Gagal mengambil berita: {str(e)}"]
-                else:
-                    if not SENTIMENT_AVAILABLE:
-                        headlines = ["Fitur sentimen tidak aktif (NLTK tidak terpasang)"]
-                    elif not RSS_AVAILABLE:
-                        headlines = ["Fitur berita tidak aktif (feedparser tidak terpasang)"]
-
-                # Kategori sentimen
+                # g) Status sentimen
                 if SENTIMENT_AVAILABLE:
                     if avg_sentiment >= 0.05:
                         sentimen_status = "Positif 🟢"
@@ -183,6 +278,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                         sentimen_status = "Negatif 🔴"
                     else:
                         sentimen_status = "Netral ⚪"
+                else:
+                    sentimen_status = "Netral ⚪ (nonaktif)"
 
                 # ==========================================
                 # 5. VOLATILITAS ADAPTIF
@@ -384,7 +481,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 st.success(f"✅ Analisis Akurat: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",", "."))
 
                 # --- BERITA & SENTIMEN ---
-                st.header("📰 Sentimen Berita Terkini (Google News)")
+                st.header("📰 Sentimen Berita (Multi‑Sumber)")
                 col_sent1, col_sent2 = st.columns([1, 2])
                 with col_sent1:
                     st.metric("Sentimen Agregat", f"{avg_sentiment:.2f}", sentimen_status)
@@ -392,14 +489,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.markdown("**5 Berita Teratas:**")
                     if headlines:
                         for i, h in enumerate(headlines[:5]):
-                            original = h
+                            src = sources[i] if i < len(sources) else ""
                             terjemahan = translated_headlines[i] if i < len(translated_headlines) else ""
-                            st.markdown(f"{i+1}. **{original}**")
-                            if terjemahan and terjemahan != original:
+                            st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>", unsafe_allow_html=True)
+                            if terjemahan and terjemahan != h:
                                 st.markdown(f"<span class='translated'>🇮🇩 {terjemahan}</span>", unsafe_allow_html=True)
                             st.markdown("")
                     else:
-                        st.markdown("*(Tidak ada data berita)*")
+                        st.markdown("*(Tidak ada berita relevan ditemukan)*")
                 st.divider()
 
                 # --- SECTION 1: REGIME & VOLATILITY ---
