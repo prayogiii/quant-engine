@@ -408,7 +408,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 # TAMPILAN DASHBOARD
                 # ==========================================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
-                st.header("📰 Sentimen Berita (Weighted)")
+                st.header("📰 Sentimen Berita ")
                 st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot (berita terbaru lebih berpengaruh).")
                 c1,c2=st.columns([1,2])
                 c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
@@ -422,7 +422,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         st.markdown("")
                 st.divider()
 
-                st.header("🧬 Regime & Volatility (10‑State)")
+                st.header("🧬 Regime & Volatility ")
                 st.caption("Klasifikasi regime menggunakan ADX, EMA, momentum, dan volatilitas. ADX > 20 = trending, ≤ 20 = sideways. 10 kondisi pasar memberikan gambaran lebih detail.")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
@@ -446,7 +446,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
 
-                st.header("🔮 Signal & Backtest 6 Bulan")
+                st.header("🔮 Signal & Trading Plan With Backtest ")
                 st.caption("Signal berdasarkan skor momentum, Z‑score, posisi EMA20, volume, dan sentimen berita. Backtest 6 bulan menggunakan sinyal serupa untuk mengukur performa historis (tanpa memperhitungkan slippage/biaya).")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
