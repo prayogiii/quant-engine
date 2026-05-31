@@ -11,7 +11,6 @@ SENTIMENT_AVAILABLE = True
 try:
     import nltk
     from nltk.sentiment import SentimentIntensityAnalyzer
-    # Download VADER lexicon jika belum ada
     try:
         nltk.data.find('sentiment/vader_lexicon.zip')
     except LookupError:
@@ -312,17 +311,22 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 allocated_capital = total_capital * kelly_adj
 
                 # ==========================================
-                # 13. MONTE CARLO STUDENT‑T
+                # 13. MONTE CARLO STUDENT‑T & ESTIMASI HARGA BESOK (LOG‑OU)
                 # ==========================================
                 n_sim = 2000
                 n_days = 30
                 sim_innov = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=(n_days, n_sim))
                 price_paths = harga_terakhir * np.exp(np.cumsum(sim_innov, axis=0))
 
-                long_term_mean = df['Close'].tail(20).mean()
-                theta = 1/20
-                mu_ou = theta * (long_term_mean - harga_terakhir) + t_loc
-                estimasi_close_besok = float(harga_terakhir * np.exp(mu_ou))
+                # --- ESTIMASI CLOSE BESOK (log‑Ornstein‑Uhlenbeck) ---
+                log_harga = np.log(df['Close'])
+                log_lt_mean = log_harga.tail(20).mean()          # rata‑rata log harga 20 hari
+                log_terakhir = np.log(harga_terakhir)
+                theta = 1/20                                     # kecepatan mean‑reversion
+                # Drift gabungan: mean‑reversion + ekspektasi harian Student‑t
+                mu_ou_log = theta * (log_lt_mean - log_terakhir) + t_loc
+                estimasi_close_besok = float(np.exp(log_terakhir + mu_ou_log))
+                # -------------------------------------------------
 
                 tp = r1
                 sl = s1
