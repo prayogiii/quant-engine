@@ -7,6 +7,7 @@ from scipy.optimize import minimize
 import warnings
 import urllib.parse
 import re
+from datetime import datetime, timedelta
 
 # ====================== FALLBACK SENTIMEN ======================
 SENTIMENT_AVAILABLE = True
@@ -38,7 +39,7 @@ except ImportError:
 warnings.filterwarnings("ignore")
 
 # ==========================================
-# 1. KONFIGURASI HALAMAN & TEMA (UI FIX)
+# 1. KONFIGURASI HALAMAN & TEMA
 # ==========================================
 st.set_page_config(
     page_title="Quant Risk Engine Pro",
@@ -58,18 +59,20 @@ st.markdown("""
     div[data-testid="InputInstructions"] { display: none !important; }
     .translated { color: #cbd5e1; font-size: 13px; }
     .source { color: #6b7280; font-size: 11px; }
+    .positive { color: #10b981; }
+    .negative { color: #ef4444; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📊 Quant & Risk Engine Pro (Akurasi Tinggi)")
-st.write("Algoritma kuantitatif + berita multi‑sumber. Distribusi Student‑t, volatilitas adaptif, Monte Carlo.")
+st.write("Algoritma kuantitatif + berita multi‑sumber + Backtesting. Distribusi Student‑t, ADX filter, Monte Carlo.")
 
 if not SENTIMENT_AVAILABLE:
-    st.warning("⚠️ NLTK tidak terpasang → sentimen berita tidak aktif.")
+    st.warning("⚠️ NLTK tidak terpasang → sentimen tidak aktif.")
 if not RSS_AVAILABLE:
-    st.warning("⚠️ `feedparser` tidak terpasang → sumber berita RSS tidak tersedia.")
+    st.warning("⚠️ `feedparser` tidak terpasang → RSS tidak tersedia.")
 if not TRANSLATOR_AVAILABLE:
-    st.info("💡 `deep-translator` tidak terpasang → terjemahan otomatis tidak aktif.")
+    st.info("💡 `deep-translator` tidak terpasang → terjemahan tidak aktif.")
 
 # ==========================================
 # 2. PANEL INPUT
@@ -97,9 +100,59 @@ if ticker_raw and not ticker_raw.endswith(".JK"):
 else:
     ticker_input = ticker_raw
 
-# ==================== FUNGSI BANTU ====================
+# ==================== FUNGSI ADX ====================
+def compute_adx(df, period=14):
+    """Hitung ADX untuk mengukur kekuatan tren."""
+    high = df['High']
+    low = df['Low']
+    close = df['Close']
+    plus_dm = high.diff()
+    minus_dm = low.diff().abs() * -1
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm > 0] = 0
+    minus_dm = minus_dm.abs()
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    adx = dx.ewm(alpha=1/period, adjust=False).mean()
+    return adx.iloc[-1]
+
+# ==================== FUNGSI BACKTEST ====================
+def backtest_signal(df, signal_func, periods=126):
+    """Backtest sinyal pada 6 bulan terakhir (~126 hari)."""
+    df_back = df.iloc[-periods:].copy()
+    signals = []
+    for i in range(20, len(df_back)):
+        slice_df = df.iloc[:df_back.index[i-1]+1]  # data sampai hari sebelumnya
+        try:
+            sig = signal_func(slice_df)
+            signals.append((df_back.index[i], sig))
+        except:
+            continue
+    # Hitung return jika mengikuti sinyal
+    trades = []
+    for i in range(len(signals)-1):
+        date, sig = signals[i]
+        next_date = signals[i+1][0]
+        if sig == "🔥 STRONG BUY" or sig == "⚡ BUY (TACTICAL)":
+            entry = df.loc[date, 'Close']
+            exit_ = df.loc[next_date, 'Close']
+            ret = (exit_ - entry) / entry
+            trades.append(ret)
+    if trades:
+        win_rate = sum(1 for r in trades if r > 0) / len(trades)
+        profit_factor = abs(sum(r for r in trades if r > 0) / sum(r for r in trades if r < 0)) if sum(r for r in trades if r < 0) != 0 else np.inf
+        avg_return = np.mean(trades)
+        return win_rate, profit_factor, avg_return, len(trades)
+    return 0, 0, 0, 0
+
+# ==================== FUNGSI BERITA ====================
 def get_google_news_rss(query_str, num=5):
-    """Ambil berita dari Google News RSS (bahasa Indonesia)."""
     if not RSS_AVAILABLE:
         return [], "RSS tidak tersedia"
     try:
@@ -111,15 +164,13 @@ def get_google_news_rss(query_str, num=5):
         for e in entries:
             title = e.get('title', '').strip()
             summary = e.get('summary', '').strip()
-            # Bersihkan HTML sederhana
             summary = re.sub('<[^<]+?>', '', summary)
-            news.append({'title': title, 'summary': summary, 'source': 'Google News RSS'})
+            news.append({'title': title, 'summary': summary, 'source': 'Google News'})
         return news, None
     except Exception as e:
         return [], str(e)
 
 def get_yahoo_search_news(query_str, num=5):
-    """Ambil berita dari Yahoo Finance Search dengan filter lokal."""
     try:
         search = yf.Search(query_str)
         items = search.news or []
@@ -131,13 +182,12 @@ def get_yahoo_search_news(query_str, num=5):
             summary = (inner.get('summary') or inner.get('longSummary') or 
                        inner.get('description') or '')
             if title:
-                news.append({'title': title, 'summary': summary, 'source': 'Yahoo Finance Search'})
+                news.append({'title': title, 'summary': summary, 'source': 'Yahoo Search'})
         return news, None
     except Exception as e:
         return [], str(e)
 
 def get_yahoo_ticker_news(ticker, num=5):
-    """Ambil berita langsung dari ticker.news (fallback terakhir)."""
     try:
         t = yf.Ticker(ticker)
         items = t.news or []
@@ -149,52 +199,57 @@ def get_yahoo_ticker_news(ticker, num=5):
             summary = (inner.get('summary') or inner.get('longSummary') or 
                        inner.get('description') or '')
             if title:
-                news.append({'title': title, 'summary': summary, 'source': 'Yahoo Ticker News'})
+                news.append({'title': title, 'summary': summary, 'source': 'Yahoo Ticker'})
         return news, None
     except Exception as e:
         return [], str(e)
 
 def filter_relevant(news_list, ticker):
-    """Hanya pertahankan berita yang mengandung ticker atau kata kunci saham."""
     keywords = [ticker.lower(), 'saham', 'ihsg', 'bei', 'idx']
     filtered = []
     for n in news_list:
         text = (n['title'] + ' ' + n['summary']).lower()
         if any(k in text for k in keywords):
             filtered.append(n)
-    return filtered if filtered else news_list  # fallback ke semua jika tidak ada
+    return filtered if filtered else news_list
 
-def analyze_sentiment(text, translator):
-    """Analisis sentimen dengan VADER, terjemahkan ke Inggris jika perlu."""
-    if not SENTIMENT_AVAILABLE:
+def analyze_sentiment_weighted(news_items, translator):
+    """Sentimen berbobot: berita lebih baru (indeks kecil) berbobot lebih tinggi."""
+    if not SENTIMENT_AVAILABLE or not news_items:
         return 0.0
     analyzer = SentimentIntensityAnalyzer()
-    # Deteksi apakah teks mengandung banyak karakter non-ASCII (mungkin bahasa Indonesia)
-    if any(ord(c) > 127 for c in text):
-        # Terjemahkan ke Inggris jika translator tersedia
-        if translator:
+    total_weight = 0
+    weighted_sum = 0
+    for i, item in enumerate(news_items):
+        weight = 1 / (i + 1)  # berita pertama bobot 1, kedua 0.5, dst
+        text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
+        # Terjemahkan ke Inggris jika perlu
+        if any(ord(c) > 127 for c in text) and translator:
             try:
                 text = translator.translate(text)
             except:
-                pass  # lanjutkan dengan teks asli
-    return analyzer.polarity_scores(text)['compound']
+                pass
+        score = analyzer.polarity_scores(text)['compound']
+        weighted_sum += score * weight
+        total_weight += weight
+    return weighted_sum / total_weight if total_weight > 0 else 0.0
+
 # =====================================================
 
-if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
-    # Validasi
+if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
     if not ticker_input:
         st.warning("⚠️ Kode saham tidak boleh kosong!")
     elif total_capital is None or total_capital <= 0:
         st.warning("⚠️ Modal portofolio harus diisi dan > Rp 0!")
     else:
-        with st.spinner("🤖 Mengunduh data harga, berita multi‑sumber, dan menjalankan model kuantitatif..."):
+        with st.spinner("🤖 Mengunduh data, berita, backtest, dan model kuantitatif..."):
             try:
                 # ==========================================
-                # 3. AMBIL DATA HARGA
+                # 3. DATA HARGA
                 # ==========================================
                 df = yf.download(ticker_input, period="1y")
                 if df.empty:
-                    st.error("❌ Data tidak ditemukan. Periksa kode saham.")
+                    st.error("❌ Data tidak ditemukan.")
                     st.stop()
 
                 if isinstance(df.columns, pd.MultiIndex):
@@ -207,70 +262,47 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. MULTI‑SUMBER BERITA + SENTIMEN AKURAT
+                # 4. BERITA MULTI‑SUMBER + SENTIMEN WEIGHTED
                 # ==========================================
                 news_pool = []
-                errors = []
-                translator = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
+                translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
+                translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
 
-                # a) Google News RSS (kata kunci: ticker saham)
-                rss_news, err = get_google_news_rss(f"{ticker_raw} saham")
-                if rss_news:
-                    news_pool.extend(rss_news)
-                else:
-                    errors.append(f"RSS: {err}")
+                rss_news, _ = get_google_news_rss(f"{ticker_raw} saham")
+                if rss_news: news_pool.extend(rss_news)
 
-                # b) Yahoo Search (kata kunci: ticker + saham)
-                ysearch_news, err = get_yahoo_search_news(f"{ticker_raw} saham")
-                if ysearch_news:
-                    news_pool.extend(ysearch_news)
-                else:
-                    errors.append(f"Yahoo Search: {err}")
+                ysearch_news, _ = get_yahoo_search_news(f"{ticker_raw} saham")
+                if ysearch_news: news_pool.extend(ysearch_news)
 
-                # c) Yahoo Ticker News (fallback)
                 if not news_pool:
-                    yticker_news, err = get_yahoo_ticker_news(ticker_input)
-                    if yticker_news:
-                        news_pool.extend(yticker_news)
+                    yticker_news, _ = get_yahoo_ticker_news(ticker_input)
+                    if yticker_news: news_pool.extend(yticker_news)
 
-                # d) Filter relevansi (jika masih banyak)
                 news_pool = filter_relevant(news_pool, ticker_raw)
 
-                # e) Ambil maks 5 berita unik
                 seen = set()
                 unique_news = []
                 for n in news_pool:
-                    key = n['title']
-                    if key not in seen:
-                        seen.add(key)
+                    if n['title'] not in seen:
+                        seen.add(n['title'])
                         unique_news.append(n)
                     if len(unique_news) >= 5:
                         break
 
-                # f) Analisis sentimen untuk setiap berita
-                sentiments = []
-                headlines = []
+                avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
+
+                headlines = [n['title'] for n in unique_news]
+                sources = [n['source'] for n in unique_news]
                 translated_headlines = []
-                sources = []
                 for n in unique_news:
-                    text = f"{n['title']}. {n['summary']}" if n['summary'] else n['title']
-                    sent = analyze_sentiment(text, translator)
-                    sentiments.append(sent)
-                    headlines.append(n['title'])
-                    sources.append(n['source'])
-                    # Terjemahan opsional untuk tampilan (ke Indonesia)
-                    if TRANSLATOR_AVAILABLE and translator:
+                    if TRANSLATOR_AVAILABLE and translator_id:
                         try:
-                            id_text = GoogleTranslator(source='auto', target='id').translate(n['title'])
-                            translated_headlines.append(id_text)
+                            translated_headlines.append(translator_id.translate(n['title']))
                         except:
                             translated_headlines.append("")
                     else:
                         translated_headlines.append("")
 
-                avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-
-                # g) Status sentimen
                 if SENTIMENT_AVAILABLE:
                     if avg_sentiment >= 0.05:
                         sentimen_status = "Positif 🟢"
@@ -334,7 +366,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     beta_ihsg = 1.0
 
                 # ==========================================
-                # 8. MOMENTUM & Z‑SCORE ADAPTIF
+                # 8. MOMENTUM & Z‑SCORE
                 # ==========================================
                 mom_3d = float((df['Close'].iloc[-1] / df['Close'].iloc[-4] - 1) * 100)
                 mom_5d = float((df['Close'].iloc[-1] / df['Close'].iloc[-6] - 1) * 100)
@@ -345,10 +377,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 z_score = (harga_terakhir - ma_20_close) / std_20_close if std_20_close > 0 else 0.0
 
                 # ==========================================
-                # 9. REGIME CLASSIFICATION ADAPTIF
+                # 9. REGIME + ADX FILTER
                 # ==========================================
                 ema_20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
                 ema_50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
+                adx_val = compute_adx(df)
 
                 mom_5d_hist = df['Close'].pct_change(5).dropna() * 100
                 bullish_thresh = np.percentile(mom_5d_hist, 70)
@@ -358,32 +391,27 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 z_up = np.percentile(z_hist.dropna(), 80)
                 z_down = np.percentile(z_hist.dropna(), 20)
 
-                if harga_terakhir > ema_20 and ema_20 > ema_50:
-                    if mom_5d > bullish_thresh or z_score > z_up:
-                        regime_status = "Strong Bullish Momentum 🚀"
-                        ihsg_status = "RISK-ON 🔥"
+                # Klasifikasi regime dengan ADX > 20 sebagai filter tren
+                if adx_val > 20:
+                    if harga_terakhir > ema_20 and ema_20 > ema_50:
+                        if mom_5d > bullish_thresh or z_score > z_up:
+                            regime_status = "Strong Bullish 🚀"
+                            ihsg_status = "RISK-ON 🔥"
+                        else:
+                            regime_status = "Bullish 📈"
+                            ihsg_status = "RISK-ON 🔥"
+                    elif harga_terakhir < ema_20 and ema_20 < ema_50:
+                        if mom_5d < bearish_thresh or z_score < z_down:
+                            regime_status = "Panic Sell ⚠️"
+                            ihsg_status = "RISK-OFF 🚨"
+                        else:
+                            regime_status = "Bearish 🔻"
+                            ihsg_status = "RISK-OFF 🚨"
                     else:
-                        regime_status = "Bullish Momentum 📈"
-                        ihsg_status = "RISK-ON 🔥"
-                elif harga_terakhir < ema_20 and ema_20 < ema_50:
-                    if mom_5d < bearish_thresh or z_score < z_down:
-                        regime_status = "Panic Sell ⚠️"
-                        ihsg_status = "RISK-OFF 🚨"
-                    else:
-                        regime_status = "Bearish Momentum 🔻"
-                        ihsg_status = "RISK-OFF 🚨"
-                elif harga_terakhir < ema_20 and ema_20 > ema_50:
-                    regime_status = "Bearish Distribution 📉"
-                    ihsg_status = "NEUTRAL ⚖️"
-                elif harga_terakhir > ema_20 and ema_20 < ema_50:
-                    if mom_3d > np.percentile(mom_5d_hist, 75):
-                        regime_status = "Recovery 🔄"
-                        ihsg_status = "NEUTRAL ⚖️"
-                    else:
-                        regime_status = "Bullish Accumulation 🏗️"
+                        regime_status = "Konsolidasi ↔️"
                         ihsg_status = "NEUTRAL ⚖️"
                 else:
-                    regime_status = "Sideways/Choppy ↔️"
+                    regime_status = "Sideways (ADX rendah) ↔️"
                     ihsg_status = "NEUTRAL ⚖️"
 
                 # ==========================================
@@ -401,7 +429,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 breakout_status = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
                 # ==========================================
-                # 11. SIGNAL ENGINE DENGAN SENTIMEN (JIKA ADA)
+                # 11. SIGNAL + BACKTEST
                 # ==========================================
                 score = 0
                 if mom_3d > 0: score += 1
@@ -409,7 +437,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 if harga_terakhir > ema_20: score += 1
                 if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean():
                     score += 1
-
                 if SENTIMENT_AVAILABLE and avg_sentiment > 0.2:
                     score += 1
                 elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2:
@@ -424,8 +451,27 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 else:
                     signal = "🚨 AVOID"
 
+                # Backtest function inline
+                def signal_func_backtest(df_slice):
+                    # Simplifikasi untuk backtest
+                    h = float(df_slice['Close'].iloc[-1])
+                    r = df_slice['Close'].pct_change().dropna()
+                    m3 = float((df_slice['Close'].iloc[-1] / df_slice['Close'].iloc[-4] - 1) * 100)
+                    ema20 = float(df_slice['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+                    ema50 = float(df_slice['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
+                    z = (h - df_slice['Close'].tail(20).mean()) / df_slice['Close'].tail(20).std() if df_slice['Close'].tail(20).std() > 0 else 0
+                    s = 0
+                    if m3 > 0: s += 1
+                    if z < -1.5: s += 1
+                    if h > ema20: s += 1
+                    if s >= 2: return "🔥 STRONG BUY"
+                    elif s >= 1: return "⚡ BUY (TACTICAL)"
+                    else: return "🚨 AVOID"
+
+                win_rate_bt, profit_factor_bt, avg_ret_bt, trades_count = backtest_signal(df, signal_func_backtest)
+
                 # ==========================================
-                # 12. METRIK RISIKO LANJUTAN
+                # 12. RISK METRICS
                 # ==========================================
                 roll_max = df['Close'].cummax()
                 drawdown = (df['Close'] - roll_max) / roll_max
@@ -446,11 +492,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 win_loss_ratio = avg_gain / avg_loss if avg_loss > 0 else 1.0
                 kelly_raw = win_rate - ((1 - win_rate) / win_loss_ratio)
                 skew_adj = 0.5 if ret_skew < -0.5 else 1.0
-                kelly_adj = max(0.0, kelly_raw * 0.3 * skew_adj)
+                kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * skew_adj))  # capped 25%
                 allocated_capital = total_capital * kelly_adj
 
                 # ==========================================
-                # 13. MONTE CARLO STUDENT‑T & ESTIMASI HARGA BESOK (LOG‑OU)
+                # 13. MONTE CARLO + EXPECTED SHORTFALL
                 # ==========================================
                 n_sim = 2000
                 n_days = 30
@@ -469,6 +515,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 lower_est = float(np.percentile(sim_prices_besok, 25))
                 upper_est = float(np.percentile(sim_prices_besok, 75))
 
+                # Expected Shortfall 95% dari simulasi 30 hari
+                final_prices = price_paths[-1, :]
+                es_95_mc = float(np.mean(final_prices[final_prices <= np.percentile(final_prices, 5)]))
+                es_95_pct = (harga_terakhir - es_95_mc) / harga_terakhir * 100
+
                 tp = r1
                 sl = s1
                 hit_tp_30d = (np.any(price_paths >= tp, axis=0).sum() / n_sim) * 100
@@ -480,46 +531,44 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 # ==========================================
                 st.success(f"✅ Analisis Akurat: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",", "."))
 
-                # --- BERITA & SENTIMEN ---
-                st.header("📰 Sentimen Berita (Multi‑Sumber)")
-                col_sent1, col_sent2 = st.columns([1, 2])
-                with col_sent1:
+                # --- BERITA ---
+                st.header("📰 Sentimen Berita (Weighted)")
+                c1, c2 = st.columns([1, 2])
+                with c1:
                     st.metric("Sentimen Agregat", f"{avg_sentiment:.2f}", sentimen_status)
-                with col_sent2:
+                with c2:
                     st.markdown("**5 Berita Teratas:**")
                     if headlines:
                         for i, h in enumerate(headlines[:5]):
                             src = sources[i] if i < len(sources) else ""
-                            terjemahan = translated_headlines[i] if i < len(translated_headlines) else ""
+                            t = translated_headlines[i] if i < len(translated_headlines) else ""
                             st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>", unsafe_allow_html=True)
-                            if terjemahan and terjemahan != h:
-                                st.markdown(f"<span class='translated'>🇮🇩 {terjemahan}</span>", unsafe_allow_html=True)
+                            if t and t != h:
+                                st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
                             st.markdown("")
-                    else:
-                        st.markdown("*(Tidak ada berita relevan ditemukan)*")
                 st.divider()
 
-                # --- SECTION 1: REGIME & VOLATILITY ---
-                st.header("🧬 Market Regime & Volatility Engine")
+                # --- REGIME ---
+                st.header("🧬 Regime & Volatility (ADX Filter)")
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Regime Status", regime_status)
-                m2.metric("IHSG Condition", ihsg_status)
-                m3.metric("EWMA Vol (λ=0.94)", f"{ewma_vol:.2f}%")
-                st.markdown(f"Parkinson Vol: `{parkinson_vol:.2f}%` | Distribusi T (df={df_est:.1f}) | Skew: `{ret_skew:.2f}` | Kurt: `{ret_kurt:.2f}`")
+                m1.metric("Regime", regime_status)
+                m2.metric("IHSG", ihsg_status)
+                m3.metric("ADX", f"{adx_val:.1f}")
+                st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T (df={df_est:.1f}) | Skew: `{ret_skew:.2f}`")
                 st.divider()
 
-                # --- SECTION 2: MOMENTUM & MEAN‑REVERSION ---
-                st.header("📊 Momentum & Mean‑Reversion")
+                # --- MOMENTUM ---
+                st.header("📊 Momentum & Z‑Score")
                 mo1, mo2, mo3, mo4 = st.columns(4)
                 mo1.metric("Mom 3D", f"{mom_3d:+.2f}%")
                 mo2.metric("Mom 5D", f"{mom_5d:+.2f}%")
                 mo3.metric("Mom 10D", f"{mom_10d:+.2f}%")
-                mo4.metric("Z‑Score (20D)", f"{z_score:+.2f}σ")
+                mo4.metric("Z‑Score", f"{z_score:+.2f}σ")
                 st.divider()
 
-                # --- SECTION 3: PIVOT & S/R ---
+                # --- PIVOT ---
                 st.header("🎯 Pivot & S/R")
-                st.write(f"**Breakout Res20:** `{breakout_status}`")
+                st.write(f"Breakout Res20: `{breakout_status}`")
                 p1, p2, p3, p4, p5 = st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",", "."))
                 p2.metric("R1", f"Rp {r1:,.0f}".replace(",", "."))
@@ -528,41 +577,41 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 p5.metric("S2", f"Rp {s2:,.0f}".replace(",", "."))
                 st.divider()
 
-                # --- SECTION 4: SIGNAL & ESTIMASI ---
-                st.header("🔮 Signal & Estimasi Harga")
+                # --- SIGNAL + BACKTEST ---
+                st.header("🔮 Signal & Backtest 6 Bulan")
                 tp1, tp2, tp3, tp4 = st.columns(4)
-                tp1.metric("Signal V2 (dgn Sentimen)", signal)
-                tp2.metric(
-                    label="Est. Close Besok (OU)",
-                    value=f"Rp {estimasi_close_besok:,.0f}".replace(",", "."),
-                    delta=f"25-75%: {lower_est:,.0f} – {upper_est:,.0f}".replace(",", ".")
-                )
-                tp3.metric("Area Entry (S1-PP)", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
-                tp4.metric("Target Profit (R1)", f"Rp {r1:,.0f}".replace(",", "."))
-                st.caption("💡 Interval 25%–75% adalah rentang harga besok yang paling mungkin terjadi (50% probabilitas)")
+                tp1.metric("Signal", signal)
+                tp2.metric("Est. Close Besok", f"Rp {estimasi_close_besok:,.0f}".replace(",", "."),
+                           f"25-75%: {lower_est:,.0f} – {upper_est:,.0f}".replace(",", "."))
+                tp3.metric("Entry (S1-PP)", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
+                tp4.metric("Target (R1)", f"Rp {r1:,.0f}".replace(",", "."))
+                st.caption("💡 Interval 25%–75% = rentang harga besok yang paling mungkin (50% probabilitas)")
+
+                # Backtest result
+                st.markdown("**📈 Backtest 6 Bulan Terakhir:**")
+                b1, b2, b3, b4 = st.columns(4)
+                b1.metric("Win Rate", f"{win_rate_bt:.1%}" if trades_count > 0 else "N/A")
+                b2.metric("Profit Factor", f"{profit_factor_bt:.2f}" if trades_count > 0 else "N/A")
+                b3.metric("Avg Return/Trade", f"{avg_ret_bt:.2%}" if trades_count > 0 else "N/A")
+                b4.metric("Total Trades", f"{trades_count}")
                 st.divider()
 
-                # --- SECTION 5: RISK ENGINE & PORTFOLIO SIZING ---
-                st.header("🛡️ Risk Engine & Portfolio Sizing")
+                # --- RISK ---
+                st.header("🛡️ Risk & Portfolio Sizing")
                 r1, r2, r3 = st.columns(3)
-                r1.metric("Kelly Adj. Allocation", f"{kelly_adj*100:.1f}%")
-                r2.metric("Rekom. Modal (Rp)", f"Rp {allocated_capital:,.0f}".replace(",", "."))
+                r1.metric("Kelly Adj. (capped)", f"{kelly_adj*100:.1f}%")
+                r2.metric("Rekom. Modal", f"Rp {allocated_capital:,.0f}".replace(",", "."))
                 r3.metric("Beta vs IHSG", f"{beta_ihsg:.2f}x")
-                st.markdown(
-                    f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30d:.2f}%`) | "
-                    f"Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`"
-                )
-                st.markdown(
-                    f"VaR 95% (t): `{var_95_t:.2f}%` | CVaR 95% (t): `{cvar_95_t:.2f}%`"
-                )
+                st.markdown(f"Max DD: `{max_dd:.2f}%` | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
+                st.markdown(f"VaR 95% (t): `{var_95_t:.2f}%` | CVaR 95% (t): `{cvar_95_t:.2f}%` | MC ES 95%: `{es_95_pct:.2f}%`")
                 st.divider()
 
-                # --- SECTION 6: PROBABILITY ENGINE (MONTE CARLO T) ---
-                st.header("🎲 Probability Engine (Monte Carlo Student‑t 2000 runs)")
+                # --- PROBABILITY ---
+                st.header("🎲 Monte Carlo (Student‑t 2000)")
                 pr1, pr2, pr3 = st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bullish_besok:.1f}%")
-                pr2.metric("Prob Hit TP (30D)", f"{hit_tp_30d:.1f}%")
-                pr3.metric("Prob Hit SL (30D)", f"{hit_sl_30d:.1f}%")
+                pr2.metric("Prob TP 30D", f"{hit_tp_30d:.1f}%")
+                pr3.metric("Prob SL 30D", f"{hit_sl_30d:.1f}%")
 
             except Exception as e:
-                st.error(f"🚨 Kesalahan pemrosesan: {str(e)}")
+                st.error(f"🚨 Kesalahan: {str(e)}")
