@@ -104,14 +104,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA (DENGAN EKSTRAKSI JUDUL YANG LEBIH ROBUST)
+                # 4. SENTIMEN BERITA (DENGAN EKSTRAKSI DARI 'content')
                 # ==========================================
                 avg_sentiment = 0.0
                 headlines = []
                 sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
 
                 if SENTIMENT_AVAILABLE:
-                    analyzer = SentimentIntensityAnalyzer()
+                    analyzer = SentimentIntelligenceAnalyzer()
                     sentiments = []
                     news_error_msg = None
 
@@ -128,32 +128,30 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
 
                         if news_list:
                             for item in news_list[:5]:
-                                # Coba berbagai kemungkinan properti judul
+                                # --- MASUK KE 'content' JIKA ADA ---
+                                inner = item.get('content') or item  # fallback ke item langsung
+
+                                # Coba berbagai properti judul di dalam content
                                 title = (
-                                    item.get('title') or
-                                    item.get('shortTitle') or
-                                    item.get('headline') or
-                                    item.get('summary') or
-                                    item.get('description') or
-                                    item.get('link', '')[:80] + '...' if item.get('link') else ''
+                                    inner.get('title') or
+                                    inner.get('shortTitle') or
+                                    inner.get('headline') or
+                                    inner.get('summary') or
+                                    inner.get('description') or
+                                    ''
                                 )
                                 # Coba berbagai properti ringkasan
                                 summary = (
-                                    item.get('summary') or
-                                    item.get('longSummary') or
-                                    item.get('description') or
+                                    inner.get('summary') or
+                                    inner.get('longSummary') or
+                                    inner.get('description') or
                                     ''
                                 )
-                                text = f"{title}. {summary}" if title or summary else ""
-                                if not text:
-                                    # Fallback: tampilkan semua kunci yang tersedia
-                                    available_keys = list(item.keys()) if isinstance(item, dict) else []
-                                    title = f"(Kunci: {available_keys})"
-                                    text = str(item)
+                                text = f"{title}. {summary}".strip() if (title or summary) else str(inner)[:200]
 
                                 vs = analyzer.polarity_scores(text)
                                 sentiments.append(vs['compound'])
-                                headlines.append(title if title else '(tanpa judul)')
+                                headlines.append(title if title else f"(Konten: {text[:80]}...)")
                             avg_sentiment = np.mean(sentiments) if sentiments else 0.0
                         else:
                             if news_error_msg:
