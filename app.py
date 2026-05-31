@@ -5,14 +5,20 @@ import numpy as np
 from scipy.stats import skew, kurtosis, t as student_t
 from scipy.optimize import minimize
 import warnings
-import nltk
-from nltk.sentiment import SentimentIntensityAnalyzer
 
-# Download VADER lexicon (sekali saja)
+# ====================== FALLBACK SENTIMEN ======================
+SENTIMENT_AVAILABLE = True
 try:
-    nltk.data.find('sentiment/vader_lexicon.zip')
-except LookupError:
-    nltk.download('vader_lexicon')
+    import nltk
+    from nltk.sentiment import SentimentIntensityAnalyzer
+    # Download VADER lexicon jika belum ada
+    try:
+        nltk.data.find('sentiment/vader_lexicon.zip')
+    except LookupError:
+        nltk.download('vader_lexicon')
+except ImportError:
+    SENTIMENT_AVAILABLE = False
+# ===============================================================
 
 warnings.filterwarnings("ignore")
 
@@ -40,6 +46,10 @@ st.markdown("""
 
 st.title("📊 Quant & Risk Engine Pro (dengan Sentimen Berita)")
 st.write("Algoritma kuantitatif + berita terkini. Distribusi Student‑t, volatilitas adaptif, Monte Carlo.")
+
+if not SENTIMENT_AVAILABLE:
+    st.warning("⚠️ NLTK tidak terpasang → fitur sentimen berita dinonaktifkan. "
+               "Install dengan `pip install nltk` untuk mengaktifkan kembali.")
 
 # ==========================================
 # 2. PANEL INPUT
@@ -94,37 +104,43 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA (YAHOO FINANCE)
+                # 4. SENTIMEN BERITA (YAHOO FINANCE) – DENGAN FALLBACK
                 # ==========================================
-                try:
-                    ticker_obj = yf.Ticker(ticker_input)
-                    news_list = ticker_obj.news
-                    analyzer = SentimentIntensityAnalyzer()
-                    sentiments = []
-                    headlines = []
-                    if news_list:
-                        for item in news_list[:5]:   # maks 5 berita terbaru
-                            title = item.get('title', '')
-                            summary = item.get('summary', '') if 'summary' in item else ''
-                            text = f"{title}. {summary}"
-                            vs = analyzer.polarity_scores(text)
-                            sentiments.append(vs['compound'])
-                            headlines.append(title)
-                        avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-                    else:
-                        avg_sentiment = 0.0
-                        headlines = ["Tidak ada berita tersedia"]
-                except Exception as e:
-                    avg_sentiment = 0.0
-                    headlines = [f"Gagal mengambil berita: {str(e)}"]
+                avg_sentiment = 0.0
+                headlines = []
+                sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
 
-                # Kategori sentimen
-                if avg_sentiment >= 0.05:
-                    sentimen_status = "Positif 🟢"
-                elif avg_sentiment <= -0.05:
-                    sentimen_status = "Negatif 🔴"
+                if SENTIMENT_AVAILABLE:
+                    try:
+                        ticker_obj = yf.Ticker(ticker_input)
+                        news_list = ticker_obj.news
+                        analyzer = SentimentIntensityAnalyzer()
+                        sentiments = []
+                        if news_list:
+                            for item in news_list[:5]:
+                                title = item.get('title', '')
+                                summary = item.get('summary', '') if 'summary' in item else ''
+                                text = f"{title}. {summary}"
+                                vs = analyzer.polarity_scores(text)
+                                sentiments.append(vs['compound'])
+                                headlines.append(title)
+                            avg_sentiment = np.mean(sentiments) if sentiments else 0.0
+                        else:
+                            headlines = ["Tidak ada berita tersedia"]
+                    except Exception as e:
+                        avg_sentiment = 0.0
+                        headlines = [f"Gagal mengambil berita: {str(e)}"]
                 else:
-                    sentimen_status = "Netral ⚪"
+                    headlines = ["Fitur sentimen tidak aktif (NLTK tidak terpasang)"]
+
+                # Kategori sentimen (hanya jika tersedia)
+                if SENTIMENT_AVAILABLE:
+                    if avg_sentiment >= 0.05:
+                        sentimen_status = "Positif 🟢"
+                    elif avg_sentiment <= -0.05:
+                        sentimen_status = "Negatif 🔴"
+                    else:
+                        sentimen_status = "Netral ⚪"
 
                 # ==========================================
                 # 5. VOLATILITAS ADAPTIF
@@ -246,19 +262,19 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 breakout_status = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
                 # ==========================================
-                # 11. SIGNAL ENGINE DENGAN SENTIMEN
+                # 11. SIGNAL ENGINE DENGAN SENTIMEN (JIKA ADA)
                 # ==========================================
                 score = 0
                 if mom_3d > 0: score += 1
-                if z_score < -1.5: score += 1          # oversold
+                if z_score < -1.5: score += 1
                 if harga_terakhir > ema_20: score += 1
                 if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean():
                     score += 1
 
-                # *** INTEGRASI SENTIMEN ***
-                if avg_sentiment > 0.2:
+                # *** INTEGRASI SENTIMEN HANYA JIKA TERSEDIA ***
+                if SENTIMENT_AVAILABLE and avg_sentiment > 0.2:
                     score += 1
-                elif avg_sentiment < -0.2:
+                elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2:
                     score -= 1
 
                 if score >= 3:
