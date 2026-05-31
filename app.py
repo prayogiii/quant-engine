@@ -53,7 +53,32 @@ st.markdown("""
     .translated { color: #cbd5e1; font-size: 13px; }
     .source { color: #6b7280; font-size: 11px; }
     .info-text { color: #94a3b8; font-size: 14px; margin-top: 5px; line-height: 1.5; }
-    .conclusion-box { background-color: #1e293b; border-left: 4px solid #00ffcc; padding: 15px; border-radius: 8px; margin-top: 20px; }
+    .summary-card {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 16px;
+        padding: 20px;
+        margin: 10px 0;
+        border: 1px solid #334155;
+    }
+    .action-card {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border-radius: 16px;
+        padding: 20px;
+        margin: 10px 0;
+        border-left: 5px solid #00ffcc;
+    }
+    .section-title {
+        color: #00ffcc;
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 12px;
+    }
+    .summary-item {
+        color: #cbd5e1;
+        font-size: 15px;
+        margin-bottom: 8px;
+    }
+    .highlight { color: #fbbf24; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -478,31 +503,58 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
 
                 # ==========================================
-                # KESIMPULAN TRADING
+                # KESIMPULAN TRADING (DIPERBAIKI LAYOUT)
                 # ==========================================
                 st.markdown("---")
                 st.header("📋 Kesimpulan & Rekomendasi Trading")
-                # Tentukan rekomendasi utama
+                
+                # Tentukan warna aksi berdasarkan sinyal
                 if "STRONG BUY" in signal:
-                    rekomendasi = "**Aksi:** Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
+                    action_color = "#10b981"  # hijau
+                    action_icon = "🟢"
+                    action_text = "Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
                 elif "BUY" in signal:
-                    rekomendasi = "**Aksi:** Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
+                    action_color = "#f59e0b"  # kuning
+                    action_icon = "🟡"
+                    action_text = "Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
                 elif "HOLD" in signal:
-                    rekomendasi = "**Aksi:** Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
+                    action_color = "#3b82f6"  # biru
+                    action_icon = "🔵"
+                    action_text = "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
                 else:
-                    rekomendasi = "**Aksi:** Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
+                    action_color = "#ef4444"  # merah
+                    action_icon = "🔴"
+                    action_text = "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
 
-                kesimpulan = f"""
-                <div class="conclusion-box">
-                <b>📌 Ringkasan:</b> Saham <b>{ticker_input}</b> saat ini berada dalam regime <b>{regime}</b> dengan kondisi pasar IHSG <b>{ihsg_cond}</b> (ADX {adx:.1f}).<br>
-                <b>📊 Sentimen berita:</b> {sentimen_status} ({avg_sentiment:.2f})<br>
-                <b>🔮 Sinyal:</b> {signal}<br>
-                <b>💰 Estimasi harga besok:</b> Rp {est_besok:,.0f} (rentang wajar 25%-75%: {low_est:,.0f} - {up_est:,.0f})<br>
-                <b>🛡️ Alokasi yang disarankan:</b> {kelly_adj*100:.1f}% dari modal (Rp {alloc:,.0f})<br><br>
-                {rekomendasi}
-                </div>
-                """
-                st.markdown(kesimpulan, unsafe_allow_html=True)
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    st.markdown(f"""
+                    <div class="summary-card">
+                        <div class="section-title">📌 Ringkasan Kondisi</div>
+                        <div class="summary-item">🏷️ <b>Regime:</b> {regime}</div>
+                        <div class="summary-item">🌐 <b>IHSG Condition:</b> {ihsg_cond}</div>
+                        <div class="summary-item">📊 <b>ADX:</b> {adx:.1f}</div>
+                        <div class="summary-item">📰 <b>Sentimen:</b> {sentimen_status} ({avg_sentiment:.2f})</div>
+                        <div class="summary-item">🔮 <b>Sinyal:</b> {signal}</div>
+                        <div class="summary-item">💰 <b>Estimasi Besok:</b> Rp {est_besok:,.0f}<br><span style="font-size:13px; color:#94a3b8;">Range 25-75%: {low_est:,.0f} – {up_est:,.0f}</span></div>
+                        <div class="summary-item">🛡️ <b>Alokasi:</b> {kelly_adj*100:.1f}% (Rp {alloc:,.0f})</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                with col2:
+                    st.markdown(f"""
+                    <div class="action-card" style="border-left-color: {action_color};">
+                        <div class="section-title">{action_icon} Rekomendasi Aksi</div>
+                        <div class="summary-item" style="font-size: 16px; margin-top: 8px;">
+                            {action_text}
+                        </div>
+                        <hr style="border-color: #334155; margin: 15px 0;">
+                        <div style="color: #94a3b8; font-size: 14px;">
+                            ⚠️ <i>Keputusan trading sepenuhnya ada di tangan Anda. Gunakan analisis ini sebagai konfirmasi tambahan.</i>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
             except Exception as e:
                 st.error(f"🚨 Kesalahan: {str(e)}")
