@@ -104,7 +104,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA (DIPERBAIKI DENGAN FALLBACK & LOG ERROR)
+                # 4. SENTIMEN BERITA (DENGAN EKSTRAKSI JUDUL YANG LEBIH ROBUST)
                 # ==========================================
                 avg_sentiment = 0.0
                 headlines = []
@@ -116,25 +116,41 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     news_error_msg = None
 
                     try:
-                        # --- Metode 1: Yahoo Finance Ticker news ---
                         ticker_obj = yf.Ticker(ticker_input)
                         news_list = ticker_obj.news
 
-                        # Jika news kosong, coba fallback ke yf.Search
                         if not news_list:
                             try:
-                                search_obj = yf.Search(ticker_raw)   # tanpa .JK
+                                search_obj = yf.Search(ticker_raw)
                                 news_list = search_obj.news
                             except Exception as search_e:
                                 news_error_msg = f"Search fallback gagal: {search_e}"
 
                         if news_list:
                             for item in news_list[:5]:
-                                # Ambil title – kadang 'title', kadang 'shortTitle'
-                                title = item.get('title', '') or item.get('shortTitle', '')
-                                # Ambil summary
-                                summary = item.get('summary', '') or item.get('longSummary', '')
-                                text = f"{title}. {summary}"
+                                # Coba berbagai kemungkinan properti judul
+                                title = (
+                                    item.get('title') or
+                                    item.get('shortTitle') or
+                                    item.get('headline') or
+                                    item.get('summary') or
+                                    item.get('description') or
+                                    item.get('link', '')[:80] + '...' if item.get('link') else ''
+                                )
+                                # Coba berbagai properti ringkasan
+                                summary = (
+                                    item.get('summary') or
+                                    item.get('longSummary') or
+                                    item.get('description') or
+                                    ''
+                                )
+                                text = f"{title}. {summary}" if title or summary else ""
+                                if not text:
+                                    # Fallback: tampilkan semua kunci yang tersedia
+                                    available_keys = list(item.keys()) if isinstance(item, dict) else []
+                                    title = f"(Kunci: {available_keys})"
+                                    text = str(item)
+
                                 vs = analyzer.polarity_scores(text)
                                 sentiments.append(vs['compound'])
                                 headlines.append(title if title else '(tanpa judul)')
@@ -368,9 +384,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.metric("Sentimen Agregat", f"{avg_sentiment:.2f}", sentimen_status)
                 with col_sent2:
                     st.markdown("**5 Berita Teratas:**")
-                    for i, h in enumerate(headlines[:5]):
-                        st.markdown(f"{i+1}. {h}")
-                    if not headlines:
+                    if headlines:
+                        for i, h in enumerate(headlines[:5]):
+                            st.markdown(f"{i+1}. {h}")
+                    else:
                         st.markdown("*(Tidak ada data berita)*")
                 st.divider()
 
