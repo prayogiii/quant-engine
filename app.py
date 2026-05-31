@@ -56,7 +56,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📊 Quant & Risk Engine Pro (Akurasi Tinggi)")
-st.write("Algoritma kuantitatif + berita multi‑sumber + Backtest. Distribusi Student‑t, ADX filter, Monte Carlo.")
+st.write("Algoritma kuantitatif + berita multi‑sumber + Backtest. Distribusi Student‑t, ADX filter, Monte Carlo, Regime 10-State.")
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
 if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
 if not TRANSLATOR_AVAILABLE: st.info("💡 deep-translator tidak terpasang")
@@ -145,13 +145,11 @@ def analyze_sentiment_weighted(news_items, translator):
     return w_sum / total_w if total_w > 0 else 0.0
 
 def backtest_signal(df, signal_func, periods=126):
-    """Backtest dengan slicing integer, aman untuk semua versi pandas."""
+    """Backtest dengan slicing integer."""
     df_back = df.iloc[-periods:].copy()
     signals = []
-    # Kita butuh minimal 20 hari untuk indikator, mulai dari indeks ke-20
     for i in range(20, len(df_back)):
-        # Data hingga hari ke-i (exclusive untuk sinyal, pakai data sampai i-1)
-        slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]  # aman, integer
+        slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]
         try:
             sig = signal_func(slice_df)
             signals.append((df_back.index[i], sig))
@@ -244,7 +242,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     else: beta_ihsg=1.0
                 except: beta_ihsg=1.0
 
-                # MOMENTUM
+                # MOMENTUM & Z-SCORE
                 mom_3d = float((df['Close'].iloc[-1]/df['Close'].iloc[-4]-1)*100)
                 mom_5d = float((df['Close'].iloc[-1]/df['Close'].iloc[-6]-1)*100)
                 mom_10d = float((df['Close'].iloc[-1]/df['Close'].iloc[-11]-1)*100)
@@ -252,7 +250,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 std20 = float(df['Close'].tail(20).std())
                 z_score = (harga_terakhir-ma20)/std20 if std20>0 else 0.0
 
-                # REGIME + ADX
+                # ==========================================
+                # REGIME 10‑STATE (AKURASI TINGGI)
+                # ==========================================
                 ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
                 ema50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
                 adx = compute_adx(df)
@@ -262,19 +262,59 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 z_hist = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
                 z_up = np.percentile(z_hist.dropna(), 80)
                 z_down = np.percentile(z_hist.dropna(), 20)
-                if adx > 20:
+                vol_hist = returns.rolling(20).std().dropna()*np.sqrt(252)*100
+                high_vol_th = np.percentile(vol_hist, 70)  # threshold volatilitas tinggi
+                low_vol_th = np.percentile(vol_hist, 30)
+
+                # Logika 10 state
+                if adx > 20:  # Sedang trending
                     if harga_terakhir > ema20 and ema20 > ema50:
-                        regime = "Strong Bullish 🚀" if (mom_5d > bull_th or z_score > z_up) else "Bullish 📈"
+                        if mom_5d > bull_th or z_score > z_up:
+                            regime = "Strong Bullish 🚀"
+                        else:
+                            regime = "Bullish 📈"
                         ihsg_cond = "RISK-ON 🔥"
                     elif harga_terakhir < ema20 and ema20 < ema50:
-                        regime = "Panic Sell ⚠️" if (mom_5d < bear_th or z_score < z_down) else "Bearish 🔻"
-                        ihsg_cond = "RISK-OFF 🚨"
+                        if mom_5d < bear_th or z_score < z_down:
+                            regime = "Panic Sell 🚨"
+                        else:
+                            regime = "Bearish 🔻"
+                        ihsg_cond = "RISK-OFF 🛑"
+                    elif harga_terakhir > ema20 and ema20 < ema50:  # Golden cross reversal
+                        regime = "Early Recovery 🔄"
+                        ihsg_cond = "TRANSISI ⚠️"
+                    elif harga_terakhir < ema20 and ema20 > ema50:  # Death cross
+                        regime = "Distribution 📉"
+                        ihsg_cond = "TRANSISI ⚠️"
                     else:
-                        regime = "Konsolidasi ↔️"; ihsg_cond = "NEUTRAL ⚖️"
-                else:
-                    regime = "Sideways (ADX rendah) ↔️"; ihsg_cond = "NEUTRAL ⚖️"
+                        regime = "Konsolidasi Tren ↔️"
+                        ihsg_cond = "NEUTRAL ⚖️"
+                else:  # ADX <= 20, pasar sideways
+                    if harga_terakhir > ema20 and ema20 > ema50:
+                        regime = "Bullish Accumulation 🏗️"
+                        ihsg_cond = "NEUTRAL ⚖️"
+                    elif harga_terakhir < ema20 and ema20 < ema50:
+                        regime = "Bearish Accumulation 🧊"
+                        ihsg_cond = "NEUTRAL ⚖️"
+                    elif harga_terakhir > ema20 and ema20 < ema50:
+                        regime = "Sideways Bias Naik ↗️"
+                        ihsg_cond = "NEUTRAL ⚖️"
+                    elif harga_terakhir < ema20 and ema20 > ema50:
+                        regime = "Sideways Bias Turun ↘️"
+                        ihsg_cond = "NEUTRAL ⚖️"
+                    else:
+                        # Cek volatilitas untuk bedakan calm vs choppy
+                        if ewma_vol > high_vol_th:
+                            regime = "Sideways Choppy 🌊"
+                        elif ewma_vol < low_vol_th:
+                            regime = "Sideways Calm 😴"
+                        else:
+                            regime = "Sideways Normal ↔️"
+                        ihsg_cond = "NEUTRAL ⚖️"
 
+                # ==========================================
                 # PIVOT
+                # ==========================================
                 hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
                 pp = (hi+lo+harga_terakhir)/3
                 r1, s1 = 2*pp-lo, 2*pp-hi
@@ -344,7 +384,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 hit_sl = (np.any(paths<=sl, axis=0).sum()/n_sim)*100
                 prob_bull = ((sim_h1>0).sum()/2000)*100
 
-                # TAMPILAN
+                # ==========================================
+                # TAMPILAN DASHBOARD
+                # ==========================================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
                 st.header("📰 Sentimen Berita (Weighted)")
                 c1,c2=st.columns([1,2])
@@ -358,7 +400,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
                         st.markdown("")
                 st.divider()
-                st.header("🧬 Regime & Volatility (ADX)")
+                st.header("🧬 Regime & Volatility (10‑State)")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
                 st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f}) | Skew: `{ret_skew:.2f}`")
