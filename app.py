@@ -52,6 +52,8 @@ st.markdown("""
     div[data-testid="InputInstructions"] { display: none !important; }
     .translated { color: #cbd5e1; font-size: 13px; }
     .source { color: #6b7280; font-size: 11px; }
+    .info-text { color: #94a3b8; font-size: 14px; margin-top: 5px; line-height: 1.5; }
+    .conclusion-box { background-color: #1e293b; border-left: 4px solid #00ffcc; padding: 15px; border-radius: 8px; margin-top: 20px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -145,7 +147,6 @@ def analyze_sentiment_weighted(news_items, translator):
     return w_sum / total_w if total_w > 0 else 0.0
 
 def backtest_signal(df, signal_func, periods=126):
-    """Backtest dengan slicing integer."""
     df_back = df.iloc[-periods:].copy()
     signals = []
     for i in range(20, len(df_back)):
@@ -169,6 +170,31 @@ def backtest_signal(df, signal_func, periods=126):
         avg_return = np.mean(trades)
         return win_rate, profit_factor, avg_return, len(trades)
     return 0, 0, 0, 0
+
+# ==================== KAMUS PENJELASAN ====================
+REGIME_INFO = {
+    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Biasanya muncul setelah breakout resistance atau berita positif besar. Fase ini ideal untuk swing buy agresif, tetapi waspadai overbought.",
+    "Bullish 📈": "Tren naik stabil tanpa akselerasi berlebihan. Kondisi pasar sehat untuk akumulasi dan swing trading jangka pendek-menengah.",
+    "Panic Sell 🚨": "Penurunan tajam dengan volume tinggi, sering dipicu kepanikan. Harga biasanya oversold, sehingga bisa menjadi peluang buy-back jika konfirmasi reversal muncul.",
+    "Bearish 🔻": "Tren turun yang terkendali. Disarankan menghindari posisi buy dulu, atau mempertimbangkan strategi short jika memungkinkan.",
+    "Early Recovery 🔄": "Harga mulai bergerak di atas EMA20, namun EMA20 masih di bawah EMA50 (golden cross tertunda). Potensi pembalikan bullish, tetapi perlu konfirmasi volume dan momentum lanjutan.",
+    "Distribution 📉": "Harga di bawah EMA20 sementara EMA20 masih di atas EMA50 (death cross). Biasanya terjadi setelah uptrend panjang, menandakan distribusi saham oleh pemain besar.",
+    "Konsolidasi Tren ↔️": "Trending namun harga bergerak bolak-balik di sekitar EMA. Pasar sedang mencari arah, tunggu penembusan support/resistance untuk entry.",
+    "Bullish Accumulation 🏗️": "Sideways dengan harga cenderung di atas EMA. Menandakan akumulasi diam-diam oleh pelaku pasar, seringkali menjelang breakout bullish.",
+    "Bearish Accumulation 🧊": "Sideways di bawah EMA, biasanya distribusi pelan. Waspadai potensi breakdown ke bawah.",
+    "Sideways Bias Naik ↗️": "Pasar sideways dengan sedikit kecenderungan naik. Potensi bullish tetapi belum cukup kuat, tunggu konfirmasi breakout.",
+    "Sideways Bias Turun ↘️": "Sideways dengan sedikit kecenderungan turun. Potensi bearish, tetapi masih rentan false signal.",
+    "Sideways Choppy 🌊": "Sideways dengan volatilitas tinggi dan tidak menentu. Sulit diprediksi, sebaiknya hindari entry sampai terbentuk tren yang lebih jelas.",
+    "Sideways Calm 😴": "Sideways sepi dengan volatilitas sangat rendah. Biasanya terjadi menjelang rilis berita besar atau breakout signifikan.",
+    "Sideways Normal ↔️": "Sideways moderat tanpa tekanan signifikan. Pasar menunggu katalis, aman untuk wait-and-see."
+}
+
+IHSG_CONDITION_INFO = {
+    "RISK-ON 🔥": "Sentimen pasar sedang positif, investor cenderung mengambil risiko. Kondisi ideal untuk posisi beli di saham agresif.",
+    "RISK-OFF 🛑": "Sentimen pasar negatif, investor menghindari risiko. Disarankan menahan diri atau pindah ke saham defensif.",
+    "NEUTRAL ⚖️": "Pasar tidak menunjukkan arah yang jelas. Strategi konservatif lebih dianjurkan.",
+    "TRANSISI ⚠️": "Pasar dalam masa transisi dari bullish ke bearish atau sebaliknya. Volatilitas tinggi, entry harus ekstra hati-hati."
+}
 # =====================================================
 
 if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
@@ -250,9 +276,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 std20 = float(df['Close'].tail(20).std())
                 z_score = (harga_terakhir-ma20)/std20 if std20>0 else 0.0
 
-                # ==========================================
-                # REGIME 10‑STATE (AKURASI TINGGI)
-                # ==========================================
+                # REGIME 10‑STATE
                 ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
                 ema50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
                 adx = compute_adx(df)
@@ -263,11 +287,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 z_up = np.percentile(z_hist.dropna(), 80)
                 z_down = np.percentile(z_hist.dropna(), 20)
                 vol_hist = returns.rolling(20).std().dropna()*np.sqrt(252)*100
-                high_vol_th = np.percentile(vol_hist, 70)  # threshold volatilitas tinggi
+                high_vol_th = np.percentile(vol_hist, 70)
                 low_vol_th = np.percentile(vol_hist, 30)
 
-                # Logika 10 state
-                if adx > 20:  # Sedang trending
+                if adx > 20:
                     if harga_terakhir > ema20 and ema20 > ema50:
                         if mom_5d > bull_th or z_score > z_up:
                             regime = "Strong Bullish 🚀"
@@ -280,16 +303,16 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         else:
                             regime = "Bearish 🔻"
                         ihsg_cond = "RISK-OFF 🛑"
-                    elif harga_terakhir > ema20 and ema20 < ema50:  # Golden cross reversal
+                    elif harga_terakhir > ema20 and ema20 < ema50:
                         regime = "Early Recovery 🔄"
                         ihsg_cond = "TRANSISI ⚠️"
-                    elif harga_terakhir < ema20 and ema20 > ema50:  # Death cross
+                    elif harga_terakhir < ema20 and ema20 > ema50:
                         regime = "Distribution 📉"
                         ihsg_cond = "TRANSISI ⚠️"
                     else:
                         regime = "Konsolidasi Tren ↔️"
                         ihsg_cond = "NEUTRAL ⚖️"
-                else:  # ADX <= 20, pasar sideways
+                else:
                     if harga_terakhir > ema20 and ema20 > ema50:
                         regime = "Bullish Accumulation 🏗️"
                         ihsg_cond = "NEUTRAL ⚖️"
@@ -303,7 +326,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         regime = "Sideways Bias Turun ↘️"
                         ihsg_cond = "NEUTRAL ⚖️"
                     else:
-                        # Cek volatilitas untuk bedakan calm vs choppy
                         if ewma_vol > high_vol_th:
                             regime = "Sideways Choppy 🌊"
                         elif ewma_vol < low_vol_th:
@@ -312,9 +334,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                             regime = "Sideways Normal ↔️"
                         ihsg_cond = "NEUTRAL ⚖️"
 
-                # ==========================================
                 # PIVOT
-                # ==========================================
                 hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
                 pp = (hi+lo+harga_terakhir)/3
                 r1, s1 = 2*pp-lo, 2*pp-hi
@@ -332,7 +352,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 elif SENTIMENT_AVAILABLE and avg_sentiment<-0.2: score-=1
                 signal = "🔥 STRONG BUY" if score>=3 else ("⚡ BUY (TACTICAL)" if score>=2 else ("⏸️ HOLD / WAIT" if score==1 else "🚨 AVOID"))
 
-                # BACKTEST (FUNGSI SIGNAL SEDERHANA)
+                # BACKTEST
                 def sig_func(sl):
                     h = float(sl['Close'].iloc[-1])
                     m3 = float((sl['Close'].iloc[-1]/sl['Close'].iloc[-4]-1)*100)
@@ -388,7 +408,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 # TAMPILAN DASHBOARD
                 # ==========================================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
-                st.header("📰 Sentimen Berita ")
+                st.header("📰 Sentimen Berita (Weighted)")
+                st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot (berita terbaru lebih berpengaruh).")
                 c1,c2=st.columns([1,2])
                 c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
                 with c2:
@@ -400,27 +421,39 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
                         st.markdown("")
                 st.divider()
-                st.header("🧬 Regime & Volatility ")
+
+                st.header("🧬 Regime & Volatility (10‑State)")
+                st.caption("Klasifikasi regime menggunakan ADX, EMA, momentum, dan volatilitas. ADX > 20 = trending, ≤ 20 = sideways. 10 kondisi pasar memberikan gambaran lebih detail.")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
                 st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f}) | Skew: `{ret_skew:.2f}`")
+                # Keterangan regime
+                st.markdown(f"**Apa artinya?** {REGIME_INFO.get(regime, '')}")
+                st.markdown(f"**Kondisi IHSG:** {IHSG_CONDITION_INFO.get(ihsg_cond, '')}")
+                st.markdown(f"**ADX:** ADX = {adx:.1f} — {'Kekuatan tren **tinggi** (>20), pasar sedang trending.' if adx > 20 else 'Kekuatan tren **rendah** (≤20), pasar cenderung sideways.'}")
                 st.divider()
+
                 st.header("📊 Momentum & Z‑Score")
+                st.caption("Momentum mengukur kekuatan pergerakan harga 3/5/10 hari. Z‑Score menunjukkan deviasi harga dari rata‑rata 20 hari (overbought jika >2, oversold jika <-2).")
                 mo1,mo2,mo3,mo4=st.columns(4)
                 mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
                 st.divider()
+
                 st.header("🎯 Pivot & S/R")
+                st.caption("Pivot point dari high/low/close kemarin. R1/S1 sebagai target/resistensi terdekat. Breakout Res20 menandakan harga menembus resistensi tertinggi 20 hari.")
                 st.write(f"Breakout Res20: `{breakout}`")
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
-                st.header("🔮 Signal & Trading Plan With Backtest ")
+
+                st.header("🔮 Signal & Backtest 6 Bulan")
+                st.caption("Signal berdasarkan skor momentum, Z‑score, posisi EMA20, volume, dan sentimen berita. Backtest 6 bulan menggunakan sinyal serupa untuk mengukur performa historis (tanpa memperhitungkan slippage/biaya).")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
                 t3.metric("Entry", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",","."))
                 t4.metric("Target", f"Rp {r1:,.0f}".replace(",","."))
-                st.caption("💡 Interval 25%-75% = rentang paling mungkin (50% probabilitas)")
+                st.caption("💡 Interval 25%-75% adalah rentang harga besok yang paling mungkin (probabilitas 50%).")
                 st.markdown("**📈 Backtest 6 Bulan:**")
                 b1,b2,b3,b4=st.columns(4)
                 b1.metric("Win Rate", f"{win_bt:.1%}" if trades_bt else "N/A")
@@ -428,7 +461,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 b3.metric("Avg Return", f"{avg_bt:.2%}" if trades_bt else "N/A")
                 b4.metric("Trades", f"{trades_bt}")
                 st.divider()
+
                 st.header("🛡️ Risk & Portfolio Sizing")
+                st.caption("Metrik risiko mencakup Maximum Drawdown, Sharpe, Sortino, Calmar, VaR, dan CVaR. Alokasi modal menggunakan Kelly Criterion yang disesuaikan dengan skewness dan dibatasi maksimum 25%.")
                 r1,r2,r3=st.columns(3)
                 r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
                 r2.metric("Rekom. Modal", f"Rp {alloc:,.0f}".replace(",","."))
@@ -436,9 +471,38 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30:.2f}%`) | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
                 st.markdown(f"VaR 95% (t): `{var_95_t:.2f}%` | CVaR 95% (t): `{cvar_95_t:.2f}%` | MC ES 95%: `{es_95_pct:.2f}%`")
                 st.divider()
+
                 st.header("🎲 Monte Carlo (Student‑t 2000)")
+                st.caption("Simulasi 2000 jalur harga 30 hari ke depan dengan distribusi Student‑t. Menampilkan probabilitas bullish besok, peluang mencapai TP/SL dalam 30 hari, dan Expected Shortfall 95%.")
                 pr1,pr2,pr3=st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
+
+                # ==========================================
+                # KESIMPULAN TRADING
+                # ==========================================
+                st.markdown("---")
+                st.header("📋 Kesimpulan & Rekomendasi Trading")
+                # Tentukan rekomendasi utama
+                if "STRONG BUY" in signal:
+                    rekomendasi = "**Aksi:** Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
+                elif "BUY" in signal:
+                    rekomendasi = "**Aksi:** Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
+                elif "HOLD" in signal:
+                    rekomendasi = "**Aksi:** Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
+                else:
+                    rekomendasi = "**Aksi:** Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
+
+                kesimpulan = f"""
+                <div class="conclusion-box">
+                <b>📌 Ringkasan:</b> Saham <b>{ticker_input}</b> saat ini berada dalam regime <b>{regime}</b> dengan kondisi pasar IHSG <b>{ihsg_cond}</b> (ADX {adx:.1f}).<br>
+                <b>📊 Sentimen berita:</b> {sentimen_status} ({avg_sentiment:.2f})<br>
+                <b>🔮 Sinyal:</b> {signal}<br>
+                <b>💰 Estimasi harga besok:</b> Rp {est_besok:,.0f} (rentang wajar 25%-75%: {low_est:,.0f} - {up_est:,.0f})<br>
+                <b>🛡️ Alokasi yang disarankan:</b> {kelly_adj*100:.1f}% dari modal (Rp {alloc:,.0f})<br><br>
+                {rekomendasi}
+                </div>
+                """
+                st.markdown(kesimpulan, unsafe_allow_html=True)
 
             except Exception as e:
                 st.error(f"🚨 Kesalahan: {str(e)}")
