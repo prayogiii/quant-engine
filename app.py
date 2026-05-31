@@ -388,7 +388,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 # TAMPILAN DASHBOARD
                 # ==========================================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
-                st.header("📰 Sentimen Berita (Weighted)")
+                st.header("📰 Sentimen Berita ")
                 c1,c2=st.columns([1,2])
                 c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
                 with c2:
@@ -414,7 +414,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
-                st.header("🔮 Signal & Backtest 6 Bulan")
+                st.header("🔮 Trading Plan & Backtest")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
