@@ -17,7 +17,14 @@ try:
         nltk.download('vader_lexicon')
 except ImportError:
     SENTIMENT_AVAILABLE = False
-# ===============================================================
+
+# ====================== FALLBACK TRANSLATOR ======================
+TRANSLATOR_AVAILABLE = True
+try:
+    from deep_translator import GoogleTranslator
+except ImportError:
+    TRANSLATOR_AVAILABLE = False
+# =================================================================
 
 warnings.filterwarnings("ignore")
 
@@ -41,6 +48,7 @@ st.markdown("""
     h1, h2, h3 { color: #f3f4f6; }
     div[data-testid="InputInstructions"] { display: none !important; }
     .range-text { color: #8892b0; font-size: 12px; }
+    .translated { color: #cbd5e1; font-size: 13px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -50,6 +58,9 @@ st.write("Algoritma kuantitatif + berita terkini. Distribusi Student‑t, volati
 if not SENTIMENT_AVAILABLE:
     st.warning("⚠️ NLTK tidak terpasang → fitur sentimen berita dinonaktifkan. "
                "Install dengan `pip install nltk` untuk mengaktifkan kembali.")
+if not TRANSLATOR_AVAILABLE:
+    st.info("💡 `deep-translator` tidak terpasang → terjemahan tidak aktif. "
+            "Install dengan `pip install deep-translator` untuk terjemahan otomatis.")
 
 # ==========================================
 # 2. PANEL INPUT
@@ -104,16 +115,20 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA (DENGAN EKSTRAKSI DARI 'content')
+                # 4. SENTIMEN BERITA + TERJEMAHAN
                 # ==========================================
                 avg_sentiment = 0.0
                 headlines = []
+                translated_headlines = []   # simpan terjemahan
                 sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
 
                 if SENTIMENT_AVAILABLE:
-                    analyzer = SentimentIntensityAnalyzer()   # ← PERBAIKAN TYPO
+                    analyzer = SentimentIntensityAnalyzer()
                     sentiments = []
                     news_error_msg = None
+
+                    # Inisialisasi translator (jika tersedia)
+                    translator = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
 
                     try:
                         ticker_obj = yf.Ticker(ticker_input)
@@ -131,7 +146,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                                 # --- MASUK KE 'content' JIKA ADA ---
                                 inner = item.get('content') or item
 
-                                # Coba berbagai properti judul di dalam content
+                                # Coba berbagai properti judul
                                 title = (
                                     inner.get('title') or
                                     inner.get('shortTitle') or
@@ -140,7 +155,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                                     inner.get('description') or
                                     ''
                                 )
-                                # Coba berbagai properti ringkasan
+                                # Coba ringkasan
                                 summary = (
                                     inner.get('summary') or
                                     inner.get('longSummary') or
@@ -152,6 +167,16 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                                 vs = analyzer.polarity_scores(text)
                                 sentiments.append(vs['compound'])
                                 headlines.append(title if title else f"(Konten: {text[:80]}...)")
+
+                                # --- TERJEMAHAN ---
+                                if TRANSLATOR_AVAILABLE and title:
+                                    try:
+                                        translated = translator.translate(title)
+                                        translated_headlines.append(translated)
+                                    except:
+                                        translated_headlines.append("(gagal terjemah)")
+                                else:
+                                    translated_headlines.append("")
                             avg_sentiment = np.mean(sentiments) if sentiments else 0.0
                         else:
                             if news_error_msg:
@@ -384,7 +409,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.markdown("**5 Berita Teratas:**")
                     if headlines:
                         for i, h in enumerate(headlines[:5]):
-                            st.markdown(f"{i+1}. {h}")
+                            original = h
+                            terjemahan = translated_headlines[i] if i < len(translated_headlines) else ""
+                            st.markdown(f"{i+1}. **{original}**")
+                            if terjemahan and terjemahan != original:
+                                st.markdown(f"<span class='translated'>🇮🇩 {terjemahan}</span>", unsafe_allow_html=True)
+                            st.markdown("")  # spasi kecil
                     else:
                         st.markdown("*(Tidak ada data berita)*")
                 st.divider()
