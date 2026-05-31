@@ -115,11 +115,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA + TERJEMAHAN
+                # 4. SENTIMEN BERITA + TERJEMAHAN (DIPERBAIKI RELEVANSINYA)
                 # ==========================================
                 avg_sentiment = 0.0
                 headlines = []
-                translated_headlines = []   # simpan terjemahan
+                translated_headlines = []
                 sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
 
                 if SENTIMENT_AVAILABLE:
@@ -127,69 +127,76 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     sentiments = []
                     news_error_msg = None
 
-                    # Inisialisasi translator (jika tersedia)
                     translator = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
 
+                    # --- STRATEGI PENGAMBILAN BERITA RELEVAN ---
+                    news_list = []
                     try:
-                        ticker_obj = yf.Ticker(ticker_input)
-                        news_list = ticker_obj.news
+                        # 1. Cari dengan query spesifik: "kode saham" + "saham"
+                        search_query = f"{ticker_raw} saham"
+                        search_obj = yf.Search(search_query)
+                        news_list = search_obj.news or []
 
+                        # 2. Jika kosong, coba tambahkan "IHSG"
                         if not news_list:
-                            try:
-                                search_obj = yf.Search(ticker_raw)
-                                news_list = search_obj.news
-                            except Exception as search_e:
-                                news_error_msg = f"Search fallback gagal: {search_e}"
+                            search_obj = yf.Search(f"{ticker_raw} IHSG")
+                            news_list = search_obj.news or []
 
-                        if news_list:
-                            for item in news_list[:5]:
-                                # --- MASUK KE 'content' JIKA ADA ---
-                                inner = item.get('content') or item
+                        # 3. Jika masih kosong, coba query ticker saja
+                        if not news_list:
+                            search_obj = yf.Search(ticker_raw)
+                            news_list = search_obj.news or []
 
-                                # Coba berbagai properti judul
-                                title = (
-                                    inner.get('title') or
-                                    inner.get('shortTitle') or
-                                    inner.get('headline') or
-                                    inner.get('summary') or
-                                    inner.get('description') or
-                                    ''
-                                )
-                                # Coba ringkasan
-                                summary = (
-                                    inner.get('summary') or
-                                    inner.get('longSummary') or
-                                    inner.get('description') or
-                                    ''
-                                )
-                                text = f"{title}. {summary}".strip() if (title or summary) else str(inner)[:200]
-
-                                vs = analyzer.polarity_scores(text)
-                                sentiments.append(vs['compound'])
-                                headlines.append(title if title else f"(Konten: {text[:80]}...)")
-
-                                # --- TERJEMAHAN ---
-                                if TRANSLATOR_AVAILABLE and title:
-                                    try:
-                                        translated = translator.translate(title)
-                                        translated_headlines.append(translated)
-                                    except:
-                                        translated_headlines.append("(gagal terjemah)")
-                                else:
-                                    translated_headlines.append("")
-                            avg_sentiment = np.mean(sentiments) if sentiments else 0.0
-                        else:
-                            if news_error_msg:
-                                headlines = [f"Tidak dapat mengambil berita. {news_error_msg}"]
-                            else:
-                                headlines = ["Tidak ada berita tersedia untuk ticker ini."]
+                        # 4. Fallback terakhir: ticker.news (meski sering tidak relevan)
+                        if not news_list:
+                            ticker_obj = yf.Ticker(ticker_input)
+                            news_list = ticker_obj.news or []
                     except Exception as e:
-                        avg_sentiment = 0.0
-                        headlines = [f"Gagal total mengambil berita: {str(e)}"]
+                        news_error_msg = f"Gagal mencari berita: {str(e)}"
+
+                    # --- PROSES BERITA ---
+                    if news_list:
+                        for item in news_list[:5]:
+                            inner = item.get('content') or item
+                            title = (
+                                inner.get('title') or
+                                inner.get('shortTitle') or
+                                inner.get('headline') or
+                                inner.get('summary') or
+                                inner.get('description') or
+                                ''
+                            )
+                            summary = (
+                                inner.get('summary') or
+                                inner.get('longSummary') or
+                                inner.get('description') or
+                                ''
+                            )
+                            text = f"{title}. {summary}".strip() if (title or summary) else str(inner)[:200]
+
+                            vs = analyzer.polarity_scores(text)
+                            sentiments.append(vs['compound'])
+                            headlines.append(title if title else f"(Konten: {text[:80]}...)")
+
+                            # Terjemahan
+                            if TRANSLATOR_AVAILABLE and title:
+                                try:
+                                    translated = translator.translate(title)
+                                    translated_headlines.append(translated)
+                                except:
+                                    translated_headlines.append("(gagal terjemah)")
+                            else:
+                                translated_headlines.append("")
+                        avg_sentiment = np.mean(sentiments) if sentiments else 0.0
+                    else:
+                        if news_error_msg:
+                            headlines = [f"Error: {news_error_msg}"]
+                        else:
+                            headlines = ["Tidak ada berita spesifik untuk saham ini."]
                 else:
                     headlines = ["Fitur sentimen tidak aktif (NLTK tidak terpasang)"]
 
-                # Kategori sentimen (hanya jika tersedia)
+                # Kategori sentimen
                 if SENTIMENT_AVAILABLE:
                     if avg_sentiment >= 0.05:
                         sentimen_status = "Positif 🟢"
@@ -327,7 +334,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean():
                     score += 1
 
-                # *** INTEGRASI SENTIMEN HANYA JIKA TERSEDIA ***
                 if SENTIMENT_AVAILABLE and avg_sentiment > 0.2:
                     score += 1
                 elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2:
@@ -375,7 +381,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 sim_innov = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=(n_days, n_sim))
                 price_paths = harga_terakhir * np.exp(np.cumsum(sim_innov, axis=0))
 
-                # --- ESTIMASI CLOSE BESOK (log‑Ornstein‑Uhlenbeck) ---
                 log_harga = np.log(df['Close'])
                 log_lt_mean = log_harga.tail(20).mean()
                 log_terakhir = np.log(harga_terakhir)
@@ -383,7 +388,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 mu_ou_log = theta * (log_lt_mean - log_terakhir) + t_loc
                 estimasi_close_besok = float(np.exp(log_terakhir + mu_ou_log))
 
-                # --- INTERVAL KEPERCAYAAN (PERSENTIL 25% – 75%) ---
                 sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=2000)
                 sim_prices_besok = harga_terakhir * np.exp(sim_h1)
                 lower_est = float(np.percentile(sim_prices_besok, 25))
@@ -414,7 +418,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                             st.markdown(f"{i+1}. **{original}**")
                             if terjemahan and terjemahan != original:
                                 st.markdown(f"<span class='translated'>🇮🇩 {terjemahan}</span>", unsafe_allow_html=True)
-                            st.markdown("")  # spasi kecil
+                            st.markdown("")
                     else:
                         st.markdown("*(Tidak ada data berita)*")
                 st.divider()
