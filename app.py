@@ -104,32 +104,49 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.stop()
 
                 # ==========================================
-                # 4. SENTIMEN BERITA (YAHOO FINANCE) – DENGAN FALLBACK
+                # 4. SENTIMEN BERITA (DIPERBAIKI DENGAN FALLBACK & LOG ERROR)
                 # ==========================================
                 avg_sentiment = 0.0
                 headlines = []
                 sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
 
                 if SENTIMENT_AVAILABLE:
+                    analyzer = SentimentIntensityAnalyzer()
+                    sentiments = []
+                    news_error_msg = None
+
                     try:
+                        # --- Metode 1: Yahoo Finance Ticker news ---
                         ticker_obj = yf.Ticker(ticker_input)
                         news_list = ticker_obj.news
-                        analyzer = SentimentIntensityAnalyzer()
-                        sentiments = []
+
+                        # Jika news kosong, coba fallback ke yf.Search
+                        if not news_list:
+                            try:
+                                search_obj = yf.Search(ticker_raw)   # tanpa .JK
+                                news_list = search_obj.news
+                            except Exception as search_e:
+                                news_error_msg = f"Search fallback gagal: {search_e}"
+
                         if news_list:
                             for item in news_list[:5]:
-                                title = item.get('title', '')
-                                summary = item.get('summary', '') if 'summary' in item else ''
+                                # Ambil title – kadang 'title', kadang 'shortTitle'
+                                title = item.get('title', '') or item.get('shortTitle', '')
+                                # Ambil summary
+                                summary = item.get('summary', '') or item.get('longSummary', '')
                                 text = f"{title}. {summary}"
                                 vs = analyzer.polarity_scores(text)
                                 sentiments.append(vs['compound'])
-                                headlines.append(title)
+                                headlines.append(title if title else '(tanpa judul)')
                             avg_sentiment = np.mean(sentiments) if sentiments else 0.0
                         else:
-                            headlines = ["Tidak ada berita tersedia"]
+                            if news_error_msg:
+                                headlines = [f"Tidak dapat mengambil berita. {news_error_msg}"]
+                            else:
+                                headlines = ["Tidak ada berita tersedia untuk ticker ini."]
                     except Exception as e:
                         avg_sentiment = 0.0
-                        headlines = [f"Gagal mengambil berita: {str(e)}"]
+                        headlines = [f"Gagal total mengambil berita: {str(e)}"]
                 else:
                     headlines = ["Fitur sentimen tidak aktif (NLTK tidak terpasang)"]
 
@@ -321,10 +338,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
 
                 # --- ESTIMASI CLOSE BESOK (log‑Ornstein‑Uhlenbeck) ---
                 log_harga = np.log(df['Close'])
-                log_lt_mean = log_harga.tail(20).mean()          # rata‑rata log harga 20 hari
+                log_lt_mean = log_harga.tail(20).mean()
                 log_terakhir = np.log(harga_terakhir)
-                theta = 1/20                                     # kecepatan mean‑reversion
-                # Drift gabungan: mean‑reversion + ekspektasi harian Student‑t
+                theta = 1/20
                 mu_ou_log = theta * (log_lt_mean - log_terakhir) + t_loc
                 estimasi_close_besok = float(np.exp(log_terakhir + mu_ou_log))
 
@@ -333,7 +349,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 sim_prices_besok = harga_terakhir * np.exp(sim_h1)
                 lower_est = float(np.percentile(sim_prices_besok, 25))
                 upper_est = float(np.percentile(sim_prices_besok, 75))
-                # -------------------------------------------------
 
                 tp = r1
                 sl = s1
@@ -355,6 +370,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                     st.markdown("**5 Berita Teratas:**")
                     for i, h in enumerate(headlines[:5]):
                         st.markdown(f"{i+1}. {h}")
+                    if not headlines:
+                        st.markdown("*(Tidak ada data berita)*")
                 st.divider()
 
                 # --- SECTION 1: REGIME & VOLATILITY ---
