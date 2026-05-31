@@ -52,7 +52,6 @@ st.markdown("""
     div[data-testid="InputInstructions"] { display: none !important; }
     .translated { color: #cbd5e1; font-size: 13px; }
     .source { color: #6b7280; font-size: 11px; }
-    .caption-text { color: #9ca3af; font-size: 14px; margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -146,6 +145,7 @@ def analyze_sentiment_weighted(news_items, translator):
     return w_sum / total_w if total_w > 0 else 0.0
 
 def backtest_signal(df, signal_func, periods=126):
+    """Backtest dengan slicing integer."""
     df_back = df.iloc[-periods:].copy()
     signals = []
     for i in range(20, len(df_back)):
@@ -250,7 +250,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 std20 = float(df['Close'].tail(20).std())
                 z_score = (harga_terakhir-ma20)/std20 if std20>0 else 0.0
 
-                # REGIME 10‑STATE
+                # ==========================================
+                # REGIME 10‑STATE (AKURASI TINGGI)
+                # ==========================================
                 ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
                 ema50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
                 adx = compute_adx(df)
@@ -261,10 +263,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 z_up = np.percentile(z_hist.dropna(), 80)
                 z_down = np.percentile(z_hist.dropna(), 20)
                 vol_hist = returns.rolling(20).std().dropna()*np.sqrt(252)*100
-                high_vol_th = np.percentile(vol_hist, 70)
+                high_vol_th = np.percentile(vol_hist, 70)  # threshold volatilitas tinggi
                 low_vol_th = np.percentile(vol_hist, 30)
 
-                if adx > 20:
+                # Logika 10 state
+                if adx > 20:  # Sedang trending
                     if harga_terakhir > ema20 and ema20 > ema50:
                         if mom_5d > bull_th or z_score > z_up:
                             regime = "Strong Bullish 🚀"
@@ -277,16 +280,16 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         else:
                             regime = "Bearish 🔻"
                         ihsg_cond = "RISK-OFF 🛑"
-                    elif harga_terakhir > ema20 and ema20 < ema50:
+                    elif harga_terakhir > ema20 and ema20 < ema50:  # Golden cross reversal
                         regime = "Early Recovery 🔄"
                         ihsg_cond = "TRANSISI ⚠️"
-                    elif harga_terakhir < ema20 and ema20 > ema50:
+                    elif harga_terakhir < ema20 and ema20 > ema50:  # Death cross
                         regime = "Distribution 📉"
                         ihsg_cond = "TRANSISI ⚠️"
                     else:
                         regime = "Konsolidasi Tren ↔️"
                         ihsg_cond = "NEUTRAL ⚖️"
-                else:
+                else:  # ADX <= 20, pasar sideways
                     if harga_terakhir > ema20 and ema20 > ema50:
                         regime = "Bullish Accumulation 🏗️"
                         ihsg_cond = "NEUTRAL ⚖️"
@@ -300,6 +303,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         regime = "Sideways Bias Turun ↘️"
                         ihsg_cond = "NEUTRAL ⚖️"
                     else:
+                        # Cek volatilitas untuk bedakan calm vs choppy
                         if ewma_vol > high_vol_th:
                             regime = "Sideways Choppy 🌊"
                         elif ewma_vol < low_vol_th:
@@ -308,7 +312,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                             regime = "Sideways Normal ↔️"
                         ihsg_cond = "NEUTRAL ⚖️"
 
+                # ==========================================
                 # PIVOT
+                # ==========================================
                 hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
                 pp = (hi+lo+harga_terakhir)/3
                 r1, s1 = 2*pp-lo, 2*pp-hi
@@ -326,7 +332,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 elif SENTIMENT_AVAILABLE and avg_sentiment<-0.2: score-=1
                 signal = "🔥 STRONG BUY" if score>=3 else ("⚡ BUY (TACTICAL)" if score>=2 else ("⏸️ HOLD / WAIT" if score==1 else "🚨 AVOID"))
 
-                # BACKTEST
+                # BACKTEST (FUNGSI SIGNAL SEDERHANA)
                 def sig_func(sl):
                     h = float(sl['Close'].iloc[-1])
                     m3 = float((sl['Close'].iloc[-1]/sl['Close'].iloc[-4]-1)*100)
@@ -379,13 +385,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 prob_bull = ((sim_h1>0).sum()/2000)*100
 
                 # ==========================================
-                # TAMPILAN DASHBOARD DENGAN KETERANGAN
+                # TAMPILAN DASHBOARD
                 # ==========================================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
-
-                # --- BERITA ---
-                st.header("📰 Sentimen Berita (Weighted)")
-                st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot (berita terbaru lebih berpengaruh).")
+                st.header("📰 Sentimen Berita ")
                 c1,c2=st.columns([1,2])
                 c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
                 with c2:
@@ -397,39 +400,27 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
                         st.markdown("")
                 st.divider()
-
-                # --- REGIME ---
-                st.header("🧬 Regime & Volatility (10‑State)")
-                st.caption("Klasifikasi regime menggunakan ADX, EMA, momentum, dan volatilitas. ADX > 20 = trending, ≤ 20 = sideways. 10 kondisi pasar memberikan gambaran lebih detail.")
+                st.header("🧬 Regime & Volatility ")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
                 st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f}) | Skew: `{ret_skew:.2f}`")
                 st.divider()
-
-                # --- MOMENTUM ---
                 st.header("📊 Momentum & Z‑Score")
-                st.caption("Momentum mengukur kekuatan pergerakan harga 3/5/10 hari. Z‑Score menunjukkan deviasi harga dari rata‑rata 20 hari (overbought jika >2, oversold jika <-2).")
                 mo1,mo2,mo3,mo4=st.columns(4)
                 mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
                 st.divider()
-
-                # --- PIVOT ---
                 st.header("🎯 Pivot & S/R")
-                st.caption("Pivot point dari high/low/close kemarin. R1/S1 sebagai target/resistensi terdekat. Breakout Res20 menandakan harga menembus resistensi tertinggi 20 hari.")
                 st.write(f"Breakout Res20: `{breakout}`")
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
-
-                # --- SIGNAL & BACKTEST ---
-                st.header("🔮 Signal & Backtest 6 Bulan")
-                st.caption("Signal berdasarkan skor momentum, Z‑score, posisi EMA20, volume, dan sentimen berita. Backtest 6 bulan menggunakan sinyal serupa untuk mengukur performa historis (tanpa memperhitungkan slippage/biaya).")
+                st.header("🔮 Signal & Trading Plan With Backtest ")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
                 t3.metric("Entry", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",","."))
                 t4.metric("Target", f"Rp {r1:,.0f}".replace(",","."))
-                st.caption("💡 Interval 25%-75% adalah rentang harga besok yang paling mungkin (probabilitas 50%).")
+                st.caption("💡 Interval 25%-75% = rentang paling mungkin (50% probabilitas)")
                 st.markdown("**📈 Backtest 6 Bulan:**")
                 b1,b2,b3,b4=st.columns(4)
                 b1.metric("Win Rate", f"{win_bt:.1%}" if trades_bt else "N/A")
@@ -437,10 +428,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 b3.metric("Avg Return", f"{avg_bt:.2%}" if trades_bt else "N/A")
                 b4.metric("Trades", f"{trades_bt}")
                 st.divider()
-
-                # --- RISK ---
                 st.header("🛡️ Risk & Portfolio Sizing")
-                st.caption("Metrik risiko mencakup Maximum Drawdown, Sharpe, Sortino, Calmar, VaR, dan CVaR. Alokasi modal menggunakan Kelly Criterion yang disesuaikan dengan skewness dan dibatasi maksimum 25%.")
                 r1,r2,r3=st.columns(3)
                 r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
                 r2.metric("Rekom. Modal", f"Rp {alloc:,.0f}".replace(",","."))
@@ -448,10 +436,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30:.2f}%`) | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
                 st.markdown(f"VaR 95% (t): `{var_95_t:.2f}%` | CVaR 95% (t): `{cvar_95_t:.2f}%` | MC ES 95%: `{es_95_pct:.2f}%`")
                 st.divider()
-
-                # --- PROBABILITY ---
                 st.header("🎲 Monte Carlo (Student‑t 2000)")
-                st.caption("Simulasi 2000 jalur harga 30 hari ke depan dengan distribusi Student‑t. Menampilkan probabilitas bullish besok, peluang mencapai TP/SL dalam 30 hari, dan Expected Shortfall 95%.")
                 pr1,pr2,pr3=st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
 
