@@ -40,6 +40,7 @@ st.markdown("""
     .stButton>button:hover { background-color: #374151; border-color: #00ffcc; }
     h1, h2, h3 { color: #f3f4f6; }
     div[data-testid="InputInstructions"] { display: none !important; }
+    .range-text { color: #8892b0; font-size: 12px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -326,6 +327,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 # Drift gabungan: mean‑reversion + ekspektasi harian Student‑t
                 mu_ou_log = theta * (log_lt_mean - log_terakhir) + t_loc
                 estimasi_close_besok = float(np.exp(log_terakhir + mu_ou_log))
+
+                # --- INTERVAL KEPERCAYAAN (PERSENTIL 25% – 75%) ---
+                sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=2000)
+                sim_prices_besok = harga_terakhir * np.exp(sim_h1)
+                lower_est = float(np.percentile(sim_prices_besok, 25))
+                upper_est = float(np.percentile(sim_prices_besok, 75))
                 # -------------------------------------------------
 
                 tp = r1
@@ -383,9 +390,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 st.header("🔮 Signal & Estimasi Harga")
                 tp1, tp2, tp3, tp4 = st.columns(4)
                 tp1.metric("Signal V2 (dgn Sentimen)", signal)
-                tp2.metric("Est. Close Besok (OU)", f"Rp {estimasi_close_besok:,.0f}".replace(",", "."))
+                tp2.metric(
+                    label="Est. Close Besok (OU)",
+                    value=f"Rp {estimasi_close_besok:,.0f}".replace(",", "."),
+                    delta=f"25-75%: {lower_est:,.0f} – {upper_est:,.0f}".replace(",", ".")
+                )
                 tp3.metric("Area Entry (S1-PP)", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
                 tp4.metric("Target Profit (R1)", f"Rp {r1:,.0f}".replace(",", "."))
+                st.caption("💡 Interval 25%–75% adalah rentang harga besok yang paling mungkin terjadi (50% probabilitas)")
                 st.divider()
 
                 # --- SECTION 5: RISK ENGINE & PORTFOLIO SIZING ---
