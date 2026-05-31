@@ -111,7 +111,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                 sentimen_status = "Netral ⚪ (nonaktif)" if not SENTIMENT_AVAILABLE else "Netral ⚪"
 
                 if SENTIMENT_AVAILABLE:
-                    analyzer = SentimentIntelligenceAnalyzer()
+                    analyzer = SentimentIntensityAnalyzer()   # ← PERBAIKAN TYPO
                     sentiments = []
                     news_error_msg = None
 
@@ -129,7 +129,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BERITA"):
                         if news_list:
                             for item in news_list[:5]:
                                 # --- MASUK KE 'content' JIKA ADA ---
-                                inner = item.get('content') or item  # fallback ke item langsung
+                                inner = item.get('content') or item
 
                                 # Coba berbagai properti judul di dalam content
                                 title = (
