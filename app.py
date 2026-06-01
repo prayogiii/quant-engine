@@ -269,6 +269,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 parkinson_vol = float(np.sqrt(log_hl.mean()/(4*np.log(2))) * np.sqrt(252)*100)
                 ewma_vol = float(np.sqrt(returns.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
 
+                # BETA IHSG
+                try:
+                    ihsg = yf.download("^JKSE", period="1y")
+                    if isinstance(ihsg.columns, pd.MultiIndex): ihsg.columns = ihsg.columns.get_level_values(0)
+                    ihsg_ret = ihsg['Close'].pct_change().dropna()
+                    common = returns.index.intersection(ihsg_ret.index)
+                    if len(common)>20:
+                        cov = np.cov(returns.loc[common], ihsg_ret.loc[common])
+                        beta_ihsg = cov[0,1]/cov[1,1] if cov[1,1]>0 else 1.0
+                    else: beta_ihsg=1.0
+                except: beta_ihsg=1.0
+
                 # ==================== THRESHOLD & PARAMETER DARI 6 BULAN PERTAMA ====================
                 split_idx = max(126, len(df) - 126)
                 df_thresh = df.iloc[:split_idx]
@@ -335,11 +347,15 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 res20 = float(df['High'].iloc[-21:-1].max())
                 breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-                # SIGNAL LIVE
-                score = 0
+                # MOMENTUM LENGKAP (3D, 5D, 10D)
                 mom_3d = float((df['Close'].iloc[-1]/df['Close'].iloc[-4]-1)*100)
+                mom_5d = float((df['Close'].iloc[-1]/df['Close'].iloc[-6]-1)*100)
+                mom_10d = float((df['Close'].iloc[-1]/df['Close'].iloc[-11]-1)*100)
                 z_score = (harga_terakhir - df['Close'].tail(20).mean()) / df['Close'].tail(20).std() if df['Close'].tail(20).std()>0 else 0
                 ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+
+                # SIGNAL LIVE
+                score = 0
                 if mom_3d > mom_median_th: score += 1
                 if z_score < z_oversold_th: score += 1
                 if harga_terakhir > ema20: score += 1
@@ -514,18 +530,20 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     st.markdown("Data fundamental tidak tersedia untuk saham ini.")
                 st.divider()
 
-                # MOMENTUM, PIVOT, SIGNAL, BACKTEST, RISK, MONTE CARLO
+                # MOMENTUM
                 st.header("📊 Momentum & Z‑Score")
                 mo1,mo2,mo3,mo4=st.columns(4)
                 mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
                 st.divider()
 
+                # PIVOT
                 st.header("🎯 Pivot & S/R")
                 st.write(f"Breakout Res20: `{breakout}`")
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
 
+                # SIGNAL & BACKTEST
                 st.header("🔮 Signal & Trading Plan With Backtest ")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
@@ -543,6 +561,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 b6.metric("Trades", f"{trades_bt}")
                 st.divider()
 
+                # RISK
                 st.header("🛡️ Risk & Portfolio Sizing")
                 r1,r2,r3=st.columns(3)
                 r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
@@ -551,6 +570,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30:.2f}%`) | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
                 st.divider()
 
+                # MONTE CARLO
                 st.header("🎲 Monte Carlo (OU, Student‑t, vol adaptif)")
                 pr1,pr2,pr3=st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
