@@ -83,7 +83,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro ")
+st.title("📊 Quant & Risk Engine Pro l ")
 st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. **Quant Score 100** sebagai otak utama pengambilan keputusan.")
 
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
@@ -534,14 +534,24 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 elif prob_bull > 50:
                     quant_score += 5
 
-                # 7. FUNDAMENTAL (15)
+                # 7. FUNDAMENTAL (15) - DENGAN FALLBACK
                 fund_score = 0
-                if per is not None and per < 15:
-                    fund_score += 5
-                if pbv is not None and pbv < 2:
-                    fund_score += 5
-                if roe is not None and roe > 0.15:
-                    fund_score += 5
+                fund_data_available = False
+
+                if per is not None:
+                    fund_data_available = True
+                    if per < 15: fund_score += 5
+                if pbv is not None:
+                    fund_data_available = True
+                    if pbv < 2: fund_score += 5
+                if roe is not None:
+                    fund_data_available = True
+                    if roe > 0.15: fund_score += 5
+
+                if not fund_data_available:
+                    fund_score = 7.5  # Skor netral jika data tidak tersedia
+                    st.info("ℹ️ Data fundamental tidak tersedia, skor fundamental diestimasi netral (7.5/15).")
+
                 quant_score += fund_score
 
                 # GRADE
@@ -598,7 +608,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
 
                 # --- FUNDAMENTAL (DETAIL) ---
                 st.header("📊 Analisis Fundamental")
-                st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia). Klasifikasi berdasarkan PER & PBV sebagai acuan sederhana.")
+                st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia).")
                 if ticker_info:
                     market_cap = ticker_info.get('marketCap')
                     eps = ticker_info.get('trailingEps')
@@ -606,40 +616,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     dividend_yield = ticker_info.get('dividendYield')
                     table_html = "<table class='fundamental-table'>"
                     table_html += f"<tr><td>Market Cap</td><td>{market_cap:,.0f} IDR</td></tr>" if market_cap else ""
-                    table_html += f"<tr><td>PER</td><td>{per:.2f}x</td></tr>" if per else ""
-                    table_html += f"<tr><td>PBV</td><td>{pbv:.2f}x</td></tr>" if pbv else ""
-                    table_html += f"<tr><td>EPS</td><td>{eps:.2f}</td></tr>" if eps else ""
-                    table_html += f"<tr><td>ROE</td><td>{roe*100:.1f}%</td></tr>" if roe else ""
-                    table_html += f"<tr><td>Debt/Equity</td><td>{debt_equity:.2f}%</td></tr>" if debt_equity else ""
-                    table_html += f"<tr><td>Div Yield</td><td>{dividend_yield*100:.2f}%</td></tr>" if dividend_yield else ""
+                    table_html += f"<tr><td>PER</td><td>{per:.2f}x</td></tr>" if per else "<tr><td>PER</td><td>N/A</td></tr>"
+                    table_html += f"<tr><td>PBV</td><td>{pbv:.2f}x</td></tr>" if pbv else "<tr><td>PBV</td><td>N/A</td></tr>"
+                    table_html += f"<tr><td>EPS</td><td>{eps:.2f}</td></tr>" if eps else "<tr><td>EPS</td><td>N/A</td></tr>"
+                    table_html += f"<tr><td>ROE</td><td>{roe*100:.1f}%</td></tr>" if roe else "<tr><td>ROE</td><td>N/A</td></tr>"
+                    table_html += f"<tr><td>Debt/Equity</td><td>{debt_equity:.2f}%</td></tr>" if debt_equity else "<tr><td>Debt/Equity</td><td>N/A</td></tr>"
+                    table_html += f"<tr><td>Div Yield</td><td>{dividend_yield*100:.2f}%</td></tr>" if dividend_yield else "<tr><td>Div Yield</td><td>N/A</td></tr>"
                     table_html += "</table>"
                     st.markdown(table_html, unsafe_allow_html=True)
-                    interpretation = []
-                    if per:
-                        if per < 10: per_status, per_color = "Rendah (undervalued)", "#10b981"
-                        elif per > 25: per_status, per_color = "Tinggi (overvalued)", "#ef4444"
-                        else: per_status, per_color = "Moderat", "#f59e0b"
-                        interpretation.append(f"PER {per:.1f}x <span style='color:{per_color}; font-weight:bold;'>{per_status}</span>.")
-                    if pbv:
-                        if pbv < 1: pbv_status, pbv_color = "di bawah 1 (undervalued)", "#10b981"
-                        elif pbv > 3: pbv_status, pbv_color = "di atas 3 (overvalued)", "#ef4444"
-                        else: pbv_status, pbv_color = "normal", "#f59e0b"
-                        interpretation.append(f"PBV {pbv:.1f}x <span style='color:{pbv_color}; font-weight:bold;'>{pbv_status}</span>.")
-                    if roe:
-                        if roe > 0.15: roe_status, roe_color = "baik (>15%)", "#10b981"
-                        elif roe < 0.05: roe_status, roe_color = "rendah", "#ef4444"
-                        else: roe_status, roe_color = "cukup", "#f59e0b"
-                        interpretation.append(f"ROE {roe*100:.1f}% <span style='color:{roe_color}; font-weight:bold;'>{roe_status}</span>.")
-                    if debt_equity:
-                        if debt_equity > 100: de_status, de_color = "tinggi", "#ef4444"
-                        else: de_status, de_color = "aman", "#10b981"
-                        interpretation.append(f"D/E {debt_equity:.1f}% <span style='color:{de_color}; font-weight:bold;'>{de_status}</span>.")
-                    if interpretation:
-                        st.markdown("**Interpretasi:** " + " ".join(interpretation), unsafe_allow_html=True)
-                    else:
-                        st.markdown("Data fundamental tidak mencukupi untuk interpretasi.")
+                    if not fund_data_available:
+                        st.info("ℹ️ Data fundamental tidak lengkap. Skor fundamental dihitung netral (7.5/15).")
                 else:
-                    st.markdown("Data fundamental tidak tersedia untuk saham ini.")
+                    st.info("ℹ️ Data fundamental tidak tersedia. Skor fundamental dihitung netral (7.5/15).")
                 st.divider()
 
                 # --- MOMENTUM ---
