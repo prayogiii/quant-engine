@@ -73,11 +73,18 @@ st.markdown("""
     .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
+    .quant-highlight {
+        background: linear-gradient(135deg, #00ffcc22, #00ffcc08);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        border: 1px solid #00ffcc44;
+    }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📊 Quant & Risk Engine Pro (Final + Quant Score 100)")
-st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental + **Quant Score 100** sebagai otak utama.")
+st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. **Quant Score 100** sebagai otak utama pengambilan keputusan.")
 
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
 if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
@@ -562,21 +569,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 # ==================== TAMPILAN ====================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
 
-                # --- QUANT SCORE DASHBOARD (DITAMPILKAN UTAMA) ---
-                st.header("🏆 Quant Score 100")
-                q1, q2 = st.columns(2)
-                q1.metric("Quant Score", f"{quant_score}/100")
-                q2.metric("Grade", grade)
-                st.caption("""
-                Interpretasi:
-                85+ = Sangat menarik
-                75–84 = Layak dipertimbangkan
-                65–74 = Cukup baik
-                50–64 = Spekulatif
-                <50 = Hindari
-                """)
-                st.divider()
-
                 # --- BERITA ---
                 st.header("📰 Sentimen Berita")
                 st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot.")
@@ -705,7 +697,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
                     st.plotly_chart(fig, use_container_width=True)
 
-                # --- KESIMPULAN ---
+                # --- KESIMPULAN & REKOMENDASI (DENGAN QUANT SCORE) ---
                 st.markdown("---")
                 st.header("📋 Kesimpulan & Rekomendasi Trading")
                 if "STRONG BUY" in signal:
@@ -716,11 +708,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     action_color, action_icon, action_text = "#3b82f6", "🔵", "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
                 else:
                     action_color, action_icon, action_text = "#ef4444", "🔴", "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
+                
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     st.markdown(f"""
                     <div class="summary-card">
                         <div class="section-title">📌 Ringkasan Kondisi</div>
+                        <div class="quant-highlight">
+                            <div style="font-size: 20px; font-weight: bold; color: #00ffcc;">🏆 Quant Score: {quant_score}/100 <span style="font-size: 18px;">({grade})</span></div>
+                            <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">
+                                85+ = Sangat menarik | 75-84 = Layak | 65-74 = Cukup baik | 50-64 = Spekulatif | <50 = Hindari
+                            </div>
+                        </div>
                         <div class="summary-item">🏷️ <b>Regime:</b> {regime}</div>
                         <div class="summary-item">🌐 <b>IHSG Condition:</b> {ihsg_cond}</div>
                         <div class="summary-item">📊 <b>ADX:</b> {adx:.1f}</div>
