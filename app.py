@@ -7,8 +7,9 @@ from scipy.optimize import minimize
 import warnings
 import urllib.parse
 import re
+import plotly.graph_objects as go
 
-# ====================== FALLBACK SENTIMEN ======================
+# ====================== FALLBACK ======================
 SENTIMENT_AVAILABLE = True
 try:
     import nltk
@@ -20,14 +21,12 @@ try:
 except ImportError:
     SENTIMENT_AVAILABLE = False
 
-# ====================== FALLBACK RSS ======================
 RSS_AVAILABLE = True
 try:
     import feedparser
 except ImportError:
     RSS_AVAILABLE = False
 
-# ====================== FALLBACK TRANSLATOR ======================
 TRANSLATOR_AVAILABLE = True
 try:
     from deep_translator import GoogleTranslator
@@ -52,7 +51,6 @@ st.markdown("""
     div[data-testid="InputInstructions"] { display: none !important; }
     .translated { color: #cbd5e1; font-size: 13px; }
     .source { color: #6b7280; font-size: 11px; }
-    .info-text { color: #94a3b8; font-size: 14px; margin-top: 5px; line-height: 1.5; }
     .summary-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
         border-radius: 16px; padding: 20px; margin: 10px 0; border: 1px solid #334155;
@@ -63,12 +61,12 @@ st.markdown("""
     }
     .section-title { color: #00ffcc; font-size: 18px; font-weight: bold; margin-bottom: 12px; }
     .summary-item { color: #cbd5e1; font-size: 15px; margin-bottom: 8px; }
-    .highlight { color: #fbbf24; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro (Akurasi Tinggi)")
-st.write("Algoritma kuantitatif + berita multi‑sumber + Backtest. Distribusi Student‑t, ADX filter, Monte Carlo, Regime 10-State.")
+st.title("📊 Quant & Risk Engine Pro (Akurasi Final)")
+st.write("Algoritma kuantitatif + berita + Backtest + Grafik. Distribusi Student‑t, ADX adaptif, Monte Carlo OU, Regime 10-State.")
+
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
 if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
 if not TRANSLATOR_AVAILABLE: st.info("💡 deep-translator tidak terpasang")
@@ -97,6 +95,17 @@ def compute_adx(df, period=14):
     minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     return dx.ewm(alpha=1/period, adjust=False).mean().iloc[-1]
+
+def compute_adx_series(df, period=14):
+    high, low, close = df['High'], df['Low'], df['Close']
+    plus_dm = high.diff().clip(lower=0)
+    minus_dm = (-low.diff()).clip(lower=0)
+    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    return dx.ewm(alpha=1/period, adjust=False).mean()
 
 def get_google_news_rss(query_str, num=5):
     if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
@@ -156,46 +165,19 @@ def analyze_sentiment_weighted(news_items, translator):
         total_w += weight
     return w_sum / total_w if total_w > 0 else 0.0
 
-def backtest_signal(df, signal_func, periods=126):
-    """Backtest tanpa look-ahead: threshold dihitung di luar, di sini hanya menjalankan sinyal."""
-    df_back = df.iloc[-periods:].copy()
-    signals = []
-    for i in range(20, len(df_back)):
-        slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]
-        try:
-            sig = signal_func(slice_df)
-            signals.append((df_back.index[i], sig))
-        except:
-            continue
-    trades = []
-    for i in range(len(signals)-1):
-        date, sig = signals[i]
-        next_date = signals[i+1][0]
-        if "BUY" in sig:
-            entry = df.loc[date, 'Close']
-            exit_ = df.loc[next_date, 'Close']
-            trades.append((exit_ - entry) / entry)
-    if trades:
-        win_rate = sum(1 for r in trades if r > 0) / len(trades)
-        profit_factor = abs(sum(r for r in trades if r > 0) / sum(r for r in trades if r < 0)) if sum(r for r in trades if r < 0) != 0 else np.inf
-        avg_return = np.mean(trades)
-        return win_rate, profit_factor, avg_return, len(trades)
-    return 0, 0, 0, 0
-
-# ==================== ESTIMASI HALF-LIFE OU ====================
 def estimate_theta_ou(close_series):
-    """Regresi log-return terhadap log-harga untuk mendapatkan mean-reversion speed."""
     log_price = np.log(close_series.dropna())
     log_lag = log_price.shift(1).dropna()
     diff = log_price.diff().dropna()
     common_idx = diff.index.intersection(log_lag.index)
+    if len(common_idx) < 20: return 0.05
     y = diff.loc[common_idx].values
     X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
     coeff = np.linalg.lstsq(X, y, rcond=None)[0]
     theta = -coeff[1] if coeff[1] < 0 else 0.05
     return theta
 
-# ==================== KAMUS PENJELASAN ====================
+# ==================== KAMUS ====================
 REGIME_INFO = {
     "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Ideal untuk swing buy agresif, waspadai overbought.",
     "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
@@ -212,7 +194,6 @@ REGIME_INFO = {
     "Sideways Calm 😴": "Sideways sepi, menjelang breakout.",
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
-
 IHSG_CONDITION_INFO = {
     "RISK-ON 🔥": "Sentimen pasar positif, cocok untuk beli saham agresif.",
     "RISK-OFF 🛑": "Sentimen pasar negatif, tahan diri atau pindah ke defensif.",
@@ -235,7 +216,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 returns = df['Close'].pct_change().dropna()
                 if len(returns) < 20: st.error("❌ Data historis kurang (minimal 20 hari)."); st.stop()
 
-                # BERITA MULTI‑SUMBER
+                # BERITA
                 news_pool = []
                 translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
                 translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
@@ -269,116 +250,85 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 parkinson_vol = float(np.sqrt(log_hl.mean()/(4*np.log(2))) * np.sqrt(252)*100)
                 ewma_vol = float(np.sqrt(returns.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
 
-                # DISTRIBUSI T
-                def t_loglike(p, d):
-                    if p[0]<=2 or p[2]<=0: return np.inf
-                    return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
-                res = minimize(t_loglike, [5, returns.mean(), returns.std()], bounds=[(2.1,100),(-0.1,0.1),(1e-6,None)], args=(returns,), method='L-BFGS-B')
-                df_est, t_loc, t_scale = res.x if res.success else (5, returns.mean(), returns.std())
-                var_95_t = float(student_t.ppf(0.05, df_est, t_loc, t_scale)*100)
-                cvar_95_t = float(t_loc + t_scale * (student_t.pdf(student_t.ppf(0.05, df_est), df_est)/0.05) * (df_est+student_t.ppf(0.05, df_est)**2)/(df_est-1))*100
-                ret_skew = float(skew(returns))
-                ret_kurt = float(kurtosis(returns, fisher=True))
+                # ==================== THRESHOLD & PARAMETER DARI 6 BULAN PERTAMA ====================
+                split_idx = max(126, len(df) - 126)
+                df_thresh = df.iloc[:split_idx]
+                returns_thresh = df_thresh['Close'].pct_change().dropna()
 
-                # BETA IHSG
-                try:
-                    ihsg = yf.download("^JKSE", period="1y")
-                    if isinstance(ihsg.columns, pd.MultiIndex): ihsg.columns = ihsg.columns.get_level_values(0)
-                    ihsg_ret = ihsg['Close'].pct_change().dropna()
-                    common = returns.index.intersection(ihsg_ret.index)
-                    if len(common)>20:
-                        cov = np.cov(returns.loc[common], ihsg_ret.loc[common])
-                        beta_ihsg = cov[0,1]/cov[1,1] if cov[1,1]>0 else 1.0
-                    else: beta_ihsg=1.0
-                except: beta_ihsg=1.0
+                # ADX threshold
+                adx_series = compute_adx_series(df_thresh)
+                adx_threshold = np.percentile(adx_series.dropna(), 75) if len(adx_series.dropna()) > 0 else 20
 
-                # MOMENTUM & Z-SCORE
-                mom_3d = float((df['Close'].iloc[-1]/df['Close'].iloc[-4]-1)*100)
-                mom_5d = float((df['Close'].iloc[-1]/df['Close'].iloc[-6]-1)*100)
-                mom_10d = float((df['Close'].iloc[-1]/df['Close'].iloc[-11]-1)*100)
-                ma20 = float(df['Close'].tail(20).mean())
-                std20 = float(df['Close'].tail(20).std())
-                z_score = (harga_terakhir-ma20)/std20 if std20>0 else 0.0
+                # Z-score & momentum threshold
+                z_hist_th = (df_thresh['Close'] - df_thresh['Close'].rolling(20).mean()) / df_thresh['Close'].rolling(20).std()
+                z_oversold_th = np.percentile(z_hist_th.dropna(), 30)
+                mom5_hist_th = df_thresh['Close'].pct_change(5).dropna()*100
+                mom_median_th = np.percentile(mom5_hist_th, 50)
 
-                # REGIME 10‑STATE (dengan threshold dari data 6 bulan pertama untuk backtest, untuk live gunakan seluruh data)
-                # Tentukan threshold: gunakan data 6 bulan pertama (sekitar 126 hari) untuk backtest fairness
-                n_total = len(df)
-                split_idx = max(126, n_total - 126)  # 6 bulan untuk threshold
-                df_threshold = df.iloc[:split_idx]
-                returns_thresh = df_threshold['Close'].pct_change().dropna()
-
-                ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
-                ema50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
-                adx = compute_adx(df)
-
-                # Hitung threshold dari data 6 bulan pertama
-                mom5_hist_th = df_threshold['Close'].pct_change(5).dropna()*100
-                bull_th = np.percentile(mom5_hist_th, 70)
-                bear_th = np.percentile(mom5_hist_th, 30)
-                z_hist_th = (df_threshold['Close'] - df_threshold['Close'].rolling(20).mean()) / df_threshold['Close'].rolling(20).std()
-                z_up = np.percentile(z_hist_th.dropna(), 80)
-                z_down = np.percentile(z_hist_th.dropna(), 20)
+                # Volatilitas threshold
                 vol_hist_th = returns_thresh.rolling(20).std().dropna()*np.sqrt(252)*100
                 high_vol_th = np.percentile(vol_hist_th, 70)
                 low_vol_th = np.percentile(vol_hist_th, 30)
 
-                # Fungsi untuk menentukan regime dan ihsg_cond berdasarkan data slice (untuk backtest)
+                # Distribusi T dari 6 bulan pertama
+                def t_loglike(p, d):
+                    if p[0]<=2 or p[2]<=0: return np.inf
+                    return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
+                res_thresh = minimize(t_loglike, [5, returns_thresh.mean(), returns_thresh.std()],
+                                      bounds=[(2.1,100),(-0.1,0.1),(1e-6,None)], args=(returns_thresh,), method='L-BFGS-B')
+                df_est, t_loc, t_scale = res_thresh.x if res_thresh.success else (5, returns_thresh.mean(), returns_thresh.std())
+
+                # ==================== FUNGSI REGIME ====================
                 def get_regime(slice_df):
                     close = slice_df['Close']
                     h = float(close.iloc[-1])
                     ema20s = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
                     ema50s = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
                     adxs = compute_adx(slice_df)
-                    # Threshold tetap dari data 6 bulan pertama (global)
-                    if adxs > 20:
+                    zs = (h - close.tail(20).mean()) / close.tail(20).std() if close.tail(20).std() > 0 else 0
+                    m5 = float((h / close.iloc[-6] - 1) * 100) if len(close) >= 6 else 0
+
+                    if adxs > adx_threshold:
                         if h > ema20s and ema20s > ema50s:
-                            if mom_5d > bull_th or z_score > z_up:
-                                regime_s = "Strong Bullish 🚀"
+                            if m5 > mom_median_th or zs > z_oversold_th:
+                                return "Strong Bullish 🚀", "RISK-ON 🔥"
                             else:
-                                regime_s = "Bullish 📈"
-                            ihsg_s = "RISK-ON 🔥"
+                                return "Bullish 📈", "RISK-ON 🔥"
                         elif h < ema20s and ema20s < ema50s:
-                            if mom_5d < bear_th or z_score < z_down:
-                                regime_s = "Panic Sell 🚨"
+                            if m5 < mom_median_th or zs < z_oversold_th:
+                                return "Panic Sell 🚨", "RISK-OFF 🛑"
                             else:
-                                regime_s = "Bearish 🔻"
-                            ihsg_s = "RISK-OFF 🛑"
+                                return "Bearish 🔻", "RISK-OFF 🛑"
                         elif h > ema20s and ema20s < ema50s:
-                            regime_s = "Early Recovery 🔄"
-                            ihsg_s = "TRANSISI ⚠️"
+                            return "Early Recovery 🔄", "TRANSISI ⚠️"
                         elif h < ema20s and ema20s > ema50s:
-                            regime_s = "Distribution 📉"
-                            ihsg_s = "TRANSISI ⚠️"
+                            return "Distribution 📉", "TRANSISI ⚠️"
                         else:
-                            regime_s = "Konsolidasi Tren ↔️"
-                            ihsg_s = "NEUTRAL ⚖️"
+                            return "Konsolidasi Tren ↔️", "NEUTRAL ⚖️"
                     else:
                         if h > ema20s and ema20s > ema50s:
-                            regime_s = "Bullish Accumulation 🏗️"
-                            ihsg_s = "NEUTRAL ⚖️"
+                            return "Bullish Accumulation 🏗️", "NEUTRAL ⚖️"
                         elif h < ema20s and ema20s < ema50s:
-                            regime_s = "Bearish Accumulation 🧊"
-                            ihsg_s = "NEUTRAL ⚖️"
+                            return "Bearish Accumulation 🧊", "NEUTRAL ⚖️"
                         elif h > ema20s and ema20s < ema50s:
-                            regime_s = "Sideways Bias Naik ↗️"
-                            ihsg_s = "NEUTRAL ⚖️"
+                            return "Sideways Bias Naik ↗️", "NEUTRAL ⚖️"
                         elif h < ema20s and ema20s > ema50s:
-                            regime_s = "Sideways Bias Turun ↘️"
-                            ihsg_s = "NEUTRAL ⚖️"
+                            return "Sideways Bias Turun ↘️", "NEUTRAL ⚖️"
                         else:
-                            # cek volatilitas
-                            ewma_vol_s = float(np.sqrt(returns_thresh.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
-                            if ewma_vol_s > high_vol_th:
-                                regime_s = "Sideways Choppy 🌊"
-                            elif ewma_vol_s < low_vol_th:
-                                regime_s = "Sideways Calm 😴"
+                            ret_s = slice_df['Close'].pct_change().dropna()
+                            if len(ret_s) >= 20:
+                                ewma_vol_s = float(np.sqrt(ret_s.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
                             else:
-                                regime_s = "Sideways Normal ↔️"
-                            ihsg_s = "NEUTRAL ⚖️"
-                    return regime_s, ihsg_s
+                                ewma_vol_s = 0
+                            if ewma_vol_s > high_vol_th:
+                                return "Sideways Choppy 🌊", "NEUTRAL ⚖️"
+                            elif ewma_vol_s < low_vol_th:
+                                return "Sideways Calm 😴", "NEUTRAL ⚖️"
+                            else:
+                                return "Sideways Normal ↔️", "NEUTRAL ⚖️"
 
-                # Regime live
                 regime, ihsg_cond = get_regime(df)
+                adx = compute_adx(df)
 
                 # PIVOT
                 hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
@@ -388,78 +338,135 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 res20 = float(df['High'].iloc[-21:-1].max())
                 breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-                # SIGNAL LIVE (dengan volume & sentimen)
+                # SIGNAL LIVE
                 score = 0
-                if mom_3d>0: score+=1
-                if z_score<-1.5: score+=1
-                if harga_terakhir>ema20: score+=1
-                if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean(): score+=1
-                if SENTIMENT_AVAILABLE and avg_sentiment>0.2: score+=1
-                elif SENTIMENT_AVAILABLE and avg_sentiment<-0.2: score-=1
-                signal = "🔥 STRONG BUY" if score>=3 else ("⚡ BUY (TACTICAL)" if score>=2 else ("⏸️ HOLD / WAIT" if score==1 else "🚨 AVOID"))
+                mom_3d = float((df['Close'].iloc[-1]/df['Close'].iloc[-4]-1)*100)
+                z_score = (harga_terakhir - df['Close'].tail(20).mean()) / df['Close'].tail(20).std() if df['Close'].tail(20).std()>0 else 0
+                ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+                if mom_3d > mom_median_th: score += 1
+                if z_score < z_oversold_th: score += 1
+                if harga_terakhir > ema20: score += 1
+                if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean(): score += 1
+                if SENTIMENT_AVAILABLE and avg_sentiment > 0.2: score += 1
+                elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2: score -= 1
+                signal = "🔥 STRONG BUY" if score >= 3 else ("⚡ BUY (TACTICAL)" if score >= 2 else ("⏸️ HOLD / WAIT" if score == 1 else "🚨 AVOID"))
 
-                # BACKTEST (fungsi sinyal yang konsisten dengan live, tapi tanpa sentimen)
-                def sig_func_full(sl):
-                    h = float(sl['Close'].iloc[-1])
-                    m3 = float((sl['Close'].iloc[-1]/sl['Close'].iloc[-4]-1)*100)
-                    ema20s = float(sl['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
-                    zs = (h - sl['Close'].tail(20).mean())/sl['Close'].tail(20).std() if sl['Close'].tail(20).std()>0 else 0
-                    vol_cond = sl['Volume'].iloc[-1] > sl['Volume'].tail(20).mean() if 'Volume' in sl.columns else False
-                    s = 0
-                    if m3>0: s+=1
-                    if zs<-1.5: s+=1
-                    if h>ema20s: s+=1
-                    if vol_cond: s+=1
-                    return "🔥 STRONG BUY" if s>=2 else ("⚡ BUY (TACTICAL)" if s>=1 else "🚨 AVOID")
-                win_bt, pf_bt, avg_bt, trades_bt = backtest_signal(df, sig_func_full)
+                # ==================== BACKTEST EXPANDING WINDOW ====================
+                def backtest_expanding(df, periods=126):
+                    df_back = df.iloc[-periods:].copy()
+                    signals = []
+                    for i in range(20, len(df_back)):
+                        slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]
+                        # expanding threshold tiap langkah
+                        if len(slice_df) >= 126:
+                            sl_thresh = slice_df.iloc[:max(126, len(slice_df)-126)]
+                        else:
+                            sl_thresh = slice_df
+                        returns_sl = sl_thresh['Close'].pct_change().dropna()
+                        z_hist_sl = (sl_thresh['Close'] - sl_thresh['Close'].rolling(20).mean()) / sl_thresh['Close'].rolling(20).std()
+                        z_ov_sl = np.percentile(z_hist_sl.dropna(), 30) if len(z_hist_sl.dropna()) > 0 else -1.5
+                        mom5_sl = sl_thresh['Close'].pct_change(5).dropna()*100
+                        mom_med_sl = np.percentile(mom5_sl, 50) if len(mom5_sl) > 0 else 0.0
+                        # sinyal
+                        h = float(slice_df['Close'].iloc[-1])
+                        m3 = float((slice_df['Close'].iloc[-1]/slice_df['Close'].iloc[-4]-1)*100)
+                        ema20s = float(slice_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+                        zs = (h - slice_df['Close'].tail(20).mean())/slice_df['Close'].tail(20).std() if slice_df['Close'].tail(20).std()>0 else 0
+                        vol_cond = slice_df['Volume'].iloc[-1] > slice_df['Volume'].tail(20).mean() if 'Volume' in slice_df.columns else False
+                        s = 0
+                        if m3 > mom_med_sl: s += 1
+                        if zs < z_ov_sl: s += 1
+                        if h > ema20s: s += 1
+                        if vol_cond: s += 1
+                        sig = "🔥 STRONG BUY" if s >= 2 else ("⚡ BUY (TACTICAL)" if s >= 1 else "🚨 AVOID")
+                        signals.append((df_back.index[i], sig))
+                    trades = []
+                    for i in range(len(signals)-1):
+                        date, sig = signals[i]
+                        next_date = signals[i+1][0]
+                        if "BUY" in sig:
+                            entry = df.loc[date, 'Close']
+                            exit_ = df.loc[next_date, 'Close']
+                            trades.append((exit_ - entry) / entry)
+                    if trades:
+                        win_rate = sum(1 for r in trades if r > 0) / len(trades)
+                        profit_factor = abs(sum(r for r in trades if r > 0) / sum(r for r in trades if r < 0)) if sum(r for r in trades if r < 0) != 0 else np.inf
+                        avg_return = np.mean(trades)
+                        # Max DD backtest
+                        equity = np.cumprod([1+r for r in trades])
+                        max_dd_bt = float(np.min(equity / np.maximum.accumulate(equity) - 1) * 100)
+                        # Sharpe backtest
+                        sharpe_bt = np.mean(trades) / np.std(trades) * np.sqrt(252/30) if np.std(trades) > 0 else 0
+                        return win_rate, profit_factor, avg_return, len(trades), max_dd_bt, sharpe_bt
+                    return 0, 0, 0, 0, 0, 0
 
-                # RISK METRICS
-                roll_max = df['Close'].cummax()
-                drawdown = (df['Close']-roll_max)/roll_max
-                max_dd = float(drawdown.min()*100)
-                max_dd_30 = float(drawdown.tail(30).min()*100)
-                mean_ret = returns.mean()*252
-                std_ret = returns.std()*np.sqrt(252)
+                win_bt, pf_bt, avg_bt, trades_bt, maxdd_bt, sharpe_bt = backtest_expanding(df)
+
+                # RISK METRICS (dari 6 bulan pertama)
+                roll_max_th = df_thresh['Close'].cummax()
+                drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
+                max_dd = float(drawdown_th.min()*100)
+                max_dd_30 = float(drawdown_th.tail(30).min()*100) if len(drawdown_th) >= 30 else max_dd
+                mean_ret = returns_thresh.mean()*252
+                std_ret = returns_thresh.std()*np.sqrt(252)
                 sharpe = mean_ret/std_ret if std_ret>0 else 0
-                down_std = returns[returns<0].std()*np.sqrt(252) if len(returns[returns<0])>0 else std_ret
+                down_std = returns_thresh[returns_thresh<0].std()*np.sqrt(252) if len(returns_thresh[returns_thresh<0])>0 else std_ret
                 sortino = mean_ret/down_std if down_std>0 else 0
                 calmar = mean_ret/abs(max_dd/100) if max_dd!=0 else 0
-                win_r = len(returns[returns>0])/len(returns)
-                avg_g = returns[returns>0].mean() if win_r>0 else 0.01
-                avg_l = abs(returns[returns<0].mean()) if len(returns[returns<0])>0 else 0.01
+                win_r = len(returns_thresh[returns_thresh>0])/len(returns_thresh)
+                avg_g = returns_thresh[returns_thresh>0].mean() if win_r>0 else 0.01
+                avg_l = abs(returns_thresh[returns_thresh<0].mean()) if len(returns_thresh[returns_thresh<0])>0 else 0.01
                 wl = avg_g/avg_l if avg_l>0 else 1
                 kelly_raw = win_r - (1-win_r)/wl
-                kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1.0)))
+                ret_skew = float(skew(returns_thresh))
+                ret_kurt = float(kurtosis(returns_thresh, fisher=True))
+                kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
+                kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1.0) * kurt_penalty))
                 alloc = total_capital*kelly_adj
 
-                # MONTE CARLO (dengan theta adaptif)
+                # ==================== MONTE CARLO OU ROLLING MEAN ====================
                 n_sim, n_days = 2000, 30
-                sim_innov = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=(n_days, n_sim))
-                paths = harga_terakhir * np.exp(np.cumsum(sim_innov, axis=0))
-                # Estimasi theta adaptif
+                latest_vol_daily = np.sqrt(returns.ewm(alpha=0.06).var().iloc[-1])
+                if df_est > 2:
+                    scale_corrected = latest_vol_daily / np.sqrt(df_est / (df_est - 2))
+                else:
+                    scale_corrected = latest_vol_daily
+
                 theta_ou = estimate_theta_ou(df['Close'])
-                log_close = np.log(df['Close'])
-                log_mean20 = log_close.tail(20).mean()
-                log_last = np.log(harga_terakhir)
-                mu_ou = theta_ou * (log_mean20 - log_last) + t_loc
-                est_besok = float(np.exp(log_last + mu_ou))
-                sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=2000)
+                log_mean_series = np.log(df['Close']).rolling(20).mean().dropna()
+                paths = np.zeros((n_days, n_sim))
+                current_log = np.log(harga_terakhir)
+                for day in range(n_days):
+                    # Update mean setiap 5 hari
+                    if day % 5 == 0 and day != 0:
+                        if len(log_mean_series) > day:
+                            log_mean20_val = log_mean_series.iloc[-day-1]
+                        else:
+                            log_mean20_val = np.log(harga_terakhir)
+                    else:
+                        log_mean20_val = np.log(df['Close']).tail(20).mean()
+                    innovations = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
+                    current_log = current_log + theta_ou * (log_mean20_val - current_log) + innovations
+                    paths[day, :] = np.exp(current_log)
+
+                mu_ou = theta_ou * (np.log(df['Close']).tail(20).mean() - np.log(harga_terakhir)) + t_loc
+                est_besok = float(np.exp(np.log(harga_terakhir) + mu_ou))
+
+                sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=scale_corrected, size=2000)
                 prices_besok = harga_terakhir * np.exp(sim_h1)
                 low_est, up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
-                final_prices = paths[-1,:]
-                es_95_mc = float(np.mean(final_prices[final_prices<=np.percentile(final_prices,5)]))
-                es_95_pct = (harga_terakhir-es_95_mc)/harga_terakhir*100
+                final_prices = paths[-1, :]
+                es_95_mc = float(np.mean(final_prices[final_prices <= np.percentile(final_prices, 5)]))
+                es_95_pct = (harga_terakhir - es_95_mc) / harga_terakhir * 100
                 tp, sl = r1, s1
-                hit_tp = (np.any(paths>=tp, axis=0).sum()/n_sim)*100
-                hit_sl = (np.any(paths<=sl, axis=0).sum()/n_sim)*100
-                prob_bull = ((sim_h1>0).sum()/2000)*100
+                hit_tp = (np.any(paths >= tp, axis=0).sum() / n_sim) * 100
+                hit_sl = (np.any(paths <= sl, axis=0).sum() / n_sim) * 100
+                prob_bull = ((sim_h1 > 0).sum() / 2000) * 100
 
-                # ==========================================
-                # TAMPILAN DASHBOARD
-                # ==========================================
+                # ==================== GRAFIK ====================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
                 st.header("📰 Sentimen Berita ")
-                st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot (berita terbaru lebih berpengaruh).")
+                st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot.")
                 c1,c2=st.columns([1,2])
                 c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
                 with c2:
@@ -473,85 +480,83 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.divider()
 
                 st.header("🧬 Regime & Volatility ")
-                st.caption("Klasifikasi regime menggunakan ADX, EMA, momentum, dan volatilitas. ADX > 20 = trending, ≤ 20 = sideways. 10 kondisi pasar memberikan gambaran lebih detail.")
+                st.caption("Klasifikasi regime adaptif dengan ADX, EMA, momentum, dan volatilitas. Threshold dari 6 bulan pertama.")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
-                st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f}) | Skew: `{ret_skew:.2f}`")
+                st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f})")
                 st.markdown(f"**Apa artinya?** {REGIME_INFO.get(regime, '')}")
                 st.markdown(f"**Kondisi IHSG:** {IHSG_CONDITION_INFO.get(ihsg_cond, '')}")
-                st.markdown(f"**ADX:** ADX = {adx:.1f} — {'Kekuatan tren **tinggi** (>20), pasar sedang trending.' if adx > 20 else 'Kekuatan tren **rendah** (≤20), pasar cenderung sideways.'}")
+                st.markdown(f"**ADX threshold adaptif:** {adx_threshold:.1f}")
                 st.divider()
 
                 st.header("📊 Momentum & Z‑Score")
-                st.caption("Momentum mengukur kekuatan pergerakan harga 3/5/10 hari. Z‑Score menunjukkan deviasi harga dari rata‑rata 20 hari (overbought jika >2, oversold jika <-2).")
+                st.caption(f"Threshold Z‑score oversold: {z_oversold_th:.2f}, momentum median: {mom_median_th:.2f}%.")
                 mo1,mo2,mo3,mo4=st.columns(4)
                 mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
                 st.divider()
 
                 st.header("🎯 Pivot & S/R")
-                st.caption("Pivot point dari high/low/close kemarin. R1/S1 sebagai target/resistensi terdekat. Breakout Res20 menandakan harga menembus resistensi tertinggi 20 hari.")
+                st.caption("Pivot point dari high/low/close kemarin. R1/S1 sebagai target/resistensi terdekat.")
                 st.write(f"Breakout Res20: `{breakout}`")
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
 
                 st.header("🔮 Signal & Trading Plan With Backtest ")
-                st.caption("Signal berdasarkan skor momentum, Z‑score, posisi EMA20, volume, dan sentimen berita. Backtest 6 bulan menggunakan sinyal serupa (dengan volume) untuk mengukur performa historis.")
+                st.caption("Signal adaptif + Backtest 6 bulan expanding window.")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
                 t3.metric("Entry", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",","."))
                 t4.metric("Target", f"Rp {r1:,.0f}".replace(",","."))
                 st.caption("💡 Interval 25%-75% adalah rentang harga besok yang paling mungkin (probabilitas 50%).")
-                st.markdown("**📈 Backtest 6 Bulan:**")
-                b1,b2,b3,b4=st.columns(4)
+                st.markdown("**📈 Backtest 6 Bulan (Expanding Window):**")
+                b1,b2,b3,b4,b5,b6=st.columns(6)
                 b1.metric("Win Rate", f"{win_bt:.1%}" if trades_bt else "N/A")
                 b2.metric("Profit Factor", f"{pf_bt:.2f}" if trades_bt else "N/A")
                 b3.metric("Avg Return", f"{avg_bt:.2%}" if trades_bt else "N/A")
-                b4.metric("Trades", f"{trades_bt}")
+                b4.metric("Max DD", f"{maxdd_bt:.2f}%" if trades_bt else "N/A")
+                b5.metric("Sharpe", f"{sharpe_bt:.2f}" if trades_bt else "N/A")
+                b6.metric("Trades", f"{trades_bt}")
                 st.divider()
 
                 st.header("🛡️ Risk & Portfolio Sizing")
-                st.caption("Metrik risiko mencakup Maximum Drawdown, Sharpe, Sortino, Calmar, VaR, dan CVaR. Alokasi modal menggunakan Kelly Criterion yang disesuaikan dengan skewness dan dibatasi maksimum 25%.")
+                st.caption("Metrik risiko + Kelly dimodifikasi skewness & kurtosis.")
                 r1,r2,r3=st.columns(3)
                 r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
                 r2.metric("Rekom. Modal", f"Rp {alloc:,.0f}".replace(",","."))
                 r3.metric("Beta", f"{beta_ihsg:.2f}x")
                 st.markdown(f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30:.2f}%`) | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
-                st.markdown(f"VaR 95% (t): `{var_95_t:.2f}%` | CVaR 95% (t): `{cvar_95_t:.2f}%` | MC ES 95%: `{es_95_pct:.2f}%`")
                 st.divider()
 
-                st.header("🎲 Monte Carlo (Student‑t 2000)")
-                st.caption("Simulasi 2000 jalur harga 30 hari ke depan dengan distribusi Student‑t. Menampilkan probabilitas bullish besok, peluang mencapai TP/SL dalam 30 hari, dan Expected Shortfall 95%.")
+                st.header("🎲 Monte Carlo (OU, Student‑t, vol adaptif)")
+                st.caption("Simulasi 2000 jalur harga 30 hari dengan model Ornstein‑Uhlenbeck dan volatilitas EWMA terkini.")
                 pr1,pr2,pr3=st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
 
-                # ==========================================
-                # KESIMPULAN TRADING
-                # ==========================================
+                # GRAFIK HARGA + EMA + PIVOT
+                st.header("📈 Chart Harga & Indikator")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='#00ffcc')))
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=20, adjust=False).mean(), name='EMA20', line=dict(color='#f59e0b', dash='dot')))
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=50, adjust=False).mean(), name='EMA50', line=dict(color='#ef4444', dash='dot')))
+                for level, label in [(r1, 'R1'), (s1, 'S1'), (pp, 'PP')]:
+                    fig.add_hline(y=level, line_dash="dash", line_color="gray", annotation_text=label, annotation_position="right")
+                fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
+                st.plotly_chart(fig, use_container_width=True)
+
+                # KESIMPULAN
                 st.markdown("---")
                 st.header("📋 Kesimpulan & Rekomendasi Trading")
-                
-                # Tentukan warna aksi berdasarkan sinyal
                 if "STRONG BUY" in signal:
-                    action_color = "#10b981"
-                    action_icon = "🟢"
-                    action_text = "Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
+                    action_color, action_icon, action_text = "#10b981", "🟢", "Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
                 elif "BUY" in signal:
-                    action_color = "#f59e0b"
-                    action_icon = "🟡"
-                    action_text = "Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
+                    action_color, action_icon, action_text = "#f59e0b", "🟡", "Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
                 elif "HOLD" in signal:
-                    action_color = "#3b82f6"
-                    action_icon = "🔵"
-                    action_text = "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
+                    action_color, action_icon, action_text = "#3b82f6", "🔵", "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
                 else:
-                    action_color = "#ef4444"
-                    action_icon = "🔴"
-                    action_text = "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
-
+                    action_color, action_icon, action_text = "#ef4444", "🔴", "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
                 col1, col2 = st.columns([1, 1])
-                
                 with col1:
                     st.markdown(f"""
                     <div class="summary-card">
@@ -565,7 +570,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         <div class="summary-item">🛡️ <b>Alokasi:</b> {kelly_adj*100:.1f}% (Rp {alloc:,.0f})</div>
                     </div>
                     """, unsafe_allow_html=True)
-
                 with col2:
                     st.markdown(f"""
                     <div class="action-card" style="border-left-color: {action_color};">
