@@ -481,10 +481,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"**ADX threshold adaptif:** {adx_threshold:.1f}")
                 st.divider()
 
-                # ANALISIS FUNDAMENTAL
+                # ANALISIS FUNDAMENTAL (dengan perbaikan kecil)
                 st.header("📊 Analisis Fundamental")
-                st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia). Klasifikasi berdasarkan PER & PBV sebagai acuan sederhana.")
-                if ticker_info:
+                st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia).")
+                # Saran kecil: cek apakah setidaknya ada PER atau PBV
+                if ticker_info and (ticker_info.get('trailingPE') or ticker_info.get('priceToBook')):
                     market_cap = ticker_info.get('marketCap')
                     per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
                     pbv = ticker_info.get('priceToBook')
