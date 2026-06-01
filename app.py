@@ -7,9 +7,16 @@ from scipy.optimize import minimize
 import warnings
 import urllib.parse
 import re
-import plotly.graph_objects as go
 
-# ====================== FALLBACK ======================
+# ====================== FALLBACK PLOTLY ======================
+PLOTLY_AVAILABLE = True
+try:
+    import plotly.graph_objects as go
+except ImportError:
+    PLOTLY_AVAILABLE = False
+# ============================================================
+
+# ====================== FALLBACK SENTIMEN ======================
 SENTIMENT_AVAILABLE = True
 try:
     import nltk
@@ -21,12 +28,14 @@ try:
 except ImportError:
     SENTIMENT_AVAILABLE = False
 
+# ====================== FALLBACK RSS ======================
 RSS_AVAILABLE = True
 try:
     import feedparser
 except ImportError:
     RSS_AVAILABLE = False
 
+# ====================== FALLBACK TRANSLATOR ======================
 TRANSLATOR_AVAILABLE = True
 try:
     from deep_translator import GoogleTranslator
@@ -64,16 +73,16 @@ st.markdown("""
     .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
-    .valuation-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro ")
+st.title("📊 Quant & Risk Engine Pro (Final + Fundamental)")
 st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. Distribusi Student‑t, ADX adaptif, Monte Carlo OU, Regime 10-State.")
 
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
 if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
 if not TRANSLATOR_AVAILABLE: st.info("💡 deep-translator tidak terpasang")
+if not PLOTLY_AVAILABLE: st.info("📈 plotly tidak terpasang – grafik tidak akan ditampilkan. Install dengan `pip install plotly`.")
 
 # ==========================================
 # 2. INPUT
@@ -265,22 +274,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 df_thresh = df.iloc[:split_idx]
                 returns_thresh = df_thresh['Close'].pct_change().dropna()
 
-                # ADX threshold
                 adx_series = compute_adx_series(df_thresh)
                 adx_threshold = np.percentile(adx_series.dropna(), 75) if len(adx_series.dropna()) > 0 else 20
 
-                # Z-score & momentum threshold
                 z_hist_th = (df_thresh['Close'] - df_thresh['Close'].rolling(20).mean()) / df_thresh['Close'].rolling(20).std()
                 z_oversold_th = np.percentile(z_hist_th.dropna(), 30)
                 mom5_hist_th = df_thresh['Close'].pct_change(5).dropna()*100
                 mom_median_th = np.percentile(mom5_hist_th, 50)
 
-                # Volatilitas threshold
                 vol_hist_th = returns_thresh.rolling(20).std().dropna()*np.sqrt(252)*100
                 high_vol_th = np.percentile(vol_hist_th, 70)
                 low_vol_th = np.percentile(vol_hist_th, 30)
 
-                # Distribusi T dari 6 bulan pertama
                 def t_loglike(p, d):
                     if p[0]<=2 or p[2]<=0: return np.inf
                     return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
@@ -297,45 +302,27 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     adxs = compute_adx(slice_df)
                     zs = (h - close.tail(20).mean()) / close.tail(20).std() if close.tail(20).std() > 0 else 0
                     m5 = float((h / close.iloc[-6] - 1) * 100) if len(close) >= 6 else 0
-
                     if adxs > adx_threshold:
                         if h > ema20s and ema20s > ema50s:
-                            if m5 > mom_median_th or zs > z_oversold_th:
-                                return "Strong Bullish 🚀", "RISK-ON 🔥"
-                            else:
-                                return "Bullish 📈", "RISK-ON 🔥"
+                            if m5 > mom_median_th or zs > z_oversold_th: return "Strong Bullish 🚀", "RISK-ON 🔥"
+                            else: return "Bullish 📈", "RISK-ON 🔥"
                         elif h < ema20s and ema20s < ema50s:
-                            if m5 < mom_median_th or zs < z_oversold_th:
-                                return "Panic Sell 🚨", "RISK-OFF 🛑"
-                            else:
-                                return "Bearish 🔻", "RISK-OFF 🛑"
-                        elif h > ema20s and ema20s < ema50s:
-                            return "Early Recovery 🔄", "TRANSISI ⚠️"
-                        elif h < ema20s and ema20s > ema50s:
-                            return "Distribution 📉", "TRANSISI ⚠️"
-                        else:
-                            return "Konsolidasi Tren ↔️", "NEUTRAL ⚖️"
+                            if m5 < mom_median_th or zs < z_oversold_th: return "Panic Sell 🚨", "RISK-OFF 🛑"
+                            else: return "Bearish 🔻", "RISK-OFF 🛑"
+                        elif h > ema20s and ema20s < ema50s: return "Early Recovery 🔄", "TRANSISI ⚠️"
+                        elif h < ema20s and ema20s > ema50s: return "Distribution 📉", "TRANSISI ⚠️"
+                        else: return "Konsolidasi Tren ↔️", "NEUTRAL ⚖️"
                     else:
-                        if h > ema20s and ema20s > ema50s:
-                            return "Bullish Accumulation 🏗️", "NEUTRAL ⚖️"
-                        elif h < ema20s and ema20s < ema50s:
-                            return "Bearish Accumulation 🧊", "NEUTRAL ⚖️"
-                        elif h > ema20s and ema20s < ema50s:
-                            return "Sideways Bias Naik ↗️", "NEUTRAL ⚖️"
-                        elif h < ema20s and ema20s > ema50s:
-                            return "Sideways Bias Turun ↘️", "NEUTRAL ⚖️"
+                        if h > ema20s and ema20s > ema50s: return "Bullish Accumulation 🏗️", "NEUTRAL ⚖️"
+                        elif h < ema20s and ema20s < ema50s: return "Bearish Accumulation 🧊", "NEUTRAL ⚖️"
+                        elif h > ema20s and ema20s < ema50s: return "Sideways Bias Naik ↗️", "NEUTRAL ⚖️"
+                        elif h < ema20s and ema20s > ema50s: return "Sideways Bias Turun ↘️", "NEUTRAL ⚖️"
                         else:
-                            ret_s = slice_df['Close'].pct_change().dropna()
-                            if len(ret_s) >= 20:
-                                ewma_vol_s = float(np.sqrt(ret_s.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
-                            else:
-                                ewma_vol_s = 0
-                            if ewma_vol_s > high_vol_th:
-                                return "Sideways Choppy 🌊", "NEUTRAL ⚖️"
-                            elif ewma_vol_s < low_vol_th:
-                                return "Sideways Calm 😴", "NEUTRAL ⚖️"
-                            else:
-                                return "Sideways Normal ↔️", "NEUTRAL ⚖️"
+                            ret_s = close.pct_change().dropna()
+                            ewma_vol_s = float(np.sqrt(ret_s.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100) if len(ret_s) >= 20 else 0
+                            if ewma_vol_s > high_vol_th: return "Sideways Choppy 🌊", "NEUTRAL ⚖️"
+                            elif ewma_vol_s < low_vol_th: return "Sideways Calm 😴", "NEUTRAL ⚖️"
+                            else: return "Sideways Normal ↔️", "NEUTRAL ⚖️"
 
                 regime, ihsg_cond = get_regime(df)
                 adx = compute_adx(df)
@@ -361,17 +348,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2: score -= 1
                 signal = "🔥 STRONG BUY" if score >= 3 else ("⚡ BUY (TACTICAL)" if score >= 2 else ("⏸️ HOLD / WAIT" if score == 1 else "🚨 AVOID"))
 
-                # ==================== BACKTEST EXPANDING WINDOW ====================
+                # BACKTEST EXPANDING WINDOW
                 def backtest_expanding(df, periods=126):
                     df_back = df.iloc[-periods:].copy()
                     signals = []
                     for i in range(20, len(df_back)):
                         slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]
-                        if len(slice_df) >= 126:
-                            sl_thresh = slice_df.iloc[:max(126, len(slice_df)-126)]
-                        else:
-                            sl_thresh = slice_df
-                        returns_sl = sl_thresh['Close'].pct_change().dropna()
+                        sl_thresh = slice_df.iloc[:max(126, len(slice_df)-126)] if len(slice_df) >= 126 else slice_df
+                        ret_sl = sl_thresh['Close'].pct_change().dropna()
                         z_hist_sl = (sl_thresh['Close'] - sl_thresh['Close'].rolling(20).mean()) / sl_thresh['Close'].rolling(20).std()
                         z_ov_sl = np.percentile(z_hist_sl.dropna(), 30) if len(z_hist_sl.dropna()) > 0 else -1.5
                         mom5_sl = sl_thresh['Close'].pct_change(5).dropna()*100
@@ -408,7 +392,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
 
                 win_bt, pf_bt, avg_bt, trades_bt, maxdd_bt, sharpe_bt = backtest_expanding(df)
 
-                # RISK METRICS (dari 6 bulan pertama)
+                # RISK METRICS
                 roll_max_th = df_thresh['Close'].cummax()
                 drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
                 max_dd = float(drawdown_th.min()*100)
@@ -430,33 +414,21 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1.0) * kurt_penalty))
                 alloc = total_capital*kelly_adj
 
-                # ==================== MONTE CARLO OU ROLLING MEAN ====================
+                # MONTE CARLO OU
                 n_sim, n_days = 2000, 30
                 latest_vol_daily = np.sqrt(returns.ewm(alpha=0.06).var().iloc[-1])
-                if df_est > 2:
-                    scale_corrected = latest_vol_daily / np.sqrt(df_est / (df_est - 2))
-                else:
-                    scale_corrected = latest_vol_daily
-
+                scale_corrected = latest_vol_daily / np.sqrt(df_est / (df_est - 2)) if df_est > 2 else latest_vol_daily
                 theta_ou = estimate_theta_ou(df['Close'])
                 log_mean_series = np.log(df['Close']).rolling(20).mean().dropna()
                 paths = np.zeros((n_days, n_sim))
                 current_log = np.log(harga_terakhir)
                 for day in range(n_days):
-                    if day % 5 == 0 and day != 0:
-                        if len(log_mean_series) > day:
-                            log_mean20_val = log_mean_series.iloc[-day-1]
-                        else:
-                            log_mean20_val = np.log(harga_terakhir)
-                    else:
-                        log_mean20_val = np.log(df['Close']).tail(20).mean()
+                    log_mean20_val = log_mean_series.iloc[-day-1] if (day % 5 == 0 and day != 0 and len(log_mean_series) > day) else np.log(df['Close']).tail(20).mean()
                     innovations = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
                     current_log = current_log + theta_ou * (log_mean20_val - current_log) + innovations
                     paths[day, :] = np.exp(current_log)
-
                 mu_ou = theta_ou * (np.log(df['Close']).tail(20).mean() - np.log(harga_terakhir)) + t_loc
                 est_besok = float(np.exp(np.log(harga_terakhir) + mu_ou))
-
                 sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=scale_corrected, size=2000)
                 prices_besok = harga_terakhir * np.exp(sim_h1)
                 low_est, up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
@@ -485,7 +457,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.divider()
 
                 st.header("🧬 Regime & Volatility ")
-                st.caption("Klasifikasi regime adaptif dengan ADX, EMA, momentum, dan volatilitas. Threshold dari 6 bulan pertama.")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
                 st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f})")
@@ -494,11 +465,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"**ADX threshold adaptif:** {adx_threshold:.1f}")
                 st.divider()
 
-                # ==================== ANALISIS FUNDAMENTAL ====================
+                # ANALISIS FUNDAMENTAL
                 st.header("📊 Analisis Fundamental")
                 st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia). Klasifikasi berdasarkan PER & PBV sebagai acuan sederhana.")
                 if ticker_info:
-                    # Ambil data yang relevan
                     market_cap = ticker_info.get('marketCap')
                     per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
                     pbv = ticker_info.get('priceToBook')
@@ -506,63 +476,36 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     roe = ticker_info.get('returnOnEquity')
                     debt_equity = ticker_info.get('debtToEquity')
                     dividend_yield = ticker_info.get('dividendYield')
-
-                    # Tampilkan metrik dalam tabel
                     table_html = "<table class='fundamental-table'>"
                     table_html += f"<tr><td>Market Cap</td><td>{market_cap:,.0f} IDR</td></tr>" if market_cap else ""
-                    table_html += f"<tr><td>PER (Price to Earnings)</td><td>{per:.2f}x</td></tr>" if per else ""
-                    table_html += f"<tr><td>PBV (Price to Book)</td><td>{pbv:.2f}x</td></tr>" if pbv else ""
-                    table_html += f"<tr><td>EPS (Earning per Share)</td><td>{eps:.2f}</td></tr>" if eps else ""
+                    table_html += f"<tr><td>PER</td><td>{per:.2f}x</td></tr>" if per else ""
+                    table_html += f"<tr><td>PBV</td><td>{pbv:.2f}x</td></tr>" if pbv else ""
+                    table_html += f"<tr><td>EPS</td><td>{eps:.2f}</td></tr>" if eps else ""
                     table_html += f"<tr><td>ROE</td><td>{roe*100:.1f}%</td></tr>" if roe else ""
                     table_html += f"<tr><td>Debt/Equity</td><td>{debt_equity:.2f}%</td></tr>" if debt_equity else ""
-                    table_html += f"<tr><td>Dividend Yield</td><td>{dividend_yield*100:.2f}%</td></tr>" if dividend_yield else ""
+                    table_html += f"<tr><td>Div Yield</td><td>{dividend_yield*100:.2f}%</td></tr>" if dividend_yield else ""
                     table_html += "</table>"
                     st.markdown(table_html, unsafe_allow_html=True)
-
-                    # Interpretasi fundamental
                     interpretation = []
                     if per:
-                        if per < 10:
-                            per_status = "Rendah (undervalued)"
-                            per_color = "#10b981"
-                        elif per > 25:
-                            per_status = "Tinggi (overvalued)"
-                            per_color = "#ef4444"
-                        else:
-                            per_status = "Moderat"
-                            per_color = "#f59e0b"
-                        interpretation.append(f"PER {per:.1f}x tergolong <span style='color:{per_color}; font-weight:bold;'>{per_status}</span>.")
+                        if per < 10: per_status, per_color = "Rendah (undervalued)", "#10b981"
+                        elif per > 25: per_status, per_color = "Tinggi (overvalued)", "#ef4444"
+                        else: per_status, per_color = "Moderat", "#f59e0b"
+                        interpretation.append(f"PER {per:.1f}x <span style='color:{per_color}; font-weight:bold;'>{per_status}</span>.")
                     if pbv:
-                        if pbv < 1:
-                            pbv_status = "di bawah 1 (undervalued)"
-                            pbv_color = "#10b981"
-                        elif pbv > 3:
-                            pbv_status = "di atas 3 (overvalued)"
-                            pbv_color = "#ef4444"
-                        else:
-                            pbv_status = "normal"
-                            pbv_color = "#f59e0b"
+                        if pbv < 1: pbv_status, pbv_color = "di bawah 1 (undervalued)", "#10b981"
+                        elif pbv > 3: pbv_status, pbv_color = "di atas 3 (overvalued)", "#ef4444"
+                        else: pbv_status, pbv_color = "normal", "#f59e0b"
                         interpretation.append(f"PBV {pbv:.1f}x <span style='color:{pbv_color}; font-weight:bold;'>{pbv_status}</span>.")
                     if roe:
-                        if roe > 0.15:
-                            roe_status = "baik (>15%)"
-                            roe_color = "#10b981"
-                        elif roe < 0.05:
-                            roe_status = "rendah"
-                            roe_color = "#ef4444"
-                        else:
-                            roe_status = "cukup"
-                            roe_color = "#f59e0b"
-                        interpretation.append(f"ROE {roe*100:.1f}% tergolong <span style='color:{roe_color}; font-weight:bold;'>{roe_status}</span>.")
+                        if roe > 0.15: roe_status, roe_color = "baik (>15%)", "#10b981"
+                        elif roe < 0.05: roe_status, roe_color = "rendah", "#ef4444"
+                        else: roe_status, roe_color = "cukup", "#f59e0b"
+                        interpretation.append(f"ROE {roe*100:.1f}% <span style='color:{roe_color}; font-weight:bold;'>{roe_status}</span>.")
                     if debt_equity:
-                        if debt_equity > 100:
-                            de_status = "tinggi, risiko leverage besar"
-                            de_color = "#ef4444"
-                        else:
-                            de_status = "aman"
-                            de_color = "#10b981"
-                        interpretation.append(f"Debt/Equity {debt_equity:.1f}% <span style='color:{de_color}; font-weight:bold;'>{de_status}</span>.")
-
+                        if debt_equity > 100: de_status, de_color = "tinggi", "#ef4444"
+                        else: de_status, de_color = "aman", "#10b981"
+                        interpretation.append(f"D/E {debt_equity:.1f}% <span style='color:{de_color}; font-weight:bold;'>{de_status}</span>.")
                     if interpretation:
                         st.markdown("**Interpretasi:** " + " ".join(interpretation), unsafe_allow_html=True)
                     else:
@@ -571,21 +514,19 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     st.markdown("Data fundamental tidak tersedia untuk saham ini.")
                 st.divider()
 
+                # MOMENTUM, PIVOT, SIGNAL, BACKTEST, RISK, MONTE CARLO
                 st.header("📊 Momentum & Z‑Score")
-                st.caption(f"Threshold Z‑score oversold: {z_oversold_th:.2f}, momentum median: {mom_median_th:.2f}%.")
                 mo1,mo2,mo3,mo4=st.columns(4)
                 mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
                 st.divider()
 
                 st.header("🎯 Pivot & S/R")
-                st.caption("Pivot point dari high/low/close kemarin. R1/S1 sebagai target/resistensi terdekat.")
                 st.write(f"Breakout Res20: `{breakout}`")
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
 
                 st.header("🔮 Signal & Trading Plan With Backtest ")
-                st.caption("Signal adaptif + Backtest 6 bulan expanding window.")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
@@ -603,7 +544,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.divider()
 
                 st.header("🛡️ Risk & Portfolio Sizing")
-                st.caption("Metrik risiko + Kelly dimodifikasi skewness & kurtosis.")
                 r1,r2,r3=st.columns(3)
                 r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
                 r2.metric("Rekom. Modal", f"Rp {alloc:,.0f}".replace(",","."))
@@ -612,20 +552,20 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.divider()
 
                 st.header("🎲 Monte Carlo (OU, Student‑t, vol adaptif)")
-                st.caption("Simulasi 2000 jalur harga 30 hari dengan model Ornstein‑Uhlenbeck dan volatilitas EWMA terkini.")
                 pr1,pr2,pr3=st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
 
-                # GRAFIK HARGA + EMA + PIVOT
-                st.header("📈 Chart Harga & Indikator")
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='#00ffcc')))
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=20, adjust=False).mean(), name='EMA20', line=dict(color='#f59e0b', dash='dot')))
-                fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=50, adjust=False).mean(), name='EMA50', line=dict(color='#ef4444', dash='dot')))
-                for level, label in [(r1, 'R1'), (s1, 'S1'), (pp, 'PP')]:
-                    fig.add_hline(y=level, line_dash="dash", line_color="gray", annotation_text=label, annotation_position="right")
-                fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
-                st.plotly_chart(fig, use_container_width=True)
+                # GRAFIK (jika plotly tersedia)
+                if PLOTLY_AVAILABLE:
+                    st.header("📈 Chart Harga & Indikator")
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='#00ffcc')))
+                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=20, adjust=False).mean(), name='EMA20', line=dict(color='#f59e0b', dash='dot')))
+                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=50, adjust=False).mean(), name='EMA50', line=dict(color='#ef4444', dash='dot')))
+                    for level, label in [(r1, 'R1'), (s1, 'S1'), (pp, 'PP')]:
+                        fig.add_hline(y=level, line_dash="dash", line_color="gray", annotation_text=label, annotation_position="right")
+                    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
+                    st.plotly_chart(fig, use_container_width=True)
 
                 # KESIMPULAN
                 st.markdown("---")
