@@ -55,29 +55,14 @@ st.markdown("""
     .info-text { color: #94a3b8; font-size: 14px; margin-top: 5px; line-height: 1.5; }
     .summary-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 20px;
-        margin: 10px 0;
-        border: 1px solid #334155;
+        border-radius: 16px; padding: 20px; margin: 10px 0; border: 1px solid #334155;
     }
     .action-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 20px;
-        margin: 10px 0;
-        border-left: 5px solid #00ffcc;
+        border-radius: 16px; padding: 20px; margin: 10px 0; border-left: 5px solid #00ffcc;
     }
-    .section-title {
-        color: #00ffcc;
-        font-size: 18px;
-        font-weight: bold;
-        margin-bottom: 12px;
-    }
-    .summary-item {
-        color: #cbd5e1;
-        font-size: 15px;
-        margin-bottom: 8px;
-    }
+    .section-title { color: #00ffcc; font-size: 18px; font-weight: bold; margin-bottom: 12px; }
+    .summary-item { color: #cbd5e1; font-size: 15px; margin-bottom: 8px; }
     .highlight { color: #fbbf24; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
@@ -172,6 +157,7 @@ def analyze_sentiment_weighted(news_items, translator):
     return w_sum / total_w if total_w > 0 else 0.0
 
 def backtest_signal(df, signal_func, periods=126):
+    """Backtest tanpa look-ahead: threshold dihitung di luar, di sini hanya menjalankan sinyal."""
     df_back = df.iloc[-periods:].copy()
     signals = []
     for i in range(20, len(df_back)):
@@ -196,29 +182,42 @@ def backtest_signal(df, signal_func, periods=126):
         return win_rate, profit_factor, avg_return, len(trades)
     return 0, 0, 0, 0
 
+# ==================== ESTIMASI HALF-LIFE OU ====================
+def estimate_theta_ou(close_series):
+    """Regresi log-return terhadap log-harga untuk mendapatkan mean-reversion speed."""
+    log_price = np.log(close_series.dropna())
+    log_lag = log_price.shift(1).dropna()
+    diff = log_price.diff().dropna()
+    common_idx = diff.index.intersection(log_lag.index)
+    y = diff.loc[common_idx].values
+    X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
+    coeff = np.linalg.lstsq(X, y, rcond=None)[0]
+    theta = -coeff[1] if coeff[1] < 0 else 0.05
+    return theta
+
 # ==================== KAMUS PENJELASAN ====================
 REGIME_INFO = {
-    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Biasanya muncul setelah breakout resistance atau berita positif besar. Fase ini ideal untuk swing buy agresif, tetapi waspadai overbought.",
-    "Bullish 📈": "Tren naik stabil tanpa akselerasi berlebihan. Kondisi pasar sehat untuk akumulasi dan swing trading jangka pendek-menengah.",
-    "Panic Sell 🚨": "Penurunan tajam dengan volume tinggi, sering dipicu kepanikan. Harga biasanya oversold, sehingga bisa menjadi peluang buy-back jika konfirmasi reversal muncul.",
-    "Bearish 🔻": "Tren turun yang terkendali. Disarankan menghindari posisi buy dulu, atau mempertimbangkan strategi short jika memungkinkan.",
-    "Early Recovery 🔄": "Harga mulai bergerak di atas EMA20, namun EMA20 masih di bawah EMA50 (golden cross tertunda). Potensi pembalikan bullish, tetapi perlu konfirmasi volume dan momentum lanjutan.",
-    "Distribution 📉": "Harga di bawah EMA20 sementara EMA20 masih di atas EMA50 (death cross). Biasanya terjadi setelah uptrend panjang, menandakan distribusi saham oleh pemain besar.",
-    "Konsolidasi Tren ↔️": "Trending namun harga bergerak bolak-balik di sekitar EMA. Pasar sedang mencari arah, tunggu penembusan support/resistance untuk entry.",
-    "Bullish Accumulation 🏗️": "Sideways dengan harga cenderung di atas EMA. Menandakan akumulasi diam-diam oleh pelaku pasar, seringkali menjelang breakout bullish.",
-    "Bearish Accumulation 🧊": "Sideways di bawah EMA, biasanya distribusi pelan. Waspadai potensi breakdown ke bawah.",
-    "Sideways Bias Naik ↗️": "Pasar sideways dengan sedikit kecenderungan naik. Potensi bullish tetapi belum cukup kuat, tunggu konfirmasi breakout.",
-    "Sideways Bias Turun ↘️": "Sideways dengan sedikit kecenderungan turun. Potensi bearish, tetapi masih rentan false signal.",
-    "Sideways Choppy 🌊": "Sideways dengan volatilitas tinggi dan tidak menentu. Sulit diprediksi, sebaiknya hindari entry sampai terbentuk tren yang lebih jelas.",
-    "Sideways Calm 😴": "Sideways sepi dengan volatilitas sangat rendah. Biasanya terjadi menjelang rilis berita besar atau breakout signifikan.",
-    "Sideways Normal ↔️": "Sideways moderat tanpa tekanan signifikan. Pasar menunggu katalis, aman untuk wait-and-see."
+    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Ideal untuk swing buy agresif, waspadai overbought.",
+    "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
+    "Panic Sell 🚨": "Penurunan tajam, sering oversold. Peluang buy-back jika reversal terkonfirmasi.",
+    "Bearish 🔻": "Tren turun terkendali. Hindari buy, pertimbangkan short.",
+    "Early Recovery 🔄": "Harga di atas EMA20 tapi EMA20 < EMA50. Potensi reversal bullish, perlu konfirmasi.",
+    "Distribution 📉": "Harga di bawah EMA20, EMA20 > EMA50. Distribusi setelah uptrend panjang.",
+    "Konsolidasi Tren ↔️": "Trending namun harga bolak-balik di EMA. Tunggu penembusan.",
+    "Bullish Accumulation 🏗️": "Sideways dengan harga > EMA. Akumulasi, potensi breakout.",
+    "Bearish Accumulation 🧊": "Sideways di bawah EMA. Distribusi pelan, waspadai breakdown.",
+    "Sideways Bias Naik ↗️": "Sideways cenderung naik, potensi bullish belum kuat.",
+    "Sideways Bias Turun ↘️": "Sideways cenderung turun, potensi bearish.",
+    "Sideways Choppy 🌊": "Sideways volatilitas tinggi. Hindari entry.",
+    "Sideways Calm 😴": "Sideways sepi, menjelang breakout.",
+    "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
 
 IHSG_CONDITION_INFO = {
-    "RISK-ON 🔥": "Sentimen pasar sedang positif, investor cenderung mengambil risiko. Kondisi ideal untuk posisi beli di saham agresif.",
-    "RISK-OFF 🛑": "Sentimen pasar negatif, investor menghindari risiko. Disarankan menahan diri atau pindah ke saham defensif.",
-    "NEUTRAL ⚖️": "Pasar tidak menunjukkan arah yang jelas. Strategi konservatif lebih dianjurkan.",
-    "TRANSISI ⚠️": "Pasar dalam masa transisi dari bullish ke bearish atau sebaliknya. Volatilitas tinggi, entry harus ekstra hati-hati."
+    "RISK-ON 🔥": "Sentimen pasar positif, cocok untuk beli saham agresif.",
+    "RISK-OFF 🛑": "Sentimen pasar negatif, tahan diri atau pindah ke defensif.",
+    "NEUTRAL ⚖️": "Pasar tanpa arah jelas, strategi konservatif.",
+    "TRANSISI ⚠️": "Pasar dalam transisi, volatilitas tinggi, entry hati-hati."
 }
 # =====================================================
 
@@ -281,7 +280,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 ret_skew = float(skew(returns))
                 ret_kurt = float(kurtosis(returns, fisher=True))
 
-                # BETA
+                # BETA IHSG
                 try:
                     ihsg = yf.download("^JKSE", period="1y")
                     if isinstance(ihsg.columns, pd.MultiIndex): ihsg.columns = ihsg.columns.get_level_values(0)
@@ -301,63 +300,85 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 std20 = float(df['Close'].tail(20).std())
                 z_score = (harga_terakhir-ma20)/std20 if std20>0 else 0.0
 
-                # REGIME 10‑STATE
+                # REGIME 10‑STATE (dengan threshold dari data 6 bulan pertama untuk backtest, untuk live gunakan seluruh data)
+                # Tentukan threshold: gunakan data 6 bulan pertama (sekitar 126 hari) untuk backtest fairness
+                n_total = len(df)
+                split_idx = max(126, n_total - 126)  # 6 bulan untuk threshold
+                df_threshold = df.iloc[:split_idx]
+                returns_thresh = df_threshold['Close'].pct_change().dropna()
+
                 ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
                 ema50 = float(df['Close'].ewm(span=50, adjust=False).mean().iloc[-1])
                 adx = compute_adx(df)
-                mom5_hist = df['Close'].pct_change(5).dropna()*100
-                bull_th = np.percentile(mom5_hist, 70)
-                bear_th = np.percentile(mom5_hist, 30)
-                z_hist = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
-                z_up = np.percentile(z_hist.dropna(), 80)
-                z_down = np.percentile(z_hist.dropna(), 20)
-                vol_hist = returns.rolling(20).std().dropna()*np.sqrt(252)*100
-                high_vol_th = np.percentile(vol_hist, 70)
-                low_vol_th = np.percentile(vol_hist, 30)
 
-                if adx > 20:
-                    if harga_terakhir > ema20 and ema20 > ema50:
-                        if mom_5d > bull_th or z_score > z_up:
-                            regime = "Strong Bullish 🚀"
+                # Hitung threshold dari data 6 bulan pertama
+                mom5_hist_th = df_threshold['Close'].pct_change(5).dropna()*100
+                bull_th = np.percentile(mom5_hist_th, 70)
+                bear_th = np.percentile(mom5_hist_th, 30)
+                z_hist_th = (df_threshold['Close'] - df_threshold['Close'].rolling(20).mean()) / df_threshold['Close'].rolling(20).std()
+                z_up = np.percentile(z_hist_th.dropna(), 80)
+                z_down = np.percentile(z_hist_th.dropna(), 20)
+                vol_hist_th = returns_thresh.rolling(20).std().dropna()*np.sqrt(252)*100
+                high_vol_th = np.percentile(vol_hist_th, 70)
+                low_vol_th = np.percentile(vol_hist_th, 30)
+
+                # Fungsi untuk menentukan regime dan ihsg_cond berdasarkan data slice (untuk backtest)
+                def get_regime(slice_df):
+                    close = slice_df['Close']
+                    h = float(close.iloc[-1])
+                    ema20s = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+                    ema50s = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+                    adxs = compute_adx(slice_df)
+                    # Threshold tetap dari data 6 bulan pertama (global)
+                    if adxs > 20:
+                        if h > ema20s and ema20s > ema50s:
+                            if mom_5d > bull_th or z_score > z_up:
+                                regime_s = "Strong Bullish 🚀"
+                            else:
+                                regime_s = "Bullish 📈"
+                            ihsg_s = "RISK-ON 🔥"
+                        elif h < ema20s and ema20s < ema50s:
+                            if mom_5d < bear_th or z_score < z_down:
+                                regime_s = "Panic Sell 🚨"
+                            else:
+                                regime_s = "Bearish 🔻"
+                            ihsg_s = "RISK-OFF 🛑"
+                        elif h > ema20s and ema20s < ema50s:
+                            regime_s = "Early Recovery 🔄"
+                            ihsg_s = "TRANSISI ⚠️"
+                        elif h < ema20s and ema20s > ema50s:
+                            regime_s = "Distribution 📉"
+                            ihsg_s = "TRANSISI ⚠️"
                         else:
-                            regime = "Bullish 📈"
-                        ihsg_cond = "RISK-ON 🔥"
-                    elif harga_terakhir < ema20 and ema20 < ema50:
-                        if mom_5d < bear_th or z_score < z_down:
-                            regime = "Panic Sell 🚨"
-                        else:
-                            regime = "Bearish 🔻"
-                        ihsg_cond = "RISK-OFF 🛑"
-                    elif harga_terakhir > ema20 and ema20 < ema50:
-                        regime = "Early Recovery 🔄"
-                        ihsg_cond = "TRANSISI ⚠️"
-                    elif harga_terakhir < ema20 and ema20 > ema50:
-                        regime = "Distribution 📉"
-                        ihsg_cond = "TRANSISI ⚠️"
+                            regime_s = "Konsolidasi Tren ↔️"
+                            ihsg_s = "NEUTRAL ⚖️"
                     else:
-                        regime = "Konsolidasi Tren ↔️"
-                        ihsg_cond = "NEUTRAL ⚖️"
-                else:
-                    if harga_terakhir > ema20 and ema20 > ema50:
-                        regime = "Bullish Accumulation 🏗️"
-                        ihsg_cond = "NEUTRAL ⚖️"
-                    elif harga_terakhir < ema20 and ema20 < ema50:
-                        regime = "Bearish Accumulation 🧊"
-                        ihsg_cond = "NEUTRAL ⚖️"
-                    elif harga_terakhir > ema20 and ema20 < ema50:
-                        regime = "Sideways Bias Naik ↗️"
-                        ihsg_cond = "NEUTRAL ⚖️"
-                    elif harga_terakhir < ema20 and ema20 > ema50:
-                        regime = "Sideways Bias Turun ↘️"
-                        ihsg_cond = "NEUTRAL ⚖️"
-                    else:
-                        if ewma_vol > high_vol_th:
-                            regime = "Sideways Choppy 🌊"
-                        elif ewma_vol < low_vol_th:
-                            regime = "Sideways Calm 😴"
+                        if h > ema20s and ema20s > ema50s:
+                            regime_s = "Bullish Accumulation 🏗️"
+                            ihsg_s = "NEUTRAL ⚖️"
+                        elif h < ema20s and ema20s < ema50s:
+                            regime_s = "Bearish Accumulation 🧊"
+                            ihsg_s = "NEUTRAL ⚖️"
+                        elif h > ema20s and ema20s < ema50s:
+                            regime_s = "Sideways Bias Naik ↗️"
+                            ihsg_s = "NEUTRAL ⚖️"
+                        elif h < ema20s and ema20s > ema50s:
+                            regime_s = "Sideways Bias Turun ↘️"
+                            ihsg_s = "NEUTRAL ⚖️"
                         else:
-                            regime = "Sideways Normal ↔️"
-                        ihsg_cond = "NEUTRAL ⚖️"
+                            # cek volatilitas
+                            ewma_vol_s = float(np.sqrt(returns_thresh.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
+                            if ewma_vol_s > high_vol_th:
+                                regime_s = "Sideways Choppy 🌊"
+                            elif ewma_vol_s < low_vol_th:
+                                regime_s = "Sideways Calm 😴"
+                            else:
+                                regime_s = "Sideways Normal ↔️"
+                            ihsg_s = "NEUTRAL ⚖️"
+                    return regime_s, ihsg_s
+
+                # Regime live
+                regime, ihsg_cond = get_regime(df)
 
                 # PIVOT
                 hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
@@ -367,7 +388,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 res20 = float(df['High'].iloc[-21:-1].max())
                 breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-                # SIGNAL
+                # SIGNAL LIVE (dengan volume & sentimen)
                 score = 0
                 if mom_3d>0: score+=1
                 if z_score<-1.5: score+=1
@@ -377,18 +398,20 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 elif SENTIMENT_AVAILABLE and avg_sentiment<-0.2: score-=1
                 signal = "🔥 STRONG BUY" if score>=3 else ("⚡ BUY (TACTICAL)" if score>=2 else ("⏸️ HOLD / WAIT" if score==1 else "🚨 AVOID"))
 
-                # BACKTEST
-                def sig_func(sl):
+                # BACKTEST (fungsi sinyal yang konsisten dengan live, tapi tanpa sentimen)
+                def sig_func_full(sl):
                     h = float(sl['Close'].iloc[-1])
                     m3 = float((sl['Close'].iloc[-1]/sl['Close'].iloc[-4]-1)*100)
                     ema20s = float(sl['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
-                    zs = (h-sl['Close'].tail(20).mean())/sl['Close'].tail(20).std() if sl['Close'].tail(20).std()>0 else 0
+                    zs = (h - sl['Close'].tail(20).mean())/sl['Close'].tail(20).std() if sl['Close'].tail(20).std()>0 else 0
+                    vol_cond = sl['Volume'].iloc[-1] > sl['Volume'].tail(20).mean() if 'Volume' in sl.columns else False
                     s = 0
                     if m3>0: s+=1
                     if zs<-1.5: s+=1
                     if h>ema20s: s+=1
+                    if vol_cond: s+=1
                     return "🔥 STRONG BUY" if s>=2 else ("⚡ BUY (TACTICAL)" if s>=1 else "🚨 AVOID")
-                win_bt, pf_bt, avg_bt, trades_bt = backtest_signal(df, sig_func)
+                win_bt, pf_bt, avg_bt, trades_bt = backtest_signal(df, sig_func_full)
 
                 # RISK METRICS
                 roll_max = df['Close'].cummax()
@@ -409,15 +432,17 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1.0)))
                 alloc = total_capital*kelly_adj
 
-                # MONTE CARLO
+                # MONTE CARLO (dengan theta adaptif)
                 n_sim, n_days = 2000, 30
                 sim_innov = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=(n_days, n_sim))
                 paths = harga_terakhir * np.exp(np.cumsum(sim_innov, axis=0))
+                # Estimasi theta adaptif
+                theta_ou = estimate_theta_ou(df['Close'])
                 log_close = np.log(df['Close'])
                 log_mean20 = log_close.tail(20).mean()
                 log_last = np.log(harga_terakhir)
-                mu_ou = (1/20)*(log_mean20-log_last) + t_loc
-                est_besok = float(np.exp(log_last+mu_ou))
+                mu_ou = theta_ou * (log_mean20 - log_last) + t_loc
+                est_besok = float(np.exp(log_last + mu_ou))
                 sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=t_scale, size=2000)
                 prices_besok = harga_terakhir * np.exp(sim_h1)
                 low_est, up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
@@ -452,7 +477,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
                 st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f}) | Skew: `{ret_skew:.2f}`")
-                # Keterangan regime
                 st.markdown(f"**Apa artinya?** {REGIME_INFO.get(regime, '')}")
                 st.markdown(f"**Kondisi IHSG:** {IHSG_CONDITION_INFO.get(ihsg_cond, '')}")
                 st.markdown(f"**ADX:** ADX = {adx:.1f} — {'Kekuatan tren **tinggi** (>20), pasar sedang trending.' if adx > 20 else 'Kekuatan tren **rendah** (≤20), pasar cenderung sideways.'}")
@@ -472,7 +496,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.divider()
 
                 st.header("🔮 Signal & Trading Plan With Backtest ")
-                st.caption("Signal berdasarkan skor momentum, Z‑score, posisi EMA20, volume, dan sentimen berita. Backtest 6 bulan menggunakan sinyal serupa untuk mengukur performa historis (tanpa memperhitungkan slippage/biaya).")
+                st.caption("Signal berdasarkan skor momentum, Z‑score, posisi EMA20, volume, dan sentimen berita. Backtest 6 bulan menggunakan sinyal serupa (dengan volume) untuk mengukur performa historis.")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
@@ -503,26 +527,26 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
 
                 # ==========================================
-                # KESIMPULAN TRADING (DIPERBAIKI LAYOUT)
+                # KESIMPULAN TRADING
                 # ==========================================
                 st.markdown("---")
                 st.header("📋 Kesimpulan & Rekomendasi Trading")
                 
                 # Tentukan warna aksi berdasarkan sinyal
                 if "STRONG BUY" in signal:
-                    action_color = "#10b981"  # hijau
+                    action_color = "#10b981"
                     action_icon = "🟢"
                     action_text = "Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
                 elif "BUY" in signal:
-                    action_color = "#f59e0b"  # kuning
+                    action_color = "#f59e0b"
                     action_icon = "🟡"
                     action_text = "Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
                 elif "HOLD" in signal:
-                    action_color = "#3b82f6"  # biru
+                    action_color = "#3b82f6"
                     action_icon = "🔵"
                     action_text = "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
                 else:
-                    action_color = "#ef4444"  # merah
+                    action_color = "#ef4444"
                     action_icon = "🔴"
                     action_text = "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
 
