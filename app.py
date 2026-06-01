@@ -61,11 +61,15 @@ st.markdown("""
     }
     .section-title { color: #00ffcc; font-size: 18px; font-weight: bold; margin-bottom: 12px; }
     .summary-item { color: #cbd5e1; font-size: 15px; margin-bottom: 8px; }
+    .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
+    .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
+    .fundamental-table td:first-child { color: #8892b0; width: 180px; }
+    .valuation-badge { display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro (Akurasi Final)")
-st.write("Algoritma kuantitatif + berita + Backtest + Grafik. Distribusi Student‑t, ADX adaptif, Monte Carlo OU, Regime 10-State.")
+st.title("📊 Quant & Risk Engine Pro ")
+st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. Distribusi Student‑t, ADX adaptif, Monte Carlo OU, Regime 10-State.")
 
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
 if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
@@ -216,6 +220,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 returns = df['Close'].pct_change().dropna()
                 if len(returns) < 20: st.error("❌ Data historis kurang (minimal 20 hari)."); st.stop()
 
+                # === DATA FUNDAMENTAL ===
+                try:
+                    ticker_info = yf.Ticker(ticker_input).info
+                except:
+                    ticker_info = {}
+
                 # BERITA
                 news_pool = []
                 translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
@@ -357,7 +367,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     signals = []
                     for i in range(20, len(df_back)):
                         slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]
-                        # expanding threshold tiap langkah
                         if len(slice_df) >= 126:
                             sl_thresh = slice_df.iloc[:max(126, len(slice_df)-126)]
                         else:
@@ -367,7 +376,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         z_ov_sl = np.percentile(z_hist_sl.dropna(), 30) if len(z_hist_sl.dropna()) > 0 else -1.5
                         mom5_sl = sl_thresh['Close'].pct_change(5).dropna()*100
                         mom_med_sl = np.percentile(mom5_sl, 50) if len(mom5_sl) > 0 else 0.0
-                        # sinyal
                         h = float(slice_df['Close'].iloc[-1])
                         m3 = float((slice_df['Close'].iloc[-1]/slice_df['Close'].iloc[-4]-1)*100)
                         ema20s = float(slice_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
@@ -392,10 +400,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         win_rate = sum(1 for r in trades if r > 0) / len(trades)
                         profit_factor = abs(sum(r for r in trades if r > 0) / sum(r for r in trades if r < 0)) if sum(r for r in trades if r < 0) != 0 else np.inf
                         avg_return = np.mean(trades)
-                        # Max DD backtest
                         equity = np.cumprod([1+r for r in trades])
                         max_dd_bt = float(np.min(equity / np.maximum.accumulate(equity) - 1) * 100)
-                        # Sharpe backtest
                         sharpe_bt = np.mean(trades) / np.std(trades) * np.sqrt(252/30) if np.std(trades) > 0 else 0
                         return win_rate, profit_factor, avg_return, len(trades), max_dd_bt, sharpe_bt
                     return 0, 0, 0, 0, 0, 0
@@ -437,7 +443,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 paths = np.zeros((n_days, n_sim))
                 current_log = np.log(harga_terakhir)
                 for day in range(n_days):
-                    # Update mean setiap 5 hari
                     if day % 5 == 0 and day != 0:
                         if len(log_mean_series) > day:
                             log_mean20_val = log_mean_series.iloc[-day-1]
@@ -463,7 +468,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 hit_sl = (np.any(paths <= sl, axis=0).sum() / n_sim) * 100
                 prob_bull = ((sim_h1 > 0).sum() / 2000) * 100
 
-                # ==================== GRAFIK ====================
+                # ==================== TAMPILAN ====================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
                 st.header("📰 Sentimen Berita ")
                 st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot.")
@@ -487,6 +492,83 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"**Apa artinya?** {REGIME_INFO.get(regime, '')}")
                 st.markdown(f"**Kondisi IHSG:** {IHSG_CONDITION_INFO.get(ihsg_cond, '')}")
                 st.markdown(f"**ADX threshold adaptif:** {adx_threshold:.1f}")
+                st.divider()
+
+                # ==================== ANALISIS FUNDAMENTAL ====================
+                st.header("📊 Analisis Fundamental")
+                st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia). Klasifikasi berdasarkan PER & PBV sebagai acuan sederhana.")
+                if ticker_info:
+                    # Ambil data yang relevan
+                    market_cap = ticker_info.get('marketCap')
+                    per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
+                    pbv = ticker_info.get('priceToBook')
+                    eps = ticker_info.get('trailingEps')
+                    roe = ticker_info.get('returnOnEquity')
+                    debt_equity = ticker_info.get('debtToEquity')
+                    dividend_yield = ticker_info.get('dividendYield')
+
+                    # Tampilkan metrik dalam tabel
+                    table_html = "<table class='fundamental-table'>"
+                    table_html += f"<tr><td>Market Cap</td><td>{market_cap:,.0f} IDR</td></tr>" if market_cap else ""
+                    table_html += f"<tr><td>PER (Price to Earnings)</td><td>{per:.2f}x</td></tr>" if per else ""
+                    table_html += f"<tr><td>PBV (Price to Book)</td><td>{pbv:.2f}x</td></tr>" if pbv else ""
+                    table_html += f"<tr><td>EPS (Earning per Share)</td><td>{eps:.2f}</td></tr>" if eps else ""
+                    table_html += f"<tr><td>ROE</td><td>{roe*100:.1f}%</td></tr>" if roe else ""
+                    table_html += f"<tr><td>Debt/Equity</td><td>{debt_equity:.2f}%</td></tr>" if debt_equity else ""
+                    table_html += f"<tr><td>Dividend Yield</td><td>{dividend_yield*100:.2f}%</td></tr>" if dividend_yield else ""
+                    table_html += "</table>"
+                    st.markdown(table_html, unsafe_allow_html=True)
+
+                    # Interpretasi fundamental
+                    interpretation = []
+                    if per:
+                        if per < 10:
+                            per_status = "Rendah (undervalued)"
+                            per_color = "#10b981"
+                        elif per > 25:
+                            per_status = "Tinggi (overvalued)"
+                            per_color = "#ef4444"
+                        else:
+                            per_status = "Moderat"
+                            per_color = "#f59e0b"
+                        interpretation.append(f"PER {per:.1f}x tergolong <span style='color:{per_color}; font-weight:bold;'>{per_status}</span>.")
+                    if pbv:
+                        if pbv < 1:
+                            pbv_status = "di bawah 1 (undervalued)"
+                            pbv_color = "#10b981"
+                        elif pbv > 3:
+                            pbv_status = "di atas 3 (overvalued)"
+                            pbv_color = "#ef4444"
+                        else:
+                            pbv_status = "normal"
+                            pbv_color = "#f59e0b"
+                        interpretation.append(f"PBV {pbv:.1f}x <span style='color:{pbv_color}; font-weight:bold;'>{pbv_status}</span>.")
+                    if roe:
+                        if roe > 0.15:
+                            roe_status = "baik (>15%)"
+                            roe_color = "#10b981"
+                        elif roe < 0.05:
+                            roe_status = "rendah"
+                            roe_color = "#ef4444"
+                        else:
+                            roe_status = "cukup"
+                            roe_color = "#f59e0b"
+                        interpretation.append(f"ROE {roe*100:.1f}% tergolong <span style='color:{roe_color}; font-weight:bold;'>{roe_status}</span>.")
+                    if debt_equity:
+                        if debt_equity > 100:
+                            de_status = "tinggi, risiko leverage besar"
+                            de_color = "#ef4444"
+                        else:
+                            de_status = "aman"
+                            de_color = "#10b981"
+                        interpretation.append(f"Debt/Equity {debt_equity:.1f}% <span style='color:{de_color}; font-weight:bold;'>{de_status}</span>.")
+
+                    if interpretation:
+                        st.markdown("**Interpretasi:** " + " ".join(interpretation), unsafe_allow_html=True)
+                    else:
+                        st.markdown("Data fundamental tidak mencukupi untuk interpretasi.")
+                else:
+                    st.markdown("Data fundamental tidak tersedia untuk saham ini.")
                 st.divider()
 
                 st.header("📊 Momentum & Z‑Score")
