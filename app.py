@@ -237,10 +237,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 if len(returns) < 20: st.error("❌ Data historis kurang (minimal 20 hari)."); st.stop()
 
                 # === DATA FUNDAMENTAL ===
+                ticker_info = {}
                 try:
-                    ticker_info = yf.Ticker(ticker_input).info
-                except:
-                    ticker_info = {}
+                ticker = yf.Ticker(ticker_input)
+                ticker_info = ticker.info
+                if not ticker_info:
+                st.warning("⚠️ Data fundamental kosong (mungkin rate limit Yahoo Finance). Coba lagi beberapa saat.")
+                except Exception as e:
+                st.warning(f"⚠️ Gagal mengambil data fundamental: {e}")
 
                 # BERITA
                 news_pool = []
