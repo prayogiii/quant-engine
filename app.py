@@ -83,7 +83,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro (Final + Quant Score 100)")
+st.title("📊 Quant & Risk Engine Pro ")
 st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. **Quant Score 100** sebagai otak utama pengambilan keputusan.")
 
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
@@ -379,16 +379,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         / df['Volume'].tail(20).mean()
                     )
 
-                # SIGNAL LIVE
-                score = 0
-                if mom_3d > mom_median_th: score += 1
-                if z_score < z_oversold_th: score += 1
-                if harga_terakhir > ema20: score += 1
-                if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean(): score += 1
-                if SENTIMENT_AVAILABLE and avg_sentiment > 0.2: score += 1
-                elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2: score -= 1
-                signal = "🔥 STRONG BUY" if score >= 3 else ("⚡ BUY (TACTICAL)" if score >= 2 else ("⏸️ HOLD / WAIT" if score == 1 else "🚨 AVOID"))
-
                 # BACKTEST EXPANDING WINDOW
                 def backtest_expanding(df, periods=126):
                     df_back = df.iloc[-periods:].copy()
@@ -566,6 +556,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 else:
                     grade = "D 🔴"
 
+                # === SIGNAL BARU BERDASARKAN QUANT SCORE ===
+                if quant_score >= 85:
+                    signal = "🔥 STRONG BUY"
+                elif quant_score >= 75:
+                    signal = "⚡ BUY (TACTICAL)"
+                elif quant_score >= 65:
+                    signal = "⏸️ HOLD / WATCH"
+                elif quant_score >= 50:
+                    signal = "⚠️ SPECULATIVE"
+                else:
+                    signal = "🚨 AVOID"
+
                 # ==================== TAMPILAN ====================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
 
@@ -700,15 +702,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 # --- KESIMPULAN & REKOMENDASI (DENGAN QUANT SCORE) ---
                 st.markdown("---")
                 st.header("📋 Kesimpulan & Rekomendasi Trading")
-                if "STRONG BUY" in signal:
-                    action_color, action_icon, action_text = "#10b981", "🟢", "Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
-                elif "BUY" in signal:
-                    action_color, action_icon, action_text = "#f59e0b", "🟡", "Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
-                elif "HOLD" in signal:
-                    action_color, action_icon, action_text = "#3b82f6", "🔵", "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
+                # Rekomendasi berdasarkan Quant Score
+                if quant_score >= 85:
+                    action_color, action_icon, action_text = "#10b981", "🟢", "Sangat menarik untuk dibeli. Gunakan alokasi Kelly dengan stop loss di bawah S1."
+                elif quant_score >= 75:
+                    action_color, action_icon, action_text = "#f59e0b", "🟡", "Layak dipertimbangkan. Bisa entry dengan porsi lebih kecil."
+                elif quant_score >= 65:
+                    action_color, action_icon, action_text = "#3b82f6", "🔵", "Cukup baik. Tahan jika sudah punya, tapi tunggu konfirmasi tambahan untuk entry baru."
+                elif quant_score >= 50:
+                    action_color, action_icon, action_text = "#f97316", "🟠", "Spekulatif. Hanya untuk trader agresif dengan modal kecil."
                 else:
-                    action_color, action_icon, action_text = "#ef4444", "🔴", "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
-                
+                    action_color, action_icon, action_text = "#ef4444", "🔴", "Hindari. Jangan masuk, atau keluar jika sudah memiliki posisi."
+
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     st.markdown(f"""
