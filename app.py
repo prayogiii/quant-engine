@@ -76,8 +76,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro (Final + Fundamental)")
-st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. Distribusi Student‑t, ADX adaptif, Monte Carlo OU, Regime 10-State.")
+st.title("📊 Quant & Risk Engine Pro (Final + Quant Score 100)")
+st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental + **Quant Score 100** sebagai otak utama.")
 
 if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
 if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
@@ -281,6 +281,16 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     else: beta_ihsg=1.0
                 except: beta_ihsg=1.0
 
+                # === RELATIVE STRENGTH VS IHSG (20 hari) ===
+                try:
+                    rs_20 = (
+                        (df['Close'].iloc[-1] / df['Close'].iloc[-20])
+                        /
+                        (ihsg['Close'].iloc[-1] / ihsg['Close'].iloc[-20])
+                    )
+                except:
+                    rs_20 = 1.0
+
                 # ==================== THRESHOLD & PARAMETER DARI 6 BULAN PERTAMA ====================
                 split_idx = max(126, len(df) - 126)
                 df_thresh = df.iloc[:split_idx]
@@ -353,6 +363,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 mom_10d = float((df['Close'].iloc[-1]/df['Close'].iloc[-11]-1)*100)
                 z_score = (harga_terakhir - df['Close'].tail(20).mean()) / df['Close'].tail(20).std() if df['Close'].tail(20).std()>0 else 0
                 ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
+
+                # === VOLUME SPIKE ===
+                vol_ratio = 1.0
+                if 'Volume' in df.columns:
+                    vol_ratio = (
+                        df['Volume'].iloc[-1]
+                        / df['Volume'].tail(20).mean()
+                    )
 
                 # SIGNAL LIVE
                 score = 0
@@ -456,9 +474,111 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 hit_sl = (np.any(paths <= sl, axis=0).sum() / n_sim) * 100
                 prob_bull = ((sim_h1 > 0).sum() / 2000) * 100
 
+                # === DATA FUNDAMENTAL UNTUK QUANT SCORE ===
+                per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
+                pbv = ticker_info.get('priceToBook')
+                roe = ticker_info.get('returnOnEquity')
+
+                # ==================== QUANT SCORE 100 ====================
+                quant_score = 0
+                # 1. REGIME (20)
+                if "Strong Bullish" in regime:
+                    quant_score += 20
+                elif "Bullish" in regime:
+                    quant_score += 16
+                elif "Early Recovery" in regime:
+                    quant_score += 12
+                elif "Bullish Accumulation" in regime:
+                    quant_score += 10
+                elif "Distribution" in regime:
+                    quant_score += 6
+                else:
+                    quant_score += 2
+
+                # 2. ADX (15)
+                if adx > 40:
+                    quant_score += 15
+                elif adx > 30:
+                    quant_score += 12
+                elif adx > 20:
+                    quant_score += 8
+                else:
+                    quant_score += 3
+
+                # 3. RELATIVE STRENGTH VS IHSG (15)
+                if rs_20 > 1.10:
+                    quant_score += 15
+                elif rs_20 > 1.03:
+                    quant_score += 10
+                elif rs_20 > 1:
+                    quant_score += 6
+
+                # 4. VOLUME SPIKE (10)
+                if vol_ratio > 2:
+                    quant_score += 10
+                elif vol_ratio > 1.5:
+                    quant_score += 7
+                elif vol_ratio > 1:
+                    quant_score += 4
+
+                # 5. SENTIMEN (10)
+                if avg_sentiment > 0.30:
+                    quant_score += 10
+                elif avg_sentiment > 0.10:
+                    quant_score += 7
+                elif avg_sentiment >= 0:
+                    quant_score += 4
+
+                # 6. MONTE CARLO (15)
+                if prob_bull > 70:
+                    quant_score += 15
+                elif prob_bull > 60:
+                    quant_score += 10
+                elif prob_bull > 50:
+                    quant_score += 5
+
+                # 7. FUNDAMENTAL (15)
+                fund_score = 0
+                if per is not None and per < 15:
+                    fund_score += 5
+                if pbv is not None and pbv < 2:
+                    fund_score += 5
+                if roe is not None and roe > 0.15:
+                    fund_score += 5
+                quant_score += fund_score
+
+                # GRADE
+                if quant_score >= 85:
+                    grade = "A+ 🚀"
+                elif quant_score >= 75:
+                    grade = "A 🟢"
+                elif quant_score >= 65:
+                    grade = "B 🟡"
+                elif quant_score >= 50:
+                    grade = "C 🟠"
+                else:
+                    grade = "D 🔴"
+
                 # ==================== TAMPILAN ====================
                 st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
-                st.header("📰 Sentimen Berita ")
+
+                # --- QUANT SCORE DASHBOARD (DITAMPILKAN UTAMA) ---
+                st.header("🏆 Quant Score 100")
+                q1, q2 = st.columns(2)
+                q1.metric("Quant Score", f"{quant_score}/100")
+                q2.metric("Grade", grade)
+                st.caption("""
+                Interpretasi:
+                85+ = Sangat menarik
+                75–84 = Layak dipertimbangkan
+                65–74 = Cukup baik
+                50–64 = Spekulatif
+                <50 = Hindari
+                """)
+                st.divider()
+
+                # --- BERITA ---
+                st.header("📰 Sentimen Berita")
                 st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot.")
                 c1,c2=st.columns([1,2])
                 c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
@@ -472,7 +592,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                         st.markdown("")
                 st.divider()
 
-                st.header("🧬 Regime & Volatility ")
+                # --- REGIME ---
+                st.header("🧬 Regime & Volatility")
                 m1,m2,m3=st.columns(3)
                 m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
                 st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f})")
@@ -481,15 +602,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"**ADX threshold adaptif:** {adx_threshold:.1f}")
                 st.divider()
 
-                # ANALISIS FUNDAMENTAL
+                # --- FUNDAMENTAL (DETAIL) ---
                 st.header("📊 Analisis Fundamental")
                 st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia). Klasifikasi berdasarkan PER & PBV sebagai acuan sederhana.")
                 if ticker_info:
                     market_cap = ticker_info.get('marketCap')
-                    per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
-                    pbv = ticker_info.get('priceToBook')
                     eps = ticker_info.get('trailingEps')
-                    roe = ticker_info.get('returnOnEquity')
                     debt_equity = ticker_info.get('debtToEquity')
                     dividend_yield = ticker_info.get('dividendYield')
                     table_html = "<table class='fundamental-table'>"
@@ -530,21 +648,21 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     st.markdown("Data fundamental tidak tersedia untuk saham ini.")
                 st.divider()
 
-                # MOMENTUM
+                # --- MOMENTUM ---
                 st.header("📊 Momentum & Z‑Score")
                 mo1,mo2,mo3,mo4=st.columns(4)
                 mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
                 st.divider()
 
-                # PIVOT
+                # --- PIVOT ---
                 st.header("🎯 Pivot & S/R")
                 st.write(f"Breakout Res20: `{breakout}`")
                 p1,p2,p3,p4,p5=st.columns(5)
                 p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
                 st.divider()
 
-                # SIGNAL & BACKTEST
-                st.header("🔮 Signal & Trading Plan With Backtest ")
+                # --- SIGNAL & BACKTEST ---
+                st.header("🔮 Signal & Trading Plan With Backtest")
                 t1,t2,t3,t4=st.columns(4)
                 t1.metric("Signal", signal)
                 t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
@@ -561,7 +679,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 b6.metric("Trades", f"{trades_bt}")
                 st.divider()
 
-                # RISK
+                # --- RISK ---
                 st.header("🛡️ Risk & Portfolio Sizing")
                 r1,r2,r3=st.columns(3)
                 r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
@@ -570,12 +688,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 st.markdown(f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30:.2f}%`) | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
                 st.divider()
 
-                # MONTE CARLO
+                # --- MONTE CARLO ---
                 st.header("🎲 Monte Carlo (OU, Student‑t, vol adaptif)")
                 pr1,pr2,pr3=st.columns(3)
                 pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
 
-                # GRAFIK (jika plotly tersedia)
+                # --- GRAFIK (jika plotly tersedia) ---
                 if PLOTLY_AVAILABLE:
                     st.header("📈 Chart Harga & Indikator")
                     fig = go.Figure()
@@ -587,7 +705,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
                     st.plotly_chart(fig, use_container_width=True)
 
-                # KESIMPULAN
+                # --- KESIMPULAN ---
                 st.markdown("---")
                 st.header("📋 Kesimpulan & Rekomendasi Trading")
                 if "STRONG BUY" in signal:
