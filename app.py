@@ -107,7 +107,7 @@ def analyze_broker_summary(entries: List[BrokerEntry], current_price: float) -> 
     for b in entries:
         if b.buy_freq > 0: all_lot_sizes.append(b.avg_buy_lot)
         if b.sell_freq > 0: all_lot_sizes.append(b.avg_sell_lot)
-    
+        
     median_lot = np.median(all_lot_sizes) if all_lot_sizes else 1.0
     whale_threshold = max(1.0, median_lot * 4.0)
     whale_presence = any(b.avg_buy_lot > whale_threshold or b.avg_sell_lot > whale_threshold for b in entries)
@@ -177,8 +177,6 @@ def fetch_rss_news(ticker: str) -> List[dict]:
             root = ET.fromstring(res.text)
             for item in root.findall(".//item"):
                 title = item.find("title").text
-                pub_date_str = item.find("pubDate").text
-                # Estimasi pemrosesan waktu sederhana
                 news_items[title] = {"title": title, "time": datetime.datetime.now()}
         except:
             continue
@@ -191,7 +189,6 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     if not api_key:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
     
-    # PERBAIKAN: Menggunakan endpoint v1beta dengan model gemini-3-flash-preview sesuai MainActivity Anda
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     
@@ -213,7 +210,6 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
             
         raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
         
-        # Bersihkan noise string untuk mengambil JSON saja
         start_idx = raw_text.find("{")
         end_idx = raw_text.rfind("}")
         
@@ -228,6 +224,7 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     except Exception as e:
         st.error(f"🚨 Detail Error System: {str(e)}")
         return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": f"Terjadi exception: {str(e)}"}
+
 # ===============================================================================
 # STREAMLIT UI SYSTEM
 # ===============================================================================
@@ -261,7 +258,7 @@ with col_left:
     run_analysis = st.button("▶ RUN HYPER-HYBRID MACRO ENGINE V12", use_container_width=True)
 
 with col_right:
-    st.subheader("▼ BROKER SUMMARY MATRIX (BUM\")")
+    st.subheader("▼ BROKER SUMMARY MATRIX (BUM)")
     st.caption("Tips: Kamu bisa Copy-Paste tabel langsung dari Excel/Spreadsheet ke grid di bawah ini.")
     
     # Setup tabel kosong interaktif pengganti addBrokerRow manual
@@ -350,8 +347,20 @@ if run_analysis:
                 st.info(ai_res.get("reason", "No reason provided by AI."))
                 
                 col_score_1, col_score_2 = st.columns(2)
-                col_score_1.progress(float(ai_res.get("stock_score", 0.0)) + 1.0 / 2.0, text=f"Stock Score Bias: {ai_res.get('stock_score')}")
-                col_score_2.progress(float(ai_res.get("market_score", 0.0)) + 1.0 / 2.0, text=f"IHSG Score Bias: {ai_res.get('market_score')}")
+                
+                # PERBAIKAN: Normalisasi matematika dengan kurung (Score + 1) / 2 & Clamping Pengaman
+                raw_stock_score = float(ai_res.get("stock_score", 0.0))
+                raw_market_score = float(ai_res.get("market_score", 0.0))
+                
+                normalized_stock = (raw_stock_score + 1.0) / 2.0
+                normalized_market = (raw_market_score + 1.0) / 2.0
+                
+                safe_stock_val = max(0.0, min(1.0, normalized_stock))
+                safe_market_val = max(0.0, min(1.0, normalized_market))
+                
+                col_score_1.progress(safe_stock_val, text=f"Stock Score Bias: {raw_stock_score}")
+                col_score_2.progress(safe_market_val, text=f"IHSG Score Bias: {raw_market_score}")
+                
                 st.caption(f"Tingkat Kepercayaan Model AI: {ai_res.get('confidence', '0')}%")
 
             with tab2:
