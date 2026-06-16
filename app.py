@@ -26,13 +26,6 @@ SMART_KEYWORDS = [
     "bond","yield","rupiah","ekspor","impor","china","nikkei","dow jones","nasdaq","akuisisi"
 ]
 
-IDX_EXCHANGE_HOLIDAYS = {
-    "20250101", "20250127", "20250128", "20250129", "20250328", "20250329",
-    "20250331", "20250401", "20250402", "20250403", "20250404", "20250407",
-    "20250501", "20250512", "20250529", "20250601", "20250606", "20250627",
-    "20250817", "20250905", "20251225", "20251226", "20260101", "20261225"
-}
-
 # ===============================================================================
 # DATA STRUCTURES & HELPERS
 # ===============================================================================
@@ -122,12 +115,11 @@ def analyze_broker_summary_ai(entries: List[BrokerEntry], current_price: float) 
     total_vol = sum(e.total_vol for e in entries)
     net_lot = sum(e.net_lot for e in entries)
     
-    # Perhitungan Institutional Flow Score
     flow_ratio = net_lot / max(1, total_vol)
-    median_lot = np.median([e.avg_buy_lot for e in entries if e.buy_freq > 0] + [e.avg_sell_lot for e in entries if e.sell_freq > 0])
+    valid_lots = [e.avg_buy_lot for e in entries if e.buy_freq > 0] + [e.avg_sell_lot for e in entries if e.sell_freq > 0]
+    median_lot = np.median(valid_lots) if valid_lots else 1.0
     whale_present = any(e.avg_buy_lot > median_lot * 4 or e.avg_sell_lot > median_lot * 4 for e in entries)
     
-    # Estimasi Price Pressure Basis Gain/Loss Broker
     w_buy_px = sum(e.avg_buy_price * e.buy_lot for e in entries if e.buy_lot > 0) / max(1, sum(e.buy_lot for e in entries))
     w_sell_px = sum(e.avg_sell_price * e.sell_lot for e in entries if e.sell_lot > 0) / max(1, sum(e.sell_lot for e in entries))
     
@@ -156,7 +148,7 @@ def analyze_with_gemini(ticker: str, headlines: List[str], api_key: str, model_n
         return {"stock_score": 0.0, "market_score": 0.0, "label": "Neutral", "reason": "API Limit/Format Error"}
 
 # ===============================================================================
-# FITUR 5, 6, 7, 8: QUANTITATIVE TECHNICAL CALCULATION MATRIX
+# FITUR 6, 7, 8: QUANTITATIVE TECHNICAL CALCULATION MATRIX
 # ===============================================================================
 def compute_quantitative_matrix(df: pd.DataFrame, current_price: float) -> dict:
     closes = df["adj_close"].to_numpy()
@@ -169,7 +161,6 @@ def compute_quantitative_matrix(df: pd.DataFrame, current_price: float) -> dict:
     regime = "HIGH VOLATILITY RISK" if volatility > 0.35 else "STABLE CONSOLIDATION"
     
     # 7. Momentum & Mean Reversion (RSI & Bollinger Band Width)
-    # Simple RSI approximation
     gains = np.where(log_returns > 0, log_returns, 0)
     losses = np.where(log_returns < 0, -log_returns, 0)
     avg_gain = np.mean(gains[-14:]) if len(gains) >= 14 else 0.01
@@ -182,7 +173,7 @@ def compute_quantitative_matrix(df: pd.DataFrame, current_price: float) -> dict:
     bb_width = (std20 * 4) / ma20
     momentum_score = 1.0 if rsi < 30 else -1.0 if rsi > 70 else (50 - rsi) / 20
     
-    # 8. Pivot Points & Support/Resistance (Standard Floor Pivot)
+    # 8. Pivot Points & Support/Resistance
     last_h, last_l, last_c = highs[-1], lows[-1], closes[-1]
     pivot = (last_h + last_l + last_c) / 3.0
     r1 = (2.0 * pivot) - last_l
@@ -204,15 +195,12 @@ def run_monte_carlo_v12(current_price: float, volatility: float, bias: float, tp
     days = 20
     dt = 1 / 252
     
-    # Integrasi V12 Adjusted Drift dengan MC_PESSIMISM
     adjusted_drift = (bias * AI_SIGNAL_CAP) * (1.0 - MC_PESSIMISM)
-    
     price_paths = np.zeros((days, simulations))
     price_paths[0] = current_price
     
     for t in range(1, days):
         rand = np.random.standard_normal(simulations)
-        # Geometric Brownian Motion Formula
         price_paths[t] = price_paths[t-1] * np.exp((adjusted_drift - 0.5 * volatility**2) * dt + volatility * np.sqrt(dt) * rand)
     
     final_prices = price_paths[-1]
@@ -226,43 +214,34 @@ def run_monte_carlo_v12(current_price: float, volatility: float, bias: float, tp
 # FITUR 10 & 11: ADVANCED RISK ENGINE METRICS
 # ===============================================================================
 def compute_advanced_risk_metrics(df: pd.DataFrame, sl_price: float, current_price: float) -> dict:
-    if df.empty:
-        return {"var_95": 0.05, "max_drawdown": 0.1, "sharpe": 1.0}
+    if df.empty: return {"var_95": 0.05, "max_drawdown": 0.1, "sharpe": 1.0, "allocation": 0.05}
     closes = df["adj_close"].to_numpy()
     log_returns = np.diff(np.log(closes))
     
-    # 11. Value at Risk (VaR 95% Parametrik)
     var_95 = np.percentile(log_returns, 5) if len(log_returns) > 5 else -0.03
-    
-    # Maximum Drawdown
     cum_returns = np.cumprod(1 + log_returns)
     running_max = np.maximum.accumulate(cum_returns)
-    # Proteksi pembagian dengan nol jika running_max berisi 0
     running_max = np.where(running_max == 0, 1.0, running_max)
     drawdowns = (cum_returns - running_max) / running_max
     max_dd = np.min(drawdowns) if len(drawdowns) > 0 else -0.10
     
-    # Sharpe Ratio (Risk Free Rate diasumsikan 0.06 / BI Rate)
     excess_ret = log_returns - (0.06/252)
     sharpe = (np.mean(excess_ret) / np.std(log_returns)) * np.sqrt(252) if np.std(log_returns) > 0 else 0.0
-    
-    # 10. Risk Allocation Engine
-    risk_per_share = current_price - sl_price
     allocation_pct = 0.05 if sharpe < 1.0 else 0.10 if sharpe < 2.0 else 0.15
     
     return {"var_95": abs(var_95), "max_drawdown": abs(max_dd), "sharpe": sharpe, "allocation": allocation_pct}
 
 # ===============================================================================
-# MAIN CONFIGURATION STREAMLIT INTERFACE
+# MAIN STREAMLIT INITIALIZATION & CONFIGURATION
 # ===============================================================================
 st.set_page_config(page_title="Hyper-Hybrid Macro Engine V12", layout="wide")
 st.title("📊 HYPER-HYBRID QUANTITATIVE ENGINE V12")
 
-# Inisialisasi Adaptive Memory State jika belum ada
-if "v12_memory_runs" not in st.session_state:
-    st.session_state["v12_memory_runs"] = 0
-    st.session_state["v12_cumulative_bias"] = 0.0
-    st.session_state["v12_last_tickers"] = []
+# Inisialisasi State Memori Adaptif dan RIWAYAT PREDIKSI
+if "v12_memory_runs" not in st.session_state: st.session_state["v12_memory_runs"] = 0
+if "v12_cumulative_bias" not in st.session_state: st.session_state["v12_cumulative_bias"] = 0.0
+if "v12_last_tickers" not in st.session_state: st.session_state["v12_last_tickers"] = []
+if "prediction_history" not in st.session_state: st.session_state["prediction_history"] = []
 
 with st.sidebar:
     st.header("⚙ CORE V12 API CONFIG")
@@ -270,13 +249,18 @@ with st.sidebar:
     if saved_key: st.session_state["gemini_api_key"] = saved_key
     selected_model = st.selectbox("Model Engine", ["gemini-1.5-flash", "gemini-3-flash-preview"])
     
-    # FITUR 3: V12 ADAPTIVE MEMORY STATUS CONTROL PANEL
+    # FITUR 3: V12 ADAPTIVE MEMORY STATUS
     st.markdown("---")
     st.subheader("🧠 Adaptive Memory Status")
     st.progress(min(1.0, st.session_state["v12_memory_runs"] / 10.0))
     st.caption(f"Engine Iterations: {st.session_state['v12_memory_runs']} Sessions")
     st.caption(f"Long-term Bias Anchoring: {st.session_state['v12_cumulative_bias']:.4f}")
     st.caption(f"Memory Buffer Cache: {', '.join(st.session_state['v12_last_tickers'][-3:])}")
+    
+    # CLEAR HISTORY BUTTON
+    if st.button("🗑 Hapus Semua Riwayat"):
+        st.session_state["prediction_history"] = []
+        st.success("Riwayat berhasil dibersihkan!")
 
 col_inp, col_grid = st.columns([1, 2])
 with col_inp:
@@ -291,21 +275,18 @@ with col_grid:
     ])
     edited_df = st.data_editor(init_df, num_rows="dynamic", use_container_width=True)
 
-# CORE PROCESSING BLOCK
+# CORE PIPELINE PROCESSING
 if run_btn:
     if not st.session_state.get("gemini_api_key"):
         st.error("❌ Masukkan API Key untuk mengaktifkan AI Sentiment Consensus!")
     else:
         with st.spinner("Executing V12 Quantitative Matrix Pipelines..."):
-            # 1. Fetch Yahoo Raw Data
             y_res = fetch_yahoo_raw_data(f"{ticker}.JK")
             df_raw = y_res["data"]
             price_current = y_res["latest_price"]
             
-            # Fetch News Titles
             news_headlines = fetch_rss_news(ticker)
             
-            # Parse Broker Data Frame
             entries = []
             for _, r in edited_df.iterrows():
                 if pd.notna(r["Broker"]) and str(r["Broker"]).strip() != "":
@@ -316,55 +297,54 @@ if run_btn:
                         avg_buy_price=float(r["Avg Buy Px"]), avg_sell_price=float(r["Avg Sell Px"])
                     ))
             
-            # 4. Broker Summary Analytics Engine & AI Calls
             brk_out = analyze_broker_summary_ai(entries, price_current)
             ai_out = analyze_with_gemini(ticker, news_headlines, st.session_state["gemini_api_key"], selected_model)
-            
-            # 6, 7, 8. Quantitative Calculations Engine
             q_out = compute_quantitative_matrix(df_raw, price_current)
             
-            # 5. V12 CONSENSUS MULTI-FACTOR ENGINE (Softmax Core Allocation)
+            # 5. V12 CONSENSUS ENGINE
             factors = ["Bandarmology", "AI News", "Momentum", "Mean Reversion"]
             raw_scores = [brk_out["score"], float(ai_out.get("stock_score", 0.0)), q_out["momentum_score"], (50 - q_out["rsi"])/50]
             weights = softmax_weights(raw_scores, temp=SOFTMAX_TEMP)
-            
             combined_consensus_bias = float(np.sum(np.array(raw_scores) * weights))
             
-            # Update Adaptive Memory State
+            # Adaptive Memory Updates
             st.session_state["v12_memory_runs"] += 1
             st.session_state["v12_cumulative_bias"] = (st.session_state["v12_cumulative_bias"] * 0.7) + (combined_consensus_bias * 0.3)
             if ticker not in st.session_state["v12_last_tickers"]: st.session_state["v12_last_tickers"].append(ticker)
             
-            # 9. PREDIKSI & TRADING PLAN CALCULATOR BASE TICK
+            # 8 & 9. PIVOT & TRADING PLAN CALCULATOR
             t_size = tick(int(price_current))
             sl_price = round((price_current * (1.0 - (0.04 + abs(combined_consensus_bias)*0.05))) / t_size) * t_size
             tp1_price = round((price_current * (1.0 + (0.05 + combined_consensus_bias*0.1))) / t_size) * t_size
             tp2_price = round((price_current * (1.0 + (0.10 + combined_consensus_bias*0.15))) / t_size) * t_size
             
-            # 12. RUN PROBABILITY MONTE CARLO ENGINE (1000 Sim x 0.82)
+            # 12. PROBABILITY MONTE CARLO
             mc_out = run_monte_carlo_v12(price_current, q_out["volatility"], combined_consensus_bias, tp1_price, sl_price)
-            
-            # 10, 11. RISK ENGINE & ADVANCED RISK METRICS
             r_out = compute_advanced_risk_metrics(df_raw, sl_price, price_current)
             
+            # SIMPAN KE FITUR RIWAYAT (Max Capped 30 Item)
+            now_time = (datetime.datetime.utcnow() + datetime.timedelta(hours=7)).strftime("%d %b %Y, %H:%M WIB")
+            st.session_state["prediction_history"].insert(0, {
+                "ticker": ticker, "time": now_time, "price": price_current,
+                "bias": combined_consensus_bias, "tp1": tp1_price, "sl": sl_price,
+                "p_tp": mc_out["p_tp"], "action": "BUY / ACCUM" if combined_consensus_bias > 0.05 else "REDUCE / AVOID" if combined_consensus_bias < -0.05 else "HOLD"
+            })
+            if len(st.session_state["prediction_history"]) > 30: st.session_state["prediction_history"].pop()
+
             # ===============================================================================
-            # RENDERING OUTPUT DASHBOARD GRID
+            # RENDERING OUTPUT INTERFACE
             # ===============================================================================
             st.success(f"### 🎯 V12 CRITICAL QUANTUM SUMMARY: {ticker}")
             
-            # Master Metrics Row
             cm1, cm2, cm3, cm4 = st.columns(4)
             cm1.metric("Current Yahoo Price", f"Rp {price_current:,.0f}")
             cm2.metric("Consensus Bias Score", f"{combined_consensus_bias:.4f}")
             cm3.metric("Monte Carlo Target (Mean)", f"Rp {mc_out['mean_target']:,.0f}")
-            cm4.metric("Engine Recommendation", "BUY / ACCUM" if combined_consensus_bias > 0.05 else "REDUCE / AVOID" if combined_consensus_bias < -0.05 else "HOLD")
+            cm4.metric("Engine Recommendation", st.session_state["prediction_history"][0]["action"])
             
             tab_data, tab_consensus, tab_plan, tab_risk, tab_report = st.tabs([
-                "📁 1. Yahoo Raw & Broker Summary", 
-                "🤝 5. V12 Consensus Engine", 
-                "🎯 8&9. Pivot & Trading Plan", 
-                "🛡 10&11. Advanced Risk Engine", 
-                "📝 2. V12 Self Learning Report"
+                "📁 1. Yahoo Raw & Broker Summary", "🤝 5. V12 Consensus Engine", 
+                "🎯 8&9. Pivot & Trading Plan", "🛡 10&11. Advanced Risk Engine", "txt 2. V12 Self Learning Report"
             ])
             
             with tab_data:
@@ -379,23 +359,16 @@ if run_btn:
             
             with tab_consensus:
                 st.write("##### Multi-Factor Softmax Weighting Profile")
-                f_df = pd.DataFrame({
-                    "Factor Component": factors,
-                    "Raw Predictive Score": raw_scores,
-                    "Softmax Dynamic Weight": weights
-                })
-                st.table(f_df)
+                st.table(pd.DataFrame({"Factor Component": factors, "Raw Predictive Score": raw_scores, "Softmax Dynamic Weight": weights}))
                 st.caption(f"Tempering Factor applied: {SOFTMAX_TEMP} | Clipping Guard rails active: ±{AI_SIGNAL_CAP}")
             
             with tab_plan:
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
                     st.write("##### Pivot Points & S/R Levels")
-                    st.write(f"- **Resistance 2 (R2):** Rp {q_out['r2']:,.0f}")
-                    st.write(f"- **Resistance 1 (R1):** Rp {q_out['r1']:,.0f}")
+                    st.write(f"- **Resistance 2 (R2):** Rp {q_out['r2']:,.0f}"); st.write(f"- **Resistance 1 (R1):** Rp {q_out['r1']:,.0f}")
                     st.metric("Standard Pivot Point", f"Rp {q_out['pivot']:,.0f}")
-                    st.write(f"- **Support 1 (S1):** Rp {q_out['s1']:,.0f}")
-                    st.write(f"- **Support 2 (S2):** Rp {q_out['s2']:,.0f}")
+                    st.write(f"- **Support 1 (S1):** Rp {q_out['s1']:,.0f}"); st.write(f"- **Support 2 (S2):** Rp {q_out['s2']:,.0f}")
                 with col_p2:
                     st.write("##### Target & Execution Matrix")
                     st.info(f"**Optimal Entry Range:** Rp {int(price_current - t_size)} - Rp {int(price_current + t_size)}")
@@ -406,21 +379,24 @@ if run_btn:
             with tab_risk:
                 st.write("##### Advanced Mathematical Risk Summary")
                 rk1, rk2, rk3, rk4 = st.columns(4)
-                rk1.metric("Value at Risk (95% VaR)", f"{r_out['var_95']:.2%}")
-                rk2.metric("Historical Max Drawdown", f"{r_out['max_drawdown']:.2%}")
-                rk3.metric("Ex-Ante Sharpe Ratio", f"{r_out['sharpe']:.2f}")
-                rk4.metric("Recommended Max Position", f"{r_out['allocation']:.0%}")
-                
+                rk1.metric("Value at Risk (95% VaR)", f"{r_out['var_95']:.2%}"); rk2.metric("Historical Max Drawdown", f"{r_out['max_drawdown']:.2%}")
+                rk3.metric("Ex-Ante Sharpe Ratio", f"{r_out['sharpe']:.2f}"); rk4.metric("Recommended Max Position", f"{r_out['allocation']:.0%}")
                 st.write(f"**Volatility Regime Status:** {q_out['regime']} (Annualized: {q_out['volatility']:.2%})")
                 st.write(f"**Monte Carlo Bullish Direction Probability:** {mc_out['p_bullish']:.2%}")
             
             with tab_report:
-                # 2. V12 SELF LEARNING REPORT GENERATOR
                 st.write("##### 🤖 V12 Engine Autonomous Assessment Report")
-                st.markdown(
-                    f"""
-                    - **Temporal Drift Check:** Validated. Bias distribution balanced with long-term memory anchor value (`{st.session_state['v12_cumulative_bias']:.4f}`).
-                    - **Overfitting Diagnostics:** No convergence errors detected. Softmax normalization effectively bounded within safe parameter window (`{WEIGHT_MIN}` - `{WEIGHT_MAX}`).
-                    - **Pessimism Engine Audit:** 1,000 Random standard normal vectors modified via alpha multiplier `{MC_PESSIMISM}`. Target boundaries successfully optimized to prevent false breakouts under current volatility conditions of `{q_out['volatility']:.4f}`.
-                    """
-                )
+                st.markdown(f"""
+                - **Temporal Drift Check:** Validated. Bias distribution balanced with long-term memory anchor value (`{st.session_state['v12_cumulative_bias']:.4f}`).
+                - **Overfitting Diagnostics:** No convergence errors detected. Softmax normalization effectively bounded within safe parameter window (`{WEIGHT_MIN}` - `{WEIGHT_MAX}`).
+                - **Pessimism Engine Audit:** 1,000 Random standard normal vectors modified via alpha multiplier `{MC_PESSIMISM}`. Target boundaries successfully optimized to prevent false breakouts under current volatility conditions of `{q_out['volatility']:.4f}`.
+                """)
+
+# RENDERING SEKSYEN RIWAYAT DI BAGIAN BAWAH UTAMA DETEKSI
+st.markdown("---")
+st.subheader("📋 Riwayat Prediksi Sesi Sesi Sebelumnya")
+if st.session_state["prediction_history"]:
+    hist_df = pd.DataFrame(st.session_state["prediction_history"])
+    st.dataframe(hist_df, use_container_width=True)
+else:
+    st.info("Belum ada riwayat simulasi run pada sesi ini.")
