@@ -191,8 +191,8 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     if not api_key:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
     
-    # Menggunakan endpoint resmi Gemini 1.5 Flash
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    # PERBAIKAN: Mengubah v1beta menjadi v1 karena model ini sudah stable (GA)
+    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     
     headlines = ". ".join(news_list[:15]) if news_list else "No recent news available."
@@ -207,14 +207,13 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     try:
         res = requests.post(url, json=body, headers=headers, timeout=15)
         
-        # JIKA API MENOLAK (Key Salah / Limit Habis / Overloaded)
         if res.status_code != 200:
             st.error(f"🚨 Google API Error (Status {res.status_code}): {res.text}")
             return {"stock_score": 0.0, "market_score": 0.0, "label": "API Error", "reason": f"Google API returned status {res.status_code}"}
             
         raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
         
-        # FIX PERBAIKAN: Cari { pertama dan } TERAKHIR (rfind / lastIndexOf)
+        # Cari { pertama dan } terakhir untuk antisipasi noise karakter dari LLM
         start_idx = raw_text.find("{")
         end_idx = raw_text.rfind("}")
         
@@ -227,7 +226,6 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
         return json.loads(json_text)
         
     except Exception as e:
-        # Menampilkan detail error asli di layar Streamlit untuk mempermudah debug
         st.error(f"🚨 Detail Error System: {str(e)}")
         return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": f"Terjadi exception: {str(e)}"}
 # ===============================================================================
