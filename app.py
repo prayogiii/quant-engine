@@ -191,31 +191,45 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     if not api_key:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
     
+    # Menggunakan endpoint resmi Gemini 1.5 Flash
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     
-    headlines = ". ".join(news_list[:15])
+    headlines = ". ".join(news_list[:15]) if news_list else "No recent news available."
     prompt = (
         f"Analyze sentiment for {ticker}.JK (IDX) and IHSG market.\n"
         f"News headlines: {headlines}.\n"
-        f"Return ONLY strict raw JSON object with this format:\n"
-        f'{{"stock_score":0.15, "market_score":0.05, "label":"Bullish", "reason":"Summary of global setup", "breakdown":"Details", "confidence":"85"}}'
+        f"Return ONLY a strict raw JSON object with this exact format, do not include markdown blocks:\n"
+        f'{{"stock_score": 0.15, "market_score": 0.05, "label": "Bullish", "reason": "Summary of global setup", "breakdown": "Details", "confidence": "85"}}'
     )
     
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     try:
         res = requests.post(url, json=body, headers=headers, timeout=15)
-        if res.status_code == 200:
-            raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-            # Sanitasi jika AI mengirim markdown codeblocks
-            if "{" in raw_text:
-                raw_text = raw_text[raw_text.find("{"):raw_text.find("}")+1]
-            import json
-            return json.loads(raw_text)
-    except Exception as e:
-        st.error(f"Gemini API Error: {str(e)}")
-    return {"stock_score": 0.0, "market_score": 0.0, "label": "Error/Timeout", "reason": "Gagal terhubung ke Gemini AI."}
+        
+        # JIKA API MENOLAK (Key Salah / Limit Habis / Overloaded)
+        if res.status_code != 200:
+            st.error(f"🚨 Google API Error (Status {res.status_code}): {res.text}")
+            return {"stock_score": 0.0, "market_score": 0.0, "label": "API Error", "reason": f"Google API returned status {res.status_code}"}
+            
+        raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+        
+        # FIX PERBAIKAN: Cari { pertama dan } TERAKHIR (rfind / lastIndexOf)
+        start_idx = raw_text.find("{")
+        end_idx = raw_text.rfind("}")
+        
+        if start_idx != -1 and end_idx != -1:
+            json_text = raw_text[start_idx:end_idx+1]
+        else:
+            json_text = raw_text
 
+        import json
+        return json.loads(json_text)
+        
+    except Exception as e:
+        # Menampilkan detail error asli di layar Streamlit untuk mempermudah debug
+        st.error(f"🚨 Detail Error System: {str(e)}")
+        return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": f"Terjadi exception: {str(e)}"}
 # ===============================================================================
 # STREAMLIT UI SYSTEM
 # ===============================================================================
