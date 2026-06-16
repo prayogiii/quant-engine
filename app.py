@@ -202,7 +202,8 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     try:
-        res = requests.post(url, json=body, headers=headers, timeout=15)
+        # PERBAIKAN: Timeout dinaikkan ke 60 detik untuk mencegah kendala jaringan/pemrosesan model preview yang lama
+        res = requests.post(url, json=body, headers=headers, timeout=60)
         
         if res.status_code != 200:
             st.error(f"🚨 Google API Error (Status {res.status_code}): {res.text}")
@@ -221,6 +222,9 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
         import json
         return json.loads(json_text)
         
+    except requests.exceptions.Timeout:
+        st.error("🚨 Detail Error System: Koneksi ke Google Gemini API Timeout (Melebihi 60 detik). Server Google sedang padat, silakan coba klik tombol Run kembali.")
+        return {"stock_score": 0.0, "market_score": 0.0, "label": "Timeout Error", "reason": "Koneksi ke Gemini API terputus karena batas waktu respon (60 detik) terlampaui."}
     except Exception as e:
         st.error(f"🚨 Detail Error System: {str(e)}")
         return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": f"Terjadi exception: {str(e)}"}
@@ -348,7 +352,7 @@ if run_analysis:
                 
                 col_score_1, col_score_2 = st.columns(2)
                 
-                # PERBAIKAN: Normalisasi matematika dengan kurung (Score + 1) / 2 & Clamping Pengaman
+                # Perbaikan: Normalisasi matematika dengan kurung (Score + 1) / 2 & Clamping Pengaman
                 raw_stock_score = float(ai_res.get("stock_score", 0.0))
                 raw_market_score = float(ai_res.get("market_score", 0.0))
                 
