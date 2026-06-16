@@ -185,11 +185,12 @@ def fetch_rss_news(ticker: str) -> List[dict]:
 # ===============================================================================
 # ENGINE 3: GEMINI SENTIMENT AI CALL
 # ===============================================================================
-def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict:
+def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str, selected_model: str) -> dict:
     if not api_key:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
     
-    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
+    # PERBAIKAN: Menggunakan model yang dipilih secara dinamis dari sidebar UI
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model}:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     
     headlines = ". ".join(news_list[:15]) if news_list else "No recent news available."
@@ -202,9 +203,13 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     try:
-        # PERBAIKAN: Timeout dinaikkan ke 60 detik untuk mencegah kendala jaringan/pemrosesan model preview yang lama
         res = requests.post(url, json=body, headers=headers, timeout=60)
         
+        # PERBAIKAN: Deteksi Error 503 (High Demand) & Beri Solusi Alternatif Langsung di Layar
+        if res.status_code == 503:
+            st.error(f"🚨 **Google API Error 503 (Server Overload)**: Model `{selected_model}` sedang penuh sesak. Silakan ganti pilihan 'Pilih Model AI' di sidebar kiri ke **gemini-1.5-flash** lalu coba klik Run lagi!")
+            return {"stock_score": 0.0, "market_score": 0.0, "label": "Server Busy", "reason": "Google Server 503: Model sedang overload. Silakan beralih ke model gemini-1.5-flash di sidebar."}
+            
         if res.status_code != 200:
             st.error(f"🚨 Google API Error (Status {res.status_code}): {res.text}")
             return {"stock_score": 0.0, "market_score": 0.0, "label": "API Error", "reason": f"Google API returned status {res.status_code}"}
@@ -224,7 +229,7 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
         
     except requests.exceptions.Timeout:
         st.error("🚨 Detail Error System: Koneksi ke Google Gemini API Timeout (Melebihi 60 detik). Server Google sedang padat, silakan coba klik tombol Run kembali.")
-        return {"stock_score": 0.0, "market_score": 0.0, "label": "Timeout Error", "reason": "Koneksi ke Gemini API terputus karena batas waktu respon (60 detik) terlampaui."}
+        return {"stock_score": 0.0, "market_score": 0.0, "label": "Timeout Error", "reason": "Koneksi ke Gemini API terputus karena batas waktu respon terlampaui."}
     except Exception as e:
         st.error(f"🚨 Detail Error System: {str(e)}")
         return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": f"Terjadi exception: {str(e)}"}
@@ -244,12 +249,20 @@ st.title("📊 HYPER-HYBRID MACRO ENGINE V12")
 if is_weekend or is_holiday:
     st.warning(f"⚠ Hari ini ({wib_now.strftime('%d-%m-%Y')}) Bursa IDX terpantau LIBUR / Tutup Sesi.")
 
-# Layout Sidebar untuk API Settings
+# Layout Sidebar untuk API & Model Settings
 with st.sidebar:
-    st.header("⚙ PENGATURAN API")
+    st.header("⚙ PENGATURAN API & ENGINE")
     saved_key = st.text_input("Gemini API Key", type="password", value=st.session_state.get("gemini_api_key", ""))
     if saved_key:
         st.session_state["gemini_api_key"] = saved_key
+        
+    # PERBAIKAN UTAMA: Penambahan Dropdown Pilihan Model untuk bypass Error 503 secara instan
+    model_options = ["gemini-1.5-flash", "gemini-3-flash-preview"]
+    selected_model = st.selectbox(
+        "Pilih Model AI (Ganti ke 1.5 jika 3-Preview Error 503)", 
+        options=model_options, 
+        index=0 # Default diset ke 1.5-flash demi keandalan sistem trading
+    )
 
 # Form Utama Pencarian & Input
 col_left, col_right = st.columns([1, 2])
@@ -303,8 +316,8 @@ if run_analysis:
             raw_news = fetch_rss_news(stock_code)
             news_titles = [n["title"] for n in raw_news]
             
-            # 3. Process Gemini Sentiment Analysis
-            ai_res = analyze_with_gemini(stock_code, news_titles, st.session_state["gemini_api_key"])
+            # 3. Process Gemini Sentiment Analysis (Dengan menyertakan model pilihan)
+            ai_res = analyze_with_gemini(stock_code, news_titles, st.session_state["gemini_api_key"], selected_model)
             
             # 4. Parse Broker Entries dari UI Grid
             entries = []
@@ -366,6 +379,7 @@ if run_analysis:
                 col_score_2.progress(safe_market_val, text=f"IHSG Score Bias: {raw_market_score}")
                 
                 st.caption(f"Tingkat Kepercayaan Model AI: {ai_res.get('confidence', '0')}%")
+                st.caption(f"Model Penggerak Aktif: `{selected_model}`")
 
             with tab2:
                 if brk_res:
