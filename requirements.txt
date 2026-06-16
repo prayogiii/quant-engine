@@ -6,3 +6,4 @@ scipy
 nltk
 deep-translator
 feedparser
+easyocr
