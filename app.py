@@ -189,7 +189,6 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str, selecte
     if not api_key:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
     
-    # PERBAIKAN: Menggunakan model yang dipilih secara dinamis dari sidebar UI
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model}:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     
@@ -204,18 +203,14 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str, selecte
     body = {"contents": [{"parts": [{"text": prompt}]}]}
     try:
         res = requests.post(url, json=body, headers=headers, timeout=60)
-        
-        # PERBAIKAN: Deteksi Error 503 (High Demand) & Beri Solusi Alternatif Langsung di Layar
         if res.status_code == 503:
             st.error(f"🚨 **Google API Error 503 (Server Overload)**: Model `{selected_model}` sedang penuh sesak. Silakan ganti pilihan 'Pilih Model AI' di sidebar kiri ke **gemini-1.5-flash** lalu coba klik Run lagi!")
-            return {"stock_score": 0.0, "market_score": 0.0, "label": "Server Busy", "reason": "Google Server 503: Model sedang overload. Silakan beralih ke model gemini-1.5-flash di sidebar."}
+            return {"stock_score": 0.0, "market_score": 0.0, "label": "Server Busy", "reason": "Google Server 503: Model sedang overload."}
             
         if res.status_code != 200:
-            st.error(f"🚨 Google API Error (Status {res.status_code}): {res.text}")
             return {"stock_score": 0.0, "market_score": 0.0, "label": "API Error", "reason": f"Google API returned status {res.status_code}"}
             
         raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-        
         start_idx = raw_text.find("{")
         end_idx = raw_text.rfind("}")
         
@@ -226,20 +221,68 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str, selecte
 
         import json
         return json.loads(json_text)
-        
-    except requests.exceptions.Timeout:
-        st.error("🚨 Detail Error System: Koneksi ke Google Gemini API Timeout (Melebihi 60 detik). Server Google sedang padat, silakan coba klik tombol Run kembali.")
-        return {"stock_score": 0.0, "market_score": 0.0, "label": "Timeout Error", "reason": "Koneksi ke Gemini API terputus karena batas waktu respon terlampaui."}
     except Exception as e:
-        st.error(f"🚨 Detail Error System: {str(e)}")
-        return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": f"Terjadi exception: {str(e)}"}
+        return {"stock_score": 0.0, "market_score": 0.0, "label": "Error Exception", "reason": str(e)}
+
+# ===============================================================================
+# BARU 🟢 ENGINE 4: MONTE CARLO & TRADING PLAN GENERATOR MATRIX
+# ===============================================================================
+def generate_v12_trading_plan(current_price: float, inst_score: float, ai_score: float) -> dict:
+    """Mengintegrasikan konstanta V12 (MC_PESSIMISM, AI_SIGNAL_CAP) untuk menyusun Kalkulasi Level Saham"""
+    t = tick(int(current_price))
+    
+    # Gabungkan bias sentimen & aliran dana (Bandarmology + AI)
+    combined_bias = (inst_score * 0.40) + (ai_score * 0.60)
+    # Batasi sinyal berdasarkan batasan cap atas sistem
+    clipped_bias = max(-AI_SIGNAL_CAP, min(AI_SIGNAL_CAP, combined_bias))
+    
+    # Penerapan Monte Carlo Pessimism Factor untuk penentuan probabilitas target
+    adjusted_growth = clipped_bias * (1.0 - MC_PESSIMISM)
+    
+    # Kalkulasi level teknikal (Target Profit & Stop Loss)
+    base_tp1_pct = 0.05 + (adjusted_growth * 0.5)
+    base_tp2_pct = 0.10 + adjusted_growth
+    base_sl_pct = 0.04 - (adjusted_growth * 0.3)
+    
+    tp_1_raw = current_price * (1.0 + max(0.02, base_tp1_pct))
+    tp_2_raw = current_price * (1.0 + max(0.04, base_tp2_pct))
+    sl_raw = current_price * (1.0 - max(0.01, base_sl_pct))
+    
+    # Normalisasi Fraksi Harga (Tick) sesuai Aturan BEI / IDX
+    tp_1 = round(tp_1_raw / t) * t
+    tp_2 = round(tp_2_raw / t) * t
+    sl = round(sl_raw / t) * t
+    
+    # Risk-to-Reward Ratio Matrix
+    risk_points = max(1.0, current_price - sl)
+    reward_points = max(1.0, tp_1 - current_price)
+    rr_ratio = reward_points / risk_points
+    
+    # Penentuan Zona Entry Realistis
+    if combined_bias > 0.10:
+        action = "BUY / ACCUMULATE"
+        entry_zone = f"Rp {int(current_price - (2*t))} - Rp {int(current_price + t)}"
+        color = "#2E7D32"
+    elif combined_bias < -0.10:
+        action = "SELL / AVOID"
+        entry_zone = "Wait & See / Short Term Bounce Only"
+        color = "#C62828"
+    else:
+        action = "HOLD / BUY ON WEAKNESS"
+        entry_zone = f"Rp {int(current_price * 0.98)} - Rp {int(current_price)}"
+        color = "#EF6C00"
+        
+    return {
+        "action": action, "entry_zone": entry_zone, "color": color,
+        "tp_1": tp_1, "tp_2": tp_2, "sl": sl, "rr_ratio": rr_ratio,
+        "clipped_bias": clipped_bias
+    }
 
 # ===============================================================================
 # STREAMLIT UI SYSTEM
 # ===============================================================================
 st.set_page_config(page_title="Hyper-Hybrid Macro Engine V12", layout="wide")
 
-# Validasi Kalender Real-time Hari ini
 wib_now = datetime.datetime.utcnow() + datetime.timedelta(hours=7)
 today_key = wib_now.strftime("%Y%m%d")
 is_weekend = wib_now.weekday() >= 5
@@ -249,43 +292,31 @@ st.title("📊 HYPER-HYBRID MACRO ENGINE V12")
 if is_weekend or is_holiday:
     st.warning(f"⚠ Hari ini ({wib_now.strftime('%d-%m-%Y')}) Bursa IDX terpantau LIBUR / Tutup Sesi.")
 
-# Layout Sidebar untuk API & Model Settings
 with st.sidebar:
     st.header("⚙ PENGATURAN API & ENGINE")
     saved_key = st.text_input("Gemini API Key", type="password", value=st.session_state.get("gemini_api_key", ""))
-    if saved_key:
-        st.session_state["gemini_api_key"] = saved_key
+    if saved_key: st.session_state["gemini_api_key"] = saved_key
         
-    # PERBAIKAN UTAMA: Penambahan Dropdown Pilihan Model untuk bypass Error 503 secara instan
     model_options = ["gemini-1.5-flash", "gemini-3-flash-preview"]
-    selected_model = st.selectbox(
-        "Pilih Model AI (Ganti ke 1.5 jika 3-Preview Error 503)", 
-        options=model_options, 
-        index=0 # Default diset ke 1.5-flash demi keandalan sistem trading
-    )
+    selected_model = st.selectbox("Pilih Model AI", options=model_options, index=0)
 
-# Form Utama Pencarian & Input
 col_left, col_right = st.columns([1, 2])
 
 with col_left:
     st.subheader("▼ MARKET DATA INPUT")
-    stock_code = st.text_input("Kode Saham (contoh: BBRI, TLKM, BMRI)", value="BBRI").upper().strip()
-    
-    # Tombol Aksi Utama
+    stock_code = st.text_input("Kode Saham", value="BBRI").upper().strip()
     run_analysis = st.button("▶ RUN HYPER-HYBRID MACRO ENGINE V12", use_container_width=True)
 
 with col_right:
     st.subheader("▼ BROKER SUMMARY MATRIX (BUM)")
     st.caption("Tips: Kamu bisa Copy-Paste tabel langsung dari Excel/Spreadsheet ke grid di bawah ini.")
     
-    # Setup tabel kosong interaktif pengganti addBrokerRow manual
     init_df = pd.DataFrame([
         {"Broker": "YP", "Buy Lot": 1500, "Buy Freq": 120, "Sell Lot": 200, "Sell Freq": 25, "Avg Buy Px": 0.0, "Avg Sell Px": 0.0}
     ])
     
     edited_df = st.data_editor(
-        init_df,
-        num_rows="dynamic",
+        init_df, num_rows="dynamic",
         column_config={
             "Broker": st.column_config.TextColumn("Kode Broker", max_chars=2, required=True),
             "Buy Lot": st.column_config.NumberColumn("Buy Lot", min_value=0, default=0),
@@ -298,28 +329,21 @@ with col_right:
         use_container_width=True
     )
 
-# EXECUTION TRIGGER
 if run_analysis:
     if not st.session_state.get("gemini_api_key"):
-        st.error("❌ Analisis dibatalkan: Masukkan Gemini API Key Anda di sidebar terlebih dahulu!")
+        st.error("❌ Masukkan Gemini API Key Anda di sidebar terlebih dahulu!")
     elif not stock_code:
-        st.error("❌ Analisis dibatalkan: Kode saham tidak boleh kosong.")
+        st.error("❌ Kode saham tidak boleh kosong.")
     else:
-        with st.spinner("Mengaktifkan V12 Engine: Menarik data market, berita makro, & memproses algoritma AI..."):
-            
-            # 1. Fetch live prices
+        with st.spinner("Mengaktifkan V12 Engine..."):
             live_price = fetch_yahoo_price(f"{stock_code}.JK")
-            if live_price == 0.0:
-                live_price = 5000.0 # Fallback default price jika API Yahoo limit
+            if live_price == 0.0: live_price = 5000.0
             
-            # 2. Fetch & Score RSS News
             raw_news = fetch_rss_news(stock_code)
             news_titles = [n["title"] for n in raw_news]
             
-            # 3. Process Gemini Sentiment Analysis (Dengan menyertakan model pilihan)
             ai_res = analyze_with_gemini(stock_code, news_titles, st.session_state["gemini_api_key"], selected_model)
             
-            # 4. Parse Broker Entries dari UI Grid
             entries = []
             for _, r in edited_df.iterrows():
                 if pd.notna(r["Broker"]) and str(r["Broker"]).strip() != "":
@@ -333,77 +357,90 @@ if run_analysis:
                         avg_sell_price=float(r["Avg Sell Px"]) if pd.notna(r["Avg Sell Px"]) else 0.0,
                     ))
 
-            # 5. Run Broker Analytics
-            brk_res = None
-            if entries:
-                brk_res = analyze_broker_summary(entries, live_price)
+            brk_res = analyze_broker_summary(entries, live_price) if entries else None
+
+            # Hitung Integrasi Plan V12 
+            inst_score_val = brk_res["institutional_score"] if brk_res else 0.0
+            ai_score_val = float(ai_res.get("stock_score", 0.0))
+            plan = generate_v12_trading_plan(live_price, inst_score_val, ai_score_val)
 
             # ===============================================================================
-            # RENDERING OUTPUT INTERFACE
+            # RENDERING OUTPUT INTERFACE WITH TRADING PLAN TAB
             # ===============================================================================
             st.balloons()
             st.success(f"## 📊 HASIL ANALISIS ENGINE V12 — {stock_code}")
             
-            # Row 1: Key Metrics Dashboard
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Harga Penutupan Terakhir", f"Rp {live_price:,.0f}")
-            m2.metric("Sentimen Label AI", ai_res.get("label", "Neutral"))
-            
+            m2.metric("Rekomendasi Aksi", plan["action"])
             if brk_res:
                 m3.metric("Sinyal Broker", brk_res["broker_signal"])
-                m4.metric("Inst Score (Whale Flow)", f"{brk_res['institutional_score']:.2f}")
+                m4.metric("Inst Score (Whale)", f"{brk_res['institutional_score']:.2f}")
             else:
                 m3.metric("Sinyal Broker", "NO DATA")
-                m4.metric("Inst Score (Whale Flow)", "0.00")
+                m4.metric("Inst Score (Whale)", "0.00")
 
-            # Row 2: Detail Analisis Komprehensif
-            tab1, tab2, tab3 = st.tabs(["🧬 Integrasi Sentimen AI & Makro", "🐋 Bandarmology Detail", "📰 Berita Terdeteksi"])
+            # Penambahan Tab Ke-3 khusus Trading Plan Kuantitatif
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "🧬 Integrasi Sentimen AI & Makro", 
+                "🐋 Bandarmology Detail", 
+                "📋 V12 Quantitative Trading Plan", 
+                "📰 Berita Terdeteksi"
+            ])
             
             with tab1:
                 st.markdown(f"### AI Evaluation Reasoning")
                 st.info(ai_res.get("reason", "No reason provided by AI."))
                 
                 col_score_1, col_score_2 = st.columns(2)
-                
-                # Perbaikan: Normalisasi matematika dengan kurung (Score + 1) / 2 & Clamping Pengaman
                 raw_stock_score = float(ai_res.get("stock_score", 0.0))
                 raw_market_score = float(ai_res.get("market_score", 0.0))
                 
-                normalized_stock = (raw_stock_score + 1.0) / 2.0
-                normalized_market = (raw_market_score + 1.0) / 2.0
-                
-                safe_stock_val = max(0.0, min(1.0, normalized_stock))
-                safe_market_val = max(0.0, min(1.0, normalized_market))
-                
-                col_score_1.progress(safe_stock_val, text=f"Stock Score Bias: {raw_stock_score}")
-                col_score_2.progress(safe_market_val, text=f"IHSG Score Bias: {raw_market_score}")
-                
-                st.caption(f"Tingkat Kepercayaan Model AI: {ai_res.get('confidence', '0')}%")
-                st.caption(f"Model Penggerak Aktif: `{selected_model}`")
+                col_score_1.progress(max(0.0, min(1.0, (raw_stock_score + 1.0) / 2.0)), text=f"Stock Score Bias: {raw_stock_score}")
+                col_score_2.progress(max(0.0, min(1.0, (raw_market_score + 1.0) / 2.0)), text=f"IHSG Score Bias: {raw_market_score}")
 
             with tab2:
                 if brk_res:
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
                         st.write("##### 🟢 Top 5 Net Buyers")
-                        buy_data = [{"Broker": b.broker_code, "Net Lot": b.net_lot, "Avg Buy Lot": b.avg_buy_lot, "Tipe": b.dominance} for b in brk_res["top_buyers"]]
-                        st.table(pd.DataFrame(buy_data))
+                        st.table(pd.DataFrame([{"Broker": b.broker_code, "Net Lot": b.net_lot, "Tipe": b.dominance} for b in brk_res["top_buyers"]]))
                     with col_b2:
                         st.write("##### 🔴 Top 5 Net Sellers")
-                        sell_data = [{"Broker": b.broker_code, "Net Lot": b.net_lot, "Avg Sell Lot": b.avg_sell_lot, "Tipe": b.dominance} for b in brk_res["top_sellers"]]
-                        st.table(pd.DataFrame(sell_data))
-                    
-                    st.markdown("##### 🧮 Rumus Internal & Data Turunan")
-                    st.write(f"- **Net Flow Volume (Lot):** {brk_res['net_flow_lot']:,}")
-                    st.write(f"- **Price Pressure Index:** {brk_res['price_pressure']:.4f}")
-                    st.write(f"- **Whale Presence Detected:** {'YA' if brk_res['whale_presence'] else 'TIDAK'}")
+                        st.table(pd.DataFrame([{"Broker": b.broker_code, "Net Lot": b.net_lot, "Tipe": b.dominance} for b in brk_res["top_sellers"]]))
                 else:
-                    st.info("Input data broker kosong. Silakan isi tabel input di atas untuk mengaktifkan modul Bandarmology.")
+                    st.info("Input data broker kosong.")
 
+            # ISI TAB BARU: TRADING PLAN QUANTITATIVE MATRIX
             with tab3:
-                st.write(f"Total berita tersaring berdasarkan {len(SMART_KEYWORDS)} kata kunci utama:")
+                st.markdown(f"### 🎯 Rencana Eksekusi Saham {stock_code}")
+                
+                # Desain Card Rekomendasi Dinamis
+                st.markdown(
+                    f"<div style='background-color:{plan['color']}; padding:15px; border-radius:8px; color:white; font-weight:bold; text-align:center; font-size:20px;'>"
+                    f"REKOMENDASI: {plan['action']}"
+                    f"</div>", 
+                    unsafe_allow_html=True
+                )
+                st.write("")
+                
+                p_col1, p_col2 = st.columns(2)
+                with p_col1:
+                    st.metric("📍 Area Beli Terbaik (Entry Zone)", str(plan["entry_zone"]))
+                    st.metric("🛑 Batas Rugi Keamanan (Stop Loss)", f"Rp {plan['sl']:,}")
+                with p_col2:
+                    st.metric("🎯 Target Profit 1 (TP 1)", f"Rp {plan['tp_1']:,}")
+                    st.metric("🚀 Target Profit 2 (TP 2)", f"Rp {plan['tp_2']:,}")
+                
+                st.markdown("---")
+                st.markdown("##### 🧮 Parameter Engine Pendukung Plan")
+                st.write(f"- **Risk-to-Reward Ratio (ke TP 1):** {plan['rr_ratio']:.2f}")
+                st.write(f"- **Clipped Combined Signal Bias:** {plan['clipped_bias']:.4f} (Maksimal Batas Atas: ±{AI_SIGNAL_CAP})")
+                st.write(f"- **Pessimism Factor Terpasang:** {MC_PESSIMISM} (Probabilitas pergeseran target diperketat untuk mengantisipasi false breakout)")
+
+            with tab4:
                 if news_titles:
-                    for idx, title in enumerate(news_titles[:20]):
+                    for idx, title in enumerate(news_titles[:15]):
                         st.write(f"{idx+1}. {title}")
                 else:
-                    st.write("Tidak ada berita spesifik yang lolos filter temporal.")
+                    st.write("Tidak ada berita yang terdeteksi.")
