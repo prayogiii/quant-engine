@@ -191,8 +191,8 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
     if not api_key:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
     
-    # PERBAIKAN: Mengubah v1beta menjadi v1 karena model ini sudah stable (GA)
-    url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent"
+    # PERBAIKAN: Menggunakan endpoint v1beta dengan model gemini-3-flash-preview sesuai MainActivity Anda
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
     headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
     
     headlines = ". ".join(news_list[:15]) if news_list else "No recent news available."
@@ -213,7 +213,7 @@ def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict
             
         raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
         
-        # Cari { pertama dan } terakhir untuk antisipasi noise karakter dari LLM
+        # Bersihkan noise string untuk mengambil JSON saja
         start_idx = raw_text.find("{")
         end_idx = raw_text.rfind("}")
         
