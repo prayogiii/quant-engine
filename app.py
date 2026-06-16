@@ -300,35 +300,40 @@ st.markdown("""
     .main-header {
         font-size: 2.5rem;
         font-weight: 700;
-        color: #0f4c81;
+        color: var(--text-color);
         text-align: center;
         margin-bottom: 1rem;
     }
     .section-title {
         font-size: 1.4rem;
         font-weight: 600;
-        color: #2c3e50;
+        color: var(--text-color);
         border-bottom: 2px solid #3498db;
         padding-bottom: 0.2rem;
         margin-top: 1.2rem;
         margin-bottom: 0.8rem;
     }
     .card {
-        background-color: #ffffff;
+        background-color: var(--secondary-background-color);
         border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         padding: 1.2rem;
         margin-bottom: 1rem;
-        border: 1px solid #eef2f6;
+        border: 1px solid rgba(128,128,128,0.2);
+        color: var(--text-color);
+    }
+    .card p, .card b {
+        color: var(--text-color);
     }
     .metric-big {
         font-size: 2rem;
         font-weight: bold;
-        color: #0f4c81;
+        color: var(--text-color);
     }
     .metric-label {
         font-size: 0.9rem;
-        color: #7f8c8d;
+        color: var(--text-color);
+        opacity: 0.6;
     }
     .stButton > button {
         background-color: #3498db;
