@@ -9,6 +9,8 @@ import os
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Any
 from PIL import Image
+import json
+import re
 
 # ===============================================================================
 # AUTO-SAVE HELPERS
@@ -139,7 +141,7 @@ def process_broker_ocr(pil_images: List[Image.Image]) -> List[Dict[str, Any]]:
             if not text_str: continue
             xs, ys = [p[0] for p in bbox], [p[1] for p in bbox]
             elements.append({
-                "text": text_str, "cx": int(np.mean(xs)), "cy": int(np.mean(ys)), 
+                "text": text_str, "cx": int(np.mean(xs)), "cy": int(np.mean(ys)),
                 "w": max(xs)-min(xs), "h": max(ys)-min(ys), "x1": min(xs), "x2": max(xs)
             })
         if len(elements) < 4: continue
@@ -166,7 +168,6 @@ def process_broker_ocr(pil_images: List[Image.Image]) -> List[Dict[str, Any]]:
                 if len(current_row) >= 2: rows.append(current_row)
                 current_row, current_y = [el], el["cy"]
         if len(current_row) >= 2: rows.append(current_row)
-        import re
         code_re = re.compile(r"^[A-Z]{2,3}$")
         col_by = next((c for c in cols if c["name"] == "BY"), None)
         col_sl = next((c for c in cols if c["name"] == "SL"), None)
@@ -247,7 +248,6 @@ def analyze_with_gemini(ticker: str, headlines: List[str], api_key: str, model_n
     try:
         res = requests.post(url, json={"contents": [{"parts": [{"text": prompt + "\nContext: " + ". ".join(headlines)}]}]}, headers={"x-goog-api-key": api_key}, timeout=20)
         raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
-        import json
         return json.loads(raw_text[raw_text.find("{"):raw_text.rfind("}")+1])
     except:
         return {"stock_score": 0.0, "market_score": 0.0, "label": "Neutral", "reason": "API Error"}
@@ -261,7 +261,7 @@ def compute_quantitative_matrix(df: pd.DataFrame, current_price: float) -> dict:
     avg_gain = np.mean(gains[-14:]) if len(gains) >= 14 else 0.01
     avg_loss = np.mean(losses[-14:]) if len(losses) >= 14 else 0.01
     rsi = 100 - (100 / (1 + (avg_gain / max(0.00001, avg_loss))))
-    
+
     last_h, last_l, last_c = df["high"].iloc[-1], df["low"].iloc[-1], closes[-1]
     pivot = (last_h + last_l + last_c) / 3.0
     return {
@@ -290,72 +290,240 @@ def compute_advanced_risk_metrics(df: pd.DataFrame) -> dict:
     return {"var_95": abs(np.percentile(log_returns, 5)), "max_drawdown": abs(max_dd), "sharpe": sharpe, "allocation": 0.05 if sharpe < 1.0 else 0.10 if sharpe < 2.0 else 0.15}
 
 # ===============================================================================
+# CUSTOM CSS FOR BETTER UI
+# ===============================================================================
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: #0f4c81;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    .section-title {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #2c3e50;
+        border-bottom: 2px solid #3498db;
+        padding-bottom: 0.2rem;
+        margin-top: 1.2rem;
+        margin-bottom: 0.8rem;
+    }
+    .card {
+        background-color: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+        border: 1px solid #eef2f6;
+    }
+    .metric-big {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #0f4c81;
+    }
+    .metric-label {
+        font-size: 0.9rem;
+        color: #7f8c8d;
+    }
+    .stButton > button {
+        background-color: #3498db;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        background-color: #2980b9;
+        box-shadow: 0 2px 8px rgba(52,152,219,0.4);
+    }
+    .dataframe {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ===============================================================================
 # MAIN LAYOUT APPLICATION BUILDER
 # ===============================================================================
-st.set_page_config(page_title="Hyper-Hybrid Engine V12 + OCR", layout="wide")
-st.title("📊 HYPER-HYBRID QUANTITATIVE ENGINE V12 + OCR")
+st.set_page_config(page_title="Hyper-Hybrid Engine V12", layout="wide", page_icon="📊")
+st.markdown('<div class="main-header">📊 HYPER-HYBRID QUANTITATIVE ENGINE V12</div>', unsafe_allow_html=True)
 
+# --- SESSION STATE INIT ---
 if "v12_memory_runs" not in st.session_state: st.session_state["v12_memory_runs"] = 0
 if "v12_cumulative_bias" not in st.session_state: st.session_state["v12_cumulative_bias"] = 0.0
 if "prediction_history" not in st.session_state: st.session_state["prediction_history"] = []
 
-# AUTO-LOAD DATA
 if "gemini_api_key" not in st.session_state: st.session_state["gemini_api_key"] = load_key_from_file()
-if "table_data" not in st.session_state: 
-    if os.path.exists("broker_data.csv"): st.session_state["table_data"] = pd.read_csv("broker_data.csv")
-    else: st.session_state["table_data"] = pd.DataFrame([{"Broker": "YP", "Buy Lot": 8500, "Buy Freq": 420, "Sell Lot": 1200, "Sell Freq": 95, "Avg Buy Px": 4500.0, "Avg Sell Px": 4480.0}])
+if "table_data" not in st.session_state:
+    if os.path.exists("broker_data.csv"):
+        st.session_state["table_data"] = pd.read_csv("broker_data.csv")
+    else:
+        st.session_state["table_data"] = pd.DataFrame([{"Broker": "YP", "Buy Lot": 8500, "Buy Freq": 420, "Sell Lot": 1200, "Sell Freq": 95, "Avg Buy Px": 4500.0, "Avg Sell Px": 4480.0}])
 
-# --- SIDEBAR COMPONENT ---
+# ===============================================================================
+# SIDEBAR (Redesigned with expanders)
+# ===============================================================================
 with st.sidebar:
-    st.header("⚙ CORE CONFIG & AI ENGINE")
-    
-    # Auto-Save API Key
-    key_input = st.text_input("Gemini API Key", type="password", value=st.session_state["gemini_api_key"])
-    if key_input != st.session_state["gemini_api_key"]:
-        st.session_state["gemini_api_key"] = key_input
-        save_key_to_file(key_input)
+    st.markdown("## ⚙️ Configuration Center")
+    with st.expander("🔑 Gemini AI API Key", expanded=True):
+        key_input = st.text_input("Masukkan API Key", type="password", value=st.session_state["gemini_api_key"])
+        if key_input != st.session_state["gemini_api_key"]:
+            st.session_state["gemini_api_key"] = key_input
+            save_key_to_file(key_input)
 
-    selected_model = st.selectbox("Model Engine", ["gemini-1.5-flash", "gemini-2.5-flash"])
-    
+    with st.expander("🧠 Model & Engine", expanded=False):
+        selected_model = st.selectbox("Pilih Model Gemini", ["gemini-1.5-flash", "gemini-2.5-flash"])
+
+    with st.expander("📸 Broker Summary OCR", expanded=HAS_OCR):
+        if HAS_OCR:
+            st.success("✅ OCR Engine (EasyOCR) Aktif")
+        else:
+            st.warning("⚠️ Install easyocr untuk fitur OCR")
+        uploaded_files = st.file_uploader("Upload Screenshot Broker", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+        if uploaded_files and HAS_OCR:
+            if st.button("Ekstrak Data Dari Gambar", use_container_width=True):
+                with st.spinner("Memproses tabel dengan OCR..."):
+                    ocr_results = process_broker_ocr([Image.open(f) for f in uploaded_files])
+                    if ocr_results:
+                        new_df = pd.DataFrame(ocr_results)
+                        st.session_state["table_data"] = new_df
+                        auto_save_broker_data(new_df)
+                        st.success(f"Berhasil mengekstrak {len(ocr_results)} broker!")
+                    else:
+                        st.error("Gagal mendeteksi tabel.")
+
+    with st.expander("🧠 V12 Adaptive Memory", expanded=False):
+        st.progress(min(1.0, st.session_state["v12_memory_runs"] / 10.0))
+        st.caption(f"Long-term Bias Anchoring: {st.session_state['v12_cumulative_bias']:.4f}")
+
     st.markdown("---")
-    st.subheader("📸 Broker Summary OCR Engine")
-    if HAS_OCR: st.success("✅ ML Kit Python (EasyOCR) Active")
-    else: st.warning("⚠️ Untuk OCR otomatis, ketik di terminal: `pip install easyocr`")
-        
-    uploaded_files = st.file_uploader("Upload Broker Summary Screenshots", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-    if uploaded_files and HAS_OCR:
-        if st.button("Extract Data Dari Gambar", use_container_width=True):
-            with st.spinner("Processing OCR Table Elements..."):
-                ocr_results = process_broker_ocr([Image.open(f) for f in uploaded_files])
-                if ocr_results:
-                    new_df = pd.DataFrame(ocr_results)
-                    st.session_state["table_data"] = new_df
-                    auto_save_broker_data(new_df) # AUTO-SAVE KE CSV
-                    st.success(f"Berhasil mengekstrak {len(ocr_results)} baris broker!")
-                else: st.error("Gagal mendeteksi tabel.")
+    st.caption("Versi 12.4 – Anti-Overfitting Engine")
 
-    # 3. V12 ADAPTIVE MEMORY STATUS
-    st.markdown("---")
-    st.subheader("🧠 3. V12 Adaptive Memory Status")
-    st.progress(min(1.0, st.session_state["v12_memory_runs"] / 10.0))
-    st.caption(f"Long-term Bias Anchoring: {st.session_state['v12_cumulative_bias']:.4f}")
+# ===============================================================================
+# MAIN CONTENT AREA
+# ===============================================================================
+tab1, tab2 = st.tabs(["🎯 Live Trading Engine", "📈 Historis & Risiko"])
 
-# --- MAIN CONTROLS WORKSPACE ---
-col_inp, col_grid = st.columns([1, 2])
-with col_inp:
-    st.subheader("▼ INPUT ASSET")
-    ticker = st.text_input("Ticker Code (IDX)", value="BBRI").upper().strip()
-    run_btn = st.button("▶ RUN FULL QUANT ENGINE DEPLOYMENT", use_container_width=True)
+with tab1:
+    # Header input area
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.markdown('<div class="section-title">▼ INPUT ASET</div>', unsafe_allow_html=True)
+        ticker = st.text_input("Kode Saham (IDX)", value="BBRI").upper().strip()
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            run_btn = st.button("▶ RUN ENGINE", use_container_width=True)
+        with col_btn2:
+            st.caption("")
 
-with col_grid:
-    st.subheader("▼ REAL-TIME BROKER DATA MATRIX")
-    edited_df = st.data_editor(st.session_state["table_data"], num_rows="dynamic", use_container_width=True)
-    if st.button("Simpan Manual Perubahan Tabel"):
-        auto_save_broker_data(edited_df)
-        st.session_state["table_data"] = edited_df
+    with col2:
+        st.markdown('<div class="section-title">▼ REAL-TIME BROKER DATA MATRIX</div>', unsafe_allow_html=True)
+        edited_df = st.data_editor(st.session_state["table_data"], num_rows="dynamic", use_container_width=True)
+        col_save, _ = st.columns([1, 3])
+        with col_save:
+            if st.button("💾 Simpan Tabel", use_container_width=True):
+                auto_save_broker_data(edited_df)
+                st.session_state["table_data"] = edited_df
+                st.success("Data broker tersimpan!")
 
-# --- EXECUTION PIPELINE BLOCK ---
-if run_btn:
-    # ... (Bagian eksekusi Anda tetap sama) ...
-    # Pastikan untuk memanggil st.session_state["gemini_api_key"] saat memanggil API
-    pass
+    # --- OUTPUT DASHBOARD (ditampilkan setelah RUN) ---
+    if run_btn:
+        with st.spinner("Mengambil data harga & berita..."):
+            yahoo_data = fetch_yahoo_raw_data(ticker)
+            current_price = yahoo_data["latest_price"]
+            df = yahoo_data["data"]
+            headlines = fetch_rss_news(ticker)
+
+            broker_entries = []
+            for _, row in st.session_state["table_data"].iterrows():
+                try:
+                    broker_entries.append(BrokerEntry(
+                        broker_code=str(row["Broker"]),
+                        buy_lot=int(row["Buy Lot"]),
+                        buy_freq=int(row["Buy Freq"]),
+                        sell_lot=int(row["Sell Lot"]),
+                        sell_freq=int(row["Sell Freq"]),
+                        avg_buy_price=float(row.get("Avg Buy Px", 0)),
+                        avg_sell_price=float(row.get("Avg Sell Px", 0))
+                    ))
+                except: pass
+
+            broker_analysis = analyze_broker_summary_ai(broker_entries, current_price)
+            gemini_res = analyze_with_gemini(ticker, headlines, st.session_state["gemini_api_key"], selected_model)
+            quant = compute_quantitative_matrix(df, current_price) if not df.empty else {"volatility": 0.2, "rsi": 50.0, "momentum_score": 0.0, "pivot": current_price, "r1": current_price*1.01, "s1": current_price*0.99}
+
+        # --- KARTU RINGKASAN SINYAL ---
+        st.markdown('<div class="section-title">📊 SINTESIS SINYAL & METRIK</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.metric("Harga Terakhir", f"Rp {current_price:,.0f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            signal_color = {"STRONG ACCUM": "🟢", "ACCUM": "🟢", "DISTRIBUTION": "🔴", "STRONG DIST": "🔴", "NEUTRAL": "⚪"}
+            st.metric("Sinyal Broker", f"{signal_color.get(broker_analysis['signal'], '⚪')} {broker_analysis['signal']}")
+            st.caption(broker_analysis['desc'])
+            st.markdown('</div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.metric("Sentimen Gemini", f"{gemini_res.get('label', 'N/A')}", delta=f"{gemini_res.get('stock_score', 0):.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        with c4:
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.metric("RSI (14)", f"{quant['rsi']:.1f}", delta=f"{quant['momentum_score']:.2f}")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+        # --- DETAIL & MONTE CARLO ---
+        colA, colB = st.columns([2, 1])
+        with colA:
+            st.markdown('<div class="section-title">🔮 PROYEKSI MONTE CARLO V12</div>', unsafe_allow_html=True)
+            tp = current_price * 1.05
+            sl = current_price * 0.95
+            mc_res = run_monte_carlo_v12(current_price, quant["volatility"], broker_analysis["score"] + gemini_res["stock_score"], tp, sl)
+            st.metric("Ekspektasi Harga 20 Hari", f"Rp {mc_res['mean_target']:,.0f}", delta=f"{mc_res['mean_target']/current_price-1:.2%}")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Prob Bullish", f"{mc_res['p_bullish']:.0%}")
+            m2.metric("Prob TP (+5%)", f"{mc_res['p_tp']:.0%}")
+            m3.metric("Prob SL (-5%)", f"{mc_res['p_sl']:.0%}")
+        with colB:
+            st.markdown('<div class="section-title">⚡ LEVEL PIVOT</div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="card">
+                <p><b>Pivot:</b> {quant['pivot']:,.0f}</p>
+                <p><b>R1:</b> {quant['r1']:,.0f}  |  <b>S1:</b> {quant['s1']:,.0f}</p>
+                <p><b>R2:</b> {quant['r2']:,.0f}  |  <b>S2:</b> {quant['s2']:,.0f}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Update memory bias
+        st.session_state["v12_memory_runs"] += 1
+        st.session_state["v12_cumulative_bias"] += (broker_analysis["score"] + gemini_res["stock_score"]) / 2
+
+        st.markdown("---")
+        st.caption(f"✅ Engine berhasil dijalankan. Berita terkini: {', '.join(headlines[:3])}")
+
+with tab2:
+    st.markdown('<div class="section-title">📉 METRIK RISIKO & HISTORIS</div>', unsafe_allow_html=True)
+    if "df" not in locals() and not os.path.exists("broker_data.csv"):
+        st.info("Silakan jalankan 'RUN ENGINE' terlebih dahulu untuk melihat analisis historis.")
+    else:
+        df_hist = df if "df" in locals() and not df.empty else pd.DataFrame()
+        risk = compute_advanced_risk_metrics(df_hist)
+        col_risk1, col_risk2, col_risk3, col_risk4 = st.columns(4)
+        with col_risk1:
+            st.metric("Value at Risk (95%)", f"{risk['var_95']:.2%}")
+        with col_risk2:
+            st.metric("Max Drawdown", f"{risk['max_drawdown']:.2%}")
+        with col_risk3:
+            st.metric("Sharpe Ratio", f"{risk['sharpe']:.2f}")
+        with col_risk4:
+            st.metric("Alokasi Modal Disarankan", f"{risk['allocation']:.1%}")
+        if not df_hist.empty:
+            st.line_chart(df_hist.set_index("timestamp")["adj_close"], use_container_width=True)
