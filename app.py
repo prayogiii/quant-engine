@@ -12,6 +12,9 @@ from PIL import Image
 import json
 import re
 
+# WAJIB: panggil set_page_config di awal
+st.set_page_config(page_title="Hyper-Hybrid Engine V12", layout="wide", page_icon="📊")
+
 # ===============================================================================
 # AUTO-SAVE HELPERS
 # ===============================================================================
@@ -290,7 +293,7 @@ def compute_advanced_risk_metrics(df: pd.DataFrame) -> dict:
     return {"var_95": abs(np.percentile(log_returns, 5)), "max_drawdown": abs(max_dd), "sharpe": sharpe, "allocation": 0.05 if sharpe < 1.0 else 0.10 if sharpe < 2.0 else 0.15}
 
 # ===============================================================================
-# CUSTOM CSS FOR BETTER UI
+# CUSTOM CSS (setelah set_page_config)
 # ===============================================================================
 st.markdown("""
 <style>
@@ -340,17 +343,12 @@ st.markdown("""
         background-color: #2980b9;
         box-shadow: 0 2px 8px rgba(52,152,219,0.4);
     }
-    .dataframe {
-        border-radius: 8px;
-        overflow: hidden;
-    }
 </style>
 """, unsafe_allow_html=True)
 
 # ===============================================================================
 # MAIN LAYOUT APPLICATION BUILDER
 # ===============================================================================
-st.set_page_config(page_title="Hyper-Hybrid Engine V12", layout="wide", page_icon="📊")
 st.markdown('<div class="main-header">📊 HYPER-HYBRID QUANTITATIVE ENGINE V12</div>', unsafe_allow_html=True)
 
 # --- SESSION STATE INIT ---
@@ -361,7 +359,10 @@ if "prediction_history" not in st.session_state: st.session_state["prediction_hi
 if "gemini_api_key" not in st.session_state: st.session_state["gemini_api_key"] = load_key_from_file()
 if "table_data" not in st.session_state:
     if os.path.exists("broker_data.csv"):
-        st.session_state["table_data"] = pd.read_csv("broker_data.csv")
+        try:
+            st.session_state["table_data"] = pd.read_csv("broker_data.csv")
+        except:
+            st.session_state["table_data"] = pd.DataFrame([{"Broker": "YP", "Buy Lot": 8500, "Buy Freq": 420, "Sell Lot": 1200, "Sell Freq": 95, "Avg Buy Px": 4500.0, "Avg Sell Px": 4480.0}])
     else:
         st.session_state["table_data"] = pd.DataFrame([{"Broker": "YP", "Buy Lot": 8500, "Buy Freq": 420, "Sell Lot": 1200, "Sell Freq": 95, "Avg Buy Px": 4500.0, "Avg Sell Px": 4480.0}])
 
@@ -423,7 +424,11 @@ with tab1:
 
     with col2:
         st.markdown('<div class="section-title">▼ REAL-TIME BROKER DATA MATRIX</div>', unsafe_allow_html=True)
-        edited_df = st.data_editor(st.session_state["table_data"], num_rows="dynamic", use_container_width=True)
+        try:
+            edited_df = st.data_editor(st.session_state["table_data"], num_rows="dynamic", use_container_width=True)
+        except Exception as e:
+            st.error(f"Gagal memuat editor: {e}")
+            edited_df = st.session_state["table_data"]
         col_save, _ = st.columns([1, 3])
         with col_save:
             if st.button("💾 Simpan Tabel", use_container_width=True):
@@ -455,7 +460,6 @@ with tab1:
 
             broker_analysis = analyze_broker_summary_ai(broker_entries, current_price)
             gemini_res = analyze_with_gemini(ticker, headlines, st.session_state["gemini_api_key"], selected_model)
-            # Perbaikan: tambahkan r2 dan s2 di fallback
             quant = compute_quantitative_matrix(df, current_price) if not df.empty else {
                 "volatility": 0.2, "rsi": 50.0, "momentum_score": 0.0,
                 "pivot": current_price, "r1": current_price*1.01, "s1": current_price*0.99,
