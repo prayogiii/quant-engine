@@ -1,631 +1,370 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
-from scipy.stats import skew, kurtosis, t as student_t
-from scipy.optimize import minimize
-import warnings
+import requests
+import datetime
 import urllib.parse
-import re
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
+from typing import List, Dict, Tuple
 
-# ====================== FALLBACK PLOTLY ======================
-PLOTLY_AVAILABLE = True
-try:
-    import plotly.graph_objects as go
-except ImportError:
-    PLOTLY_AVAILABLE = False
-# ============================================================
+# ===============================================================================
+# CONFIG & KONSTANTA GLOBAL (V12 Anti-Overfitting Engine)
+# ===============================================================================
+WEIGHT_MIN = 0.08
+WEIGHT_MAX = 0.40
+SOFTMAX_TEMP = 2.5
+AI_SIGNAL_CAP = 0.30
+MC_PESSIMISM = 0.82
+TEMPORAL_HALF_DECAY = 25.0
 
-# ====================== FALLBACK SENTIMEN ======================
-SENTIMENT_AVAILABLE = True
-try:
-    import nltk
-    from nltk.sentiment import SentimentIntensityAnalyzer
-    try:
-        nltk.data.find('sentiment/vader_lexicon.zip')
-    except LookupError:
-        nltk.download('vader_lexicon')
-except ImportError:
-    SENTIMENT_AVAILABLE = False
+SMART_KEYWORDS = [
+    "fed","fomc","rate","inflation","perang","war","konflik","conflict",
+    "bi rate","interest","msci","ftse","trump","election","ihsg",
+    "rups","dividen","dividend","laba","profit","lk","report","buyback",
+    "emas","gold","xau","minyak","oil","crude","coal","nikel","nickel",
+    "bond","yield","rupiah","ekspor","impor","china","nikkei","dow jones","nasdaq","akuisisi"
+]
 
-# ====================== FALLBACK RSS ======================
-RSS_AVAILABLE = True
-try:
-    import feedparser
-except ImportError:
-    RSS_AVAILABLE = False
+IDX_EXCHANGE_HOLIDAYS = {
+    # 2024
+    "20240101", "20240208", "20240209", "20240210", "20240311", "20240312",
+    "20240329", "20240408", "20240409", "20240410", "20240411", "20240412",
+    "20240415", "20240501", "20240509", "20240523", "20240524", "20240601",
+    "20240617", "20240618", "20240707", "20240817", "20240916", "20241225", "20241226",
+    # 2025
+    "20250101", "20250127", "20250128", "20250129", "20250328", "20250329",
+    "20250331", "20250401", "20250402", "20250403", "20250404", "20250407",
+    "20250501", "20250512", "20250529", "20250601", "20250606", "20250627",
+    "20250817", "20250905", "20251225", "20251226",
+    # 2026
+    "20260101", "20260217", "20260303", "20260320", "20260403", "20260420",
+    "20260421", "20260422", "20260423", "20260424", "20260501", "20260514",
+    "20260526", "20260601", "20260616", "20260716", "20260817", "20260924",
+    "20261225", "20261226"
+}
 
-# ====================== FALLBACK TRANSLATOR ======================
-TRANSLATOR_AVAILABLE = True
-try:
-    from deep_translator import GoogleTranslator
-except ImportError:
-    TRANSLATOR_AVAILABLE = False
-# =================================================================
+# ===============================================================================
+# DATA CLASSES
+# ===============================================================================
+@dataclass
+class BrokerEntry:
+    broker_code: str
+    buy_lot: int
+    buy_freq: int
+    sell_lot: int
+    sell_freq: int
+    avg_buy_price: float = 0.0
+    avg_sell_price: float = 0.0
 
-warnings.filterwarnings("ignore")
+    @property
+    def net_lot(self) -> int: return self.buy_lot - self.sell_lot
+    @property
+    def net_freq(self) -> int: return self.buy_freq - self.sell_freq
+    @property
+    def avg_buy_lot(self) -> float: return self.buy_lot / self.buy_freq if self.buy_freq > 0 else 0.0
+    @property
+    def avg_sell_lot(self) -> float: return self.sell_lot / self.sell_freq if self.sell_freq > 0 else 0.0
+    @property
+    def dominance(self) -> str:
+        if self.net_lot > 0 and self.avg_buy_lot > self.avg_sell_lot * 1.5: return "WHALE_BUY"
+        if self.net_lot < 0 and self.avg_sell_lot > self.avg_buy_lot * 1.5: return "WHALE_SELL"
+        if self.net_lot > 0: return "RETAIL_BUY"
+        if self.net_lot < 0: return "RETAIL_SELL"
+        return "NEUTRAL"
 
-# ==========================================
-# 1. KONFIGURASI HALAMAN
-# ==========================================
-st.set_page_config(page_title="Quant Risk Engine Pro", page_icon="📊", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("""
-    <style>
-    .main { background-color: #0f1116; color: #ffffff; }
-    div[data-testid="stMetricValue"] { font-size: 24px; font-weight: bold; color: #00ffcc; }
-    div[data-testid="stMetricLabel"] { font-size: 14px; color: #8892b0; }
-    .stButton>button { width: 100%; background-color: #1f2937; color: white; border: 1px solid #374151; }
-    .stButton>button:hover { background-color: #374151; border-color: #00ffcc; }
-    h1, h2, h3 { color: #f3f4f6; }
-    div[data-testid="InputInstructions"] { display: none !important; }
-    .translated { color: #cbd5e1; font-size: 13px; }
-    .source { color: #6b7280; font-size: 11px; }
-    .summary-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px; padding: 20px; margin: 10px 0; border: 1px solid #334155;
+# ===============================================================================
+# MATRICES & MATHEMATICAL HELPERS
+# ===============================================================================
+def normalize_signal(v: float, scale: float = 1.0) -> float:
+    return max(-1.0, min(1.0, v / max(0.0001, scale)))
+
+def tick(p: int) -> int:
+    if p < 200: return 1
+    if p < 500: return 2
+    if p < 2000: return 5
+    if p < 5000: return 10
+    return 25
+
+# ===============================================================================
+# ENGINE 1: DATA BROKER SUMMARY ANALYSIS
+# ===============================================================================
+def analyze_broker_summary(entries: List[BrokerEntry], current_price: float) -> dict:
+    total_buy_lot = sum(b.buy_lot for b in entries)
+    total_sell_lot = sum(b.sell_lot for b in entries)
+    total_buy_freq = sum(b.buy_freq for b in entries)
+    total_sell_freq = sum(b.sell_freq for b in entries)
+    total_freq = max(1, total_buy_freq + total_sell_freq)
+    total_volume = max(1, total_buy_lot + total_sell_lot)
+
+    net_flow_lot = total_buy_lot - total_sell_lot
+    net_flow_freq = total_buy_freq - total_sell_freq
+    avg_buy_order = total_buy_lot / total_buy_freq if total_buy_freq > 0 else 0.0
+    avg_sell_order = total_sell_lot / total_sell_freq if total_sell_freq > 0 else 0.0
+    freq_imbalance = (total_buy_freq - total_sell_freq) / total_freq
+
+    all_lot_sizes = []
+    for b in entries:
+        if b.buy_freq > 0: all_lot_sizes.append(b.avg_buy_lot)
+        if b.sell_freq > 0: all_lot_sizes.append(b.avg_sell_lot)
+    
+    median_lot = np.median(all_lot_sizes) if all_lot_sizes else 1.0
+    whale_threshold = max(1.0, median_lot * 4.0)
+    whale_presence = any(b.avg_buy_lot > whale_threshold or b.avg_sell_lot > whale_threshold for b in entries)
+
+    top_buyers = sorted([b for b in entries if b.net_lot > 0], key=lambda x: x.net_lot, reverse=True)[:5]
+    top_sellers = sorted([b for b in entries if b.net_lot < 0], key=lambda x: x.net_lot)[:5]
+
+    flow_score = max(-1.0, min(1.0, net_flow_lot / total_volume))
+    size_score = max(-1.0, min(1.0, (avg_buy_order - avg_sell_order) / max(1.0, avg_buy_order + avg_sell_order)))
+
+    buy_pr_entries = [b for b in entries if b.avg_buy_price > 0 and b.buy_lot > 0]
+    sell_pr_entries = [b for b in entries if b.avg_sell_price > 0 and b.sell_lot > 0]
+
+    w_avg_buy_price = sum(b.avg_buy_price * b.buy_lot for b in buy_pr_entries) / sum(b.buy_lot for b in buy_pr_entries) if buy_pr_entries else 0.0
+    w_avg_sell_price = sum(b.avg_sell_price * b.sell_lot for b in sell_pr_entries) / sum(b.sell_lot for b in sell_pr_entries) if sell_pr_entries else 0.0
+    
+    has_price_data = w_avg_buy_price > 0 or w_avg_sell_price > 0
+    buy_weight = total_buy_lot / total_volume
+    sell_weight = 1.0 - buy_weight
+    buyer_gain = (current_price - w_avg_buy_price) / w_avg_buy_price if w_avg_buy_price > 0 else 0.0
+    seller_gain = (w_avg_sell_price - current_price) / w_avg_sell_price if w_avg_sell_price > 0 else 0.0
+    price_pressure = max(-1.0, min(1.0, (buyer_gain * buy_weight) - (seller_gain * sell_weight))) if has_price_data else 0.0
+
+    price_bonus = price_pressure * 0.15 if has_price_data else 0.0
+    volume_multiplier = 1.0 if total_volume >= 100 else 0.5
+    
+    inst_score = ((flow_score * 0.45) + (size_score * 0.25) + (freq_imbalance * 0.15) + price_bonus) * volume_multiplier
+    inst_score = max(-1.0, min(1.0, inst_score))
+
+    if inst_score > 0.25 and whale_presence: signal = "STRONG ACCUMULATION"
+    elif inst_score > 0.10: signal = "ACCUMULATION"
+    elif inst_score < -0.25 and whale_presence: signal = "STRONG DISTRIBUTION"
+    elif inst_score < -0.10: signal = "DISTRIBUTION"
+    else: signal = "NEUTRAL"
+
+    return {
+        "top_buyers": top_buyers, "top_sellers": top_sellers,
+        "net_flow_lot": net_flow_lot, "net_flow_freq": net_flow_freq,
+        "whale_presence": whale_presence, "broker_signal": signal,
+        "institutional_score": inst_score, "avg_buy_order": avg_buy_order,
+        "avg_sell_order": avg_sell_order, "w_avg_buy_price": w_avg_buy_price,
+        "w_avg_sell_price": w_avg_sell_price, "price_pressure": price_pressure
     }
-    .action-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px; padding: 20px; margin: 10px 0; border-left: 5px solid #00ffcc;
-    }
-    .section-title { color: #00ffcc; font-size: 18px; font-weight: bold; margin-bottom: 12px; }
-    .summary-item { color: #cbd5e1; font-size: 15px; margin-bottom: 8px; }
-    .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
-    .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
-    .fundamental-table td:first-child { color: #8892b0; width: 180px; }
-    </style>
-""", unsafe_allow_html=True)
 
-st.title("📊 Quant & Risk Engine Pro (Final + Fundamental)")
-st.write("Algoritma kuantitatif + berita + Backtest + Grafik + Fundamental. Distribusi Student‑t, ADX adaptif, Monte Carlo OU, Regime 10-State.")
-
-if not SENTIMENT_AVAILABLE: st.warning("⚠️ NLTK tidak terpasang")
-if not RSS_AVAILABLE: st.warning("⚠️ feedparser tidak terpasang")
-if not TRANSLATOR_AVAILABLE: st.info("💡 deep-translator tidak terpasang")
-if not PLOTLY_AVAILABLE: st.info("📈 plotly tidak terpasang – grafik tidak akan ditampilkan. Install dengan `pip install plotly`.")
-
-# ==========================================
-# 2. INPUT
-# ==========================================
-ticker_raw = st.text_input("Masukkan Kode Saham IHSG (Contoh: BRMS, BBRI, BMRI):", value="").upper().strip()
-total_capital = st.number_input("Total Modal Portofolio Anda (Rp):", min_value=0, value=None, step=10000, placeholder="Masukkan nominal modal anda...")
-if total_capital is not None and total_capital > 0:
-    st.markdown(f"✍️ *Terbaca:* **Rp {total_capital:,.0f}**".replace(",", "."))
-
-if ticker_raw and not ticker_raw.endswith(".JK"):
-    ticker_input = f"{ticker_raw}.JK"
-else:
-    ticker_input = ticker_raw
-
-# ==================== FUNGSI UTILITAS ====================
-def compute_adx(df, period=14):
-    high, low, close = df['High'], df['Low'], df['Close']
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = (-low.diff()).clip(lower=0)
-    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    return dx.ewm(alpha=1/period, adjust=False).mean().iloc[-1]
-
-def compute_adx_series(df, period=14):
-    high, low, close = df['High'], df['Low'], df['Close']
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = (-low.diff()).clip(lower=0)
-    tr = pd.concat([high - low, (high - close.shift()).abs(), (low - close.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    return dx.ewm(alpha=1/period, adjust=False).mean()
-
-def get_google_news_rss(query_str, num=5):
-    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
+# ===============================================================================
+# ENGINE 2: LIVE YAHOO FINANCE & NEWS DECAY RSS ENGINE
+# ===============================================================================
+def fetch_yahoo_price(symbol: str) -> float:
     try:
-        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
-        feed = feedparser.parse(url)
-        news = []
-        for e in feed.entries[:num]:
-            title = e.get('title', '').strip()
-            summary = re.sub('<[^<]+?>', '', e.get('summary', ''))
-            news.append({'title': title, 'summary': summary, 'source': 'Google News'})
-        return news, None
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = requests.get(url, headers=headers, timeout=10).json()
+        closes = res["chart"]["result"][0]["indicators"]["adjclose"][0]["adjclose"]
+        return float(closes[-1]) if closes else 0.0
+    except:
+        return 0.0
+
+def fetch_rss_news(ticker: str) -> List[dict]:
+    queries = [f"{ticker} site:cnbcindonesia.com", f"{ticker} site:bloomberg.com", ticker, "IHSG Hari Ini"]
+    news_items = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    for q in queries:
+        try:
+            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}"
+            res = requests.get(url, headers=headers, timeout=10)
+            root = ET.fromstring(res.text)
+            for item in root.findall(".//item"):
+                title = item.find("title").text
+                pub_date_str = item.find("pubDate").text
+                # Estimasi pemrosesan waktu sederhana
+                news_items[title] = {"title": title, "time": datetime.datetime.now()}
+        except:
+            continue
+    return list(news_items.values())
+
+# ===============================================================================
+# ENGINE 3: GEMINI SENTIMENT AI CALL
+# ===============================================================================
+def analyze_with_gemini(ticker: str, news_list: List[str], api_key: str) -> dict:
+    if not api_key:
+        return {"stock_score": 0.0, "market_score": 0.0, "label": "No API Key", "reason": "API Key belum diset."}
+    
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    
+    headlines = ". ".join(news_list[:15])
+    prompt = (
+        f"Analyze sentiment for {ticker}.JK (IDX) and IHSG market.\n"
+        f"News headlines: {headlines}.\n"
+        f"Return ONLY strict raw JSON object with this format:\n"
+        f'{{"stock_score":0.15, "market_score":0.05, "label":"Bullish", "reason":"Summary of global setup", "breakdown":"Details", "confidence":"85"}}'
+    )
+    
+    body = {"contents": [{"parts": [{"text": prompt}]}]}
+    try:
+        res = requests.post(url, json=body, headers=headers, timeout=15)
+        if res.status_code == 200:
+            raw_text = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+            # Sanitasi jika AI mengirim markdown codeblocks
+            if "{" in raw_text:
+                raw_text = raw_text[raw_text.find("{"):raw_text.find("}")+1]
+            import json
+            return json.loads(raw_text)
     except Exception as e:
-        return [], str(e)
+        st.error(f"Gemini API Error: {str(e)}")
+    return {"stock_score": 0.0, "market_score": 0.0, "label": "Error/Timeout", "reason": "Gagal terhubung ke Gemini AI."}
 
-def get_yahoo_search_news(query_str, num=5):
-    try:
-        items = yf.Search(query_str).news or []
-        news = []
-        for item in items[:num]:
-            inner = item.get('content') or item
-            title = (inner.get('title') or inner.get('shortTitle') or inner.get('headline') or '')
-            summary = (inner.get('summary') or inner.get('longSummary') or inner.get('description') or '')
-            if title: news.append({'title': title, 'summary': summary, 'source': 'Yahoo Search'})
-        return news, None
-    except: return [], "Yahoo Search gagal"
+# ===============================================================================
+# STREAMLIT UI SYSTEM
+# ===============================================================================
+st.set_page_config(page_title="Hyper-Hybrid Macro Engine V12", layout="wide")
 
-def get_yahoo_ticker_news(ticker, num=5):
-    try:
-        items = yf.Ticker(ticker).news or []
-        news = []
-        for item in items[:num]:
-            inner = item.get('content') or item
-            title = (inner.get('title') or inner.get('shortTitle') or inner.get('headline') or '')
-            summary = (inner.get('summary') or inner.get('longSummary') or inner.get('description') or '')
-            if title: news.append({'title': title, 'summary': summary, 'source': 'Yahoo Ticker'})
-        return news, None
-    except: return [], "Yahoo Ticker gagal"
+# Validasi Kalender Real-time Hari ini
+wib_now = datetime.datetime.utcnow() + datetime.timedelta(hours=7)
+today_key = wib_now.strftime("%Y%m%d")
+is_weekend = wib_now.weekday() >= 5
+is_holiday = today_key in IDX_EXCHANGE_HOLIDAYS
 
-def filter_relevant(news_list, ticker):
-    keywords = [ticker.lower(), 'saham', 'ihsg', 'bei', 'idx']
-    filtered = [n for n in news_list if any(k in (n['title']+n['summary']).lower() for k in keywords)]
-    return filtered if filtered else news_list
+st.title("📊 HYPER-HYBRID MACRO ENGINE V12")
+if is_weekend or is_holiday:
+    st.warning(f"⚠ Hari ini ({wib_now.strftime('%d-%m-%Y')}) Bursa IDX terpantau LIBUR / Tutup Sesi.")
 
-def analyze_sentiment_weighted(news_items, translator):
-    if not SENTIMENT_AVAILABLE or not news_items: return 0.0
-    analyzer = SentimentIntensityAnalyzer()
-    total_w, w_sum = 0, 0
-    for i, item in enumerate(news_items):
-        text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
-        if any(ord(c) > 127 for c in text) and translator:
-            try: text = translator.translate(text)
-            except: pass
-        score = analyzer.polarity_scores(text)['compound']
-        weight = 1 / (i + 1)
-        w_sum += score * weight
-        total_w += weight
-    return w_sum / total_w if total_w > 0 else 0.0
+# Layout Sidebar untuk API Settings
+with st.sidebar:
+    st.header("⚙ PENGATURAN API")
+    saved_key = st.text_input("Gemini API Key", type="password", value=st.session_state.get("gemini_api_key", ""))
+    if saved_key:
+        st.session_state["gemini_api_key"] = saved_key
 
-def estimate_theta_ou(close_series):
-    log_price = np.log(close_series.dropna())
-    log_lag = log_price.shift(1).dropna()
-    diff = log_price.diff().dropna()
-    common_idx = diff.index.intersection(log_lag.index)
-    if len(common_idx) < 20: return 0.05
-    y = diff.loc[common_idx].values
-    X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
-    coeff = np.linalg.lstsq(X, y, rcond=None)[0]
-    theta = -coeff[1] if coeff[1] < 0 else 0.05
-    return theta
+# Form Utama Pencarian & Input
+col_left, col_right = st.columns([1, 2])
 
-# ==================== KAMUS ====================
-REGIME_INFO = {
-    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Ideal untuk swing buy agresif, waspadai overbought.",
-    "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
-    "Panic Sell 🚨": "Penurunan tajam, sering oversold. Peluang buy-back jika reversal terkonfirmasi.",
-    "Bearish 🔻": "Tren turun terkendali. Hindari buy, pertimbangkan short.",
-    "Early Recovery 🔄": "Harga di atas EMA20 tapi EMA20 < EMA50. Potensi reversal bullish, perlu konfirmasi.",
-    "Distribution 📉": "Harga di bawah EMA20, EMA20 > EMA50. Distribusi setelah uptrend panjang.",
-    "Konsolidasi Tren ↔️": "Trending namun harga bolak-balik di EMA. Tunggu penembusan.",
-    "Bullish Accumulation 🏗️": "Sideways dengan harga > EMA. Akumulasi, potensi breakout.",
-    "Bearish Accumulation 🧊": "Sideways di bawah EMA. Distribusi pelan, waspadai breakdown.",
-    "Sideways Bias Naik ↗️": "Sideways cenderung naik, potensi bullish belum kuat.",
-    "Sideways Bias Turun ↘️": "Sideways cenderung turun, potensi bearish.",
-    "Sideways Choppy 🌊": "Sideways volatilitas tinggi. Hindari entry.",
-    "Sideways Calm 😴": "Sideways sepi, menjelang breakout.",
-    "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
-}
-IHSG_CONDITION_INFO = {
-    "RISK-ON 🔥": "Sentimen pasar positif, cocok untuk beli saham agresif.",
-    "RISK-OFF 🛑": "Sentimen pasar negatif, tahan diri atau pindah ke defensif.",
-    "NEUTRAL ⚖️": "Pasar tanpa arah jelas, strategi konservatif.",
-    "TRANSISI ⚠️": "Pasar dalam transisi, volatilitas tinggi, entry hati-hati."
-}
-# =====================================================
+with col_left:
+    st.subheader("▼ MARKET DATA INPUT")
+    stock_code = st.text_input("Kode Saham (contoh: BBRI, TLKM, BMRI)", value="BBRI").upper().strip()
+    
+    # Tombol Aksi Utama
+    run_analysis = st.button("▶ RUN HYPER-HYBRID MACRO ENGINE V12", use_container_width=True)
 
-if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
-    if not ticker_input: st.warning("⚠️ Kode saham tidak boleh kosong!")
-    elif total_capital is None or total_capital <= 0: st.warning("⚠️ Modal portofolio harus diisi dan > Rp 0!")
+with col_right:
+    st.subheader("▼ BROKER SUMMARY MATRIX (BUM\")")
+    st.caption("Tips: Kamu bisa Copy-Paste tabel langsung dari Excel/Spreadsheet ke grid di bawah ini.")
+    
+    # Setup tabel kosong interaktif pengganti addBrokerRow manual
+    init_df = pd.DataFrame([
+        {"Broker": "YP", "Buy Lot": 1500, "Buy Freq": 120, "Sell Lot": 200, "Sell Freq": 25, "Avg Buy Px": 0.0, "Avg Sell Px": 0.0}
+    ])
+    
+    edited_df = st.data_editor(
+        init_df,
+        num_rows="dynamic",
+        column_config={
+            "Broker": st.column_config.TextColumn("Kode Broker", max_chars=2, required=True),
+            "Buy Lot": st.column_config.NumberColumn("Buy Lot", min_value=0, default=0),
+            "Buy Freq": st.column_config.NumberColumn("Buy Freq", min_value=0, default=0),
+            "Sell Lot": st.column_config.NumberColumn("Sell Lot", min_value=0, default=0),
+            "Sell Freq": st.column_config.NumberColumn("Sell Freq", min_value=0, default=0),
+            "Avg Buy Px": st.column_config.NumberColumn("Avg Buy Price", min_value=0.0, default=0.0),
+            "Avg Sell Px": st.column_config.NumberColumn("Avg Sell Price", min_value=0.0, default=0.0),
+        },
+        use_container_width=True
+    )
+
+# EXECUTION TRIGGER
+if run_analysis:
+    if not st.session_state.get("gemini_api_key"):
+        st.error("❌ Analisis dibatalkan: Masukkan Gemini API Key Anda di sidebar terlebih dahulu!")
+    elif not stock_code:
+        st.error("❌ Analisis dibatalkan: Kode saham tidak boleh kosong.")
     else:
-        with st.spinner("🤖 Mengunduh data, berita, backtest, dan model kuantitatif..."):
-            try:
-                # DATA HARGA
-                df = yf.download(ticker_input, period="1y")
-                if df.empty: st.error("❌ Data tidak ditemukan."); st.stop()
-                if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-                harga_terakhir = float(df['Close'].iloc[-1])
-                returns = df['Close'].pct_change().dropna()
-                if len(returns) < 20: st.error("❌ Data historis kurang (minimal 20 hari)."); st.stop()
+        with st.spinner("Mengaktifkan V12 Engine: Menarik data market, berita makro, & memproses algoritma AI..."):
+            
+            # 1. Fetch live prices
+            live_price = fetch_yahoo_price(f"{stock_code}.JK")
+            if live_price == 0.0:
+                live_price = 5000.0 # Fallback default price jika API Yahoo limit
+            
+            # 2. Fetch & Score RSS News
+            raw_news = fetch_rss_news(stock_code)
+            news_titles = [n["title"] for n in raw_news]
+            
+            # 3. Process Gemini Sentiment Analysis
+            ai_res = analyze_with_gemini(stock_code, news_titles, st.session_state["gemini_api_key"])
+            
+            # 4. Parse Broker Entries dari UI Grid
+            entries = []
+            for _, r in edited_df.iterrows():
+                if pd.notna(r["Broker"]) and str(r["Broker"]).strip() != "":
+                    entries.append(BrokerEntry(
+                        broker_code=str(r["Broker"]).upper(),
+                        buy_lot=int(r["Buy Lot"]) if pd.notna(r["Buy Lot"]) else 0,
+                        buy_freq=int(r["Buy Freq"]) if pd.notna(r["Buy Freq"]) else 0,
+                        sell_lot=int(r["Sell Lot"]) if pd.notna(r["Sell Lot"]) else 0,
+                        sell_freq=int(r["Sell Freq"]) if pd.notna(r["Sell Freq"]) else 0,
+                        avg_buy_price=float(r["Avg Buy Px"]) if pd.notna(r["Avg Buy Px"]) else 0.0,
+                        avg_sell_price=float(r["Avg Sell Px"]) if pd.notna(r["Avg Sell Px"]) else 0.0,
+                    ))
 
-                # === DATA FUNDAMENTAL ===
-                try:
-                    ticker_info = yf.Ticker(ticker_input).info
-                except:
-                    ticker_info = {}
+            # 5. Run Broker Analytics
+            brk_res = None
+            if entries:
+                brk_res = analyze_broker_summary(entries, live_price)
 
-                # BERITA
-                news_pool = []
-                translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
-                translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
-                rss, _ = get_google_news_rss(f"{ticker_raw} saham")
-                if rss: news_pool.extend(rss)
-                ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
-                if ysearch: news_pool.extend(ysearch)
-                if not news_pool:
-                    ytick, _ = get_yahoo_ticker_news(ticker_input)
-                    if ytick: news_pool.extend(ytick)
-                news_pool = filter_relevant(news_pool, ticker_raw)
-                seen = set()
-                unique_news = []
-                for n in news_pool:
-                    if n['title'] not in seen:
-                        seen.add(n['title']); unique_news.append(n)
-                    if len(unique_news) >= 5: break
-                avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
-                headlines = [n['title'] for n in unique_news]
-                sources = [n['source'] for n in unique_news]
-                translated = []
-                for n in unique_news:
-                    if TRANSLATOR_AVAILABLE and translator_id:
-                        try: translated.append(translator_id.translate(n['title']))
-                        except: translated.append("")
-                    else: translated.append("")
-                sentimen_status = "Positif 🟢" if avg_sentiment >= 0.05 else ("Negatif 🔴" if avg_sentiment <= -0.05 else "Netral ⚪") if SENTIMENT_AVAILABLE else "Nonaktif"
+            # ===============================================================================
+            # RENDERING OUTPUT INTERFACE
+            # ===============================================================================
+            st.balloons()
+            st.success(f"## 📊 HASIL ANALISIS ENGINE V12 — {stock_code}")
+            
+            # Row 1: Key Metrics Dashboard
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Harga Penutupan Terakhir", f"Rp {live_price:,.0f}")
+            m2.metric("Sentimen Label AI", ai_res.get("label", "Neutral"))
+            
+            if brk_res:
+                m3.metric("Sinyal Broker", brk_res["broker_signal"])
+                m4.metric("Inst Score (Whale Flow)", f"{brk_res['institutional_score']:.2f}")
+            else:
+                m3.metric("Sinyal Broker", "NO DATA")
+                m4.metric("Inst Score (Whale Flow)", "0.00")
 
-                # VOLATILITAS
-                log_hl = np.log(df['High'] / df['Low'])**2
-                parkinson_vol = float(np.sqrt(log_hl.mean()/(4*np.log(2))) * np.sqrt(252)*100)
-                ewma_vol = float(np.sqrt(returns.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100)
+            # Row 2: Detail Analisis Komprehensif
+            tab1, tab2, tab3 = st.tabs(["🧬 Integrasi Sentimen AI & Makro", "🐋 Bandarmology Detail", "📰 Berita Terdeteksi"])
+            
+            with tab1:
+                st.markdown(f"### AI Evaluation Reasoning")
+                st.info(ai_res.get("reason", "No reason provided by AI."))
+                
+                col_score_1, col_score_2 = st.columns(2)
+                col_score_1.progress(float(ai_res.get("stock_score", 0.0)) + 1.0 / 2.0, text=f"Stock Score Bias: {ai_res.get('stock_score')}")
+                col_score_2.progress(float(ai_res.get("market_score", 0.0)) + 1.0 / 2.0, text=f"IHSG Score Bias: {ai_res.get('market_score')}")
+                st.caption(f"Tingkat Kepercayaan Model AI: {ai_res.get('confidence', '0')}%")
 
-                # BETA IHSG
-                try:
-                    ihsg = yf.download("^JKSE", period="1y")
-                    if isinstance(ihsg.columns, pd.MultiIndex): ihsg.columns = ihsg.columns.get_level_values(0)
-                    ihsg_ret = ihsg['Close'].pct_change().dropna()
-                    common = returns.index.intersection(ihsg_ret.index)
-                    if len(common)>20:
-                        cov = np.cov(returns.loc[common], ihsg_ret.loc[common])
-                        beta_ihsg = cov[0,1]/cov[1,1] if cov[1,1]>0 else 1.0
-                    else: beta_ihsg=1.0
-                except: beta_ihsg=1.0
-
-                # ==================== THRESHOLD & PARAMETER DARI 6 BULAN PERTAMA ====================
-                split_idx = max(126, len(df) - 126)
-                df_thresh = df.iloc[:split_idx]
-                returns_thresh = df_thresh['Close'].pct_change().dropna()
-
-                adx_series = compute_adx_series(df_thresh)
-                adx_threshold = np.percentile(adx_series.dropna(), 75) if len(adx_series.dropna()) > 0 else 20
-
-                z_hist_th = (df_thresh['Close'] - df_thresh['Close'].rolling(20).mean()) / df_thresh['Close'].rolling(20).std()
-                z_oversold_th = np.percentile(z_hist_th.dropna(), 30)
-                mom5_hist_th = df_thresh['Close'].pct_change(5).dropna()*100
-                mom_median_th = np.percentile(mom5_hist_th, 50)
-
-                vol_hist_th = returns_thresh.rolling(20).std().dropna()*np.sqrt(252)*100
-                high_vol_th = np.percentile(vol_hist_th, 70)
-                low_vol_th = np.percentile(vol_hist_th, 30)
-
-                def t_loglike(p, d):
-                    if p[0]<=2 or p[2]<=0: return np.inf
-                    return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
-                res_thresh = minimize(t_loglike, [5, returns_thresh.mean(), returns_thresh.std()],
-                                      bounds=[(2.1,100),(-0.1,0.1),(1e-6,None)], args=(returns_thresh,), method='L-BFGS-B')
-                df_est, t_loc, t_scale = res_thresh.x if res_thresh.success else (5, returns_thresh.mean(), returns_thresh.std())
-
-                # ==================== FUNGSI REGIME ====================
-                def get_regime(slice_df):
-                    close = slice_df['Close']
-                    h = float(close.iloc[-1])
-                    ema20s = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
-                    ema50s = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-                    adxs = compute_adx(slice_df)
-                    zs = (h - close.tail(20).mean()) / close.tail(20).std() if close.tail(20).std() > 0 else 0
-                    m5 = float((h / close.iloc[-6] - 1) * 100) if len(close) >= 6 else 0
-                    if adxs > adx_threshold:
-                        if h > ema20s and ema20s > ema50s:
-                            if m5 > mom_median_th or zs > z_oversold_th: return "Strong Bullish 🚀", "RISK-ON 🔥"
-                            else: return "Bullish 📈", "RISK-ON 🔥"
-                        elif h < ema20s and ema20s < ema50s:
-                            if m5 < mom_median_th or zs < z_oversold_th: return "Panic Sell 🚨", "RISK-OFF 🛑"
-                            else: return "Bearish 🔻", "RISK-OFF 🛑"
-                        elif h > ema20s and ema20s < ema50s: return "Early Recovery 🔄", "TRANSISI ⚠️"
-                        elif h < ema20s and ema20s > ema50s: return "Distribution 📉", "TRANSISI ⚠️"
-                        else: return "Konsolidasi Tren ↔️", "NEUTRAL ⚖️"
-                    else:
-                        if h > ema20s and ema20s > ema50s: return "Bullish Accumulation 🏗️", "NEUTRAL ⚖️"
-                        elif h < ema20s and ema20s < ema50s: return "Bearish Accumulation 🧊", "NEUTRAL ⚖️"
-                        elif h > ema20s and ema20s < ema50s: return "Sideways Bias Naik ↗️", "NEUTRAL ⚖️"
-                        elif h < ema20s and ema20s > ema50s: return "Sideways Bias Turun ↘️", "NEUTRAL ⚖️"
-                        else:
-                            ret_s = close.pct_change().dropna()
-                            ewma_vol_s = float(np.sqrt(ret_s.ewm(alpha=0.06).var().iloc[-1]) * np.sqrt(252)*100) if len(ret_s) >= 20 else 0
-                            if ewma_vol_s > high_vol_th: return "Sideways Choppy 🌊", "NEUTRAL ⚖️"
-                            elif ewma_vol_s < low_vol_th: return "Sideways Calm 😴", "NEUTRAL ⚖️"
-                            else: return "Sideways Normal ↔️", "NEUTRAL ⚖️"
-
-                regime, ihsg_cond = get_regime(df)
-                adx = compute_adx(df)
-
-                # PIVOT
-                hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
-                pp = (hi+lo+harga_terakhir)/3
-                r1, s1 = 2*pp-lo, 2*pp-hi
-                r2, s2 = pp+(hi-lo), pp-(hi-lo)
-                res20 = float(df['High'].iloc[-21:-1].max())
-                breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
-
-                # MOMENTUM LENGKAP (3D, 5D, 10D)
-                mom_3d = float((df['Close'].iloc[-1]/df['Close'].iloc[-4]-1)*100)
-                mom_5d = float((df['Close'].iloc[-1]/df['Close'].iloc[-6]-1)*100)
-                mom_10d = float((df['Close'].iloc[-1]/df['Close'].iloc[-11]-1)*100)
-                z_score = (harga_terakhir - df['Close'].tail(20).mean()) / df['Close'].tail(20).std() if df['Close'].tail(20).std()>0 else 0
-                ema20 = float(df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
-
-                # SIGNAL LIVE
-                score = 0
-                if mom_3d > mom_median_th: score += 1
-                if z_score < z_oversold_th: score += 1
-                if harga_terakhir > ema20: score += 1
-                if 'Volume' in df.columns and df['Volume'].iloc[-1] > df['Volume'].tail(20).mean(): score += 1
-                if SENTIMENT_AVAILABLE and avg_sentiment > 0.2: score += 1
-                elif SENTIMENT_AVAILABLE and avg_sentiment < -0.2: score -= 1
-                signal = "🔥 STRONG BUY" if score >= 3 else ("⚡ BUY (TACTICAL)" if score >= 2 else ("⏸️ HOLD / WAIT" if score == 1 else "🚨 AVOID"))
-
-                # BACKTEST EXPANDING WINDOW
-                def backtest_expanding(df, periods=126):
-                    df_back = df.iloc[-periods:].copy()
-                    signals = []
-                    for i in range(20, len(df_back)):
-                        slice_df = df.iloc[:df.index.get_loc(df_back.index[i-1])+1]
-                        sl_thresh = slice_df.iloc[:max(126, len(slice_df)-126)] if len(slice_df) >= 126 else slice_df
-                        ret_sl = sl_thresh['Close'].pct_change().dropna()
-                        z_hist_sl = (sl_thresh['Close'] - sl_thresh['Close'].rolling(20).mean()) / sl_thresh['Close'].rolling(20).std()
-                        z_ov_sl = np.percentile(z_hist_sl.dropna(), 30) if len(z_hist_sl.dropna()) > 0 else -1.5
-                        mom5_sl = sl_thresh['Close'].pct_change(5).dropna()*100
-                        mom_med_sl = np.percentile(mom5_sl, 50) if len(mom5_sl) > 0 else 0.0
-                        h = float(slice_df['Close'].iloc[-1])
-                        m3 = float((slice_df['Close'].iloc[-1]/slice_df['Close'].iloc[-4]-1)*100)
-                        ema20s = float(slice_df['Close'].ewm(span=20, adjust=False).mean().iloc[-1])
-                        zs = (h - slice_df['Close'].tail(20).mean())/slice_df['Close'].tail(20).std() if slice_df['Close'].tail(20).std()>0 else 0
-                        vol_cond = slice_df['Volume'].iloc[-1] > slice_df['Volume'].tail(20).mean() if 'Volume' in slice_df.columns else False
-                        s = 0
-                        if m3 > mom_med_sl: s += 1
-                        if zs < z_ov_sl: s += 1
-                        if h > ema20s: s += 1
-                        if vol_cond: s += 1
-                        sig = "🔥 STRONG BUY" if s >= 2 else ("⚡ BUY (TACTICAL)" if s >= 1 else "🚨 AVOID")
-                        signals.append((df_back.index[i], sig))
-                    trades = []
-                    for i in range(len(signals)-1):
-                        date, sig = signals[i]
-                        next_date = signals[i+1][0]
-                        if "BUY" in sig:
-                            entry = df.loc[date, 'Close']
-                            exit_ = df.loc[next_date, 'Close']
-                            trades.append((exit_ - entry) / entry)
-                    if trades:
-                        win_rate = sum(1 for r in trades if r > 0) / len(trades)
-                        profit_factor = abs(sum(r for r in trades if r > 0) / sum(r for r in trades if r < 0)) if sum(r for r in trades if r < 0) != 0 else np.inf
-                        avg_return = np.mean(trades)
-                        equity = np.cumprod([1+r for r in trades])
-                        max_dd_bt = float(np.min(equity / np.maximum.accumulate(equity) - 1) * 100)
-                        sharpe_bt = np.mean(trades) / np.std(trades) * np.sqrt(252/30) if np.std(trades) > 0 else 0
-                        return win_rate, profit_factor, avg_return, len(trades), max_dd_bt, sharpe_bt
-                    return 0, 0, 0, 0, 0, 0
-
-                win_bt, pf_bt, avg_bt, trades_bt, maxdd_bt, sharpe_bt = backtest_expanding(df)
-
-                # RISK METRICS
-                roll_max_th = df_thresh['Close'].cummax()
-                drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
-                max_dd = float(drawdown_th.min()*100)
-                max_dd_30 = float(drawdown_th.tail(30).min()*100) if len(drawdown_th) >= 30 else max_dd
-                mean_ret = returns_thresh.mean()*252
-                std_ret = returns_thresh.std()*np.sqrt(252)
-                sharpe = mean_ret/std_ret if std_ret>0 else 0
-                down_std = returns_thresh[returns_thresh<0].std()*np.sqrt(252) if len(returns_thresh[returns_thresh<0])>0 else std_ret
-                sortino = mean_ret/down_std if down_std>0 else 0
-                calmar = mean_ret/abs(max_dd/100) if max_dd!=0 else 0
-                win_r = len(returns_thresh[returns_thresh>0])/len(returns_thresh)
-                avg_g = returns_thresh[returns_thresh>0].mean() if win_r>0 else 0.01
-                avg_l = abs(returns_thresh[returns_thresh<0].mean()) if len(returns_thresh[returns_thresh<0])>0 else 0.01
-                wl = avg_g/avg_l if avg_l>0 else 1
-                kelly_raw = win_r - (1-win_r)/wl
-                ret_skew = float(skew(returns_thresh))
-                ret_kurt = float(kurtosis(returns_thresh, fisher=True))
-                kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
-                kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1.0) * kurt_penalty))
-                alloc = total_capital*kelly_adj
-
-                # MONTE CARLO OU
-                n_sim, n_days = 2000, 30
-                latest_vol_daily = np.sqrt(returns.ewm(alpha=0.06).var().iloc[-1])
-                scale_corrected = latest_vol_daily / np.sqrt(df_est / (df_est - 2)) if df_est > 2 else latest_vol_daily
-                theta_ou = estimate_theta_ou(df['Close'])
-                log_mean_series = np.log(df['Close']).rolling(20).mean().dropna()
-                paths = np.zeros((n_days, n_sim))
-                current_log = np.log(harga_terakhir)
-                for day in range(n_days):
-                    log_mean20_val = log_mean_series.iloc[-day-1] if (day % 5 == 0 and day != 0 and len(log_mean_series) > day) else np.log(df['Close']).tail(20).mean()
-                    innovations = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
-                    current_log = current_log + theta_ou * (log_mean20_val - current_log) + innovations
-                    paths[day, :] = np.exp(current_log)
-                mu_ou = theta_ou * (np.log(df['Close']).tail(20).mean() - np.log(harga_terakhir)) + t_loc
-                est_besok = float(np.exp(np.log(harga_terakhir) + mu_ou))
-                sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=scale_corrected, size=2000)
-                prices_besok = harga_terakhir * np.exp(sim_h1)
-                low_est, up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
-                final_prices = paths[-1, :]
-                es_95_mc = float(np.mean(final_prices[final_prices <= np.percentile(final_prices, 5)]))
-                es_95_pct = (harga_terakhir - es_95_mc) / harga_terakhir * 100
-                tp, sl = r1, s1
-                hit_tp = (np.any(paths >= tp, axis=0).sum() / n_sim) * 100
-                hit_sl = (np.any(paths <= sl, axis=0).sum() / n_sim) * 100
-                prob_bull = ((sim_h1 > 0).sum() / 2000) * 100
-
-                # ==================== TAMPILAN ====================
-                st.success(f"✅ Analisis: {ticker_input} | Harga: Rp {harga_terakhir:,.0f}".replace(",","."))
-                st.header("📰 Sentimen Berita ")
-                st.caption("Berita diambil dari Google News & Yahoo Finance, sentimen dihitung dengan bobot.")
-                c1,c2=st.columns([1,2])
-                c1.metric("Sentimen", f"{avg_sentiment:.2f}", sentimen_status)
-                with c2:
-                    st.markdown("**5 Berita Teratas:**")
-                    for i,h in enumerate(headlines):
-                        src = sources[i] if i<len(sources) else ""
-                        t = translated[i] if i<len(translated) else ""
-                        st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>", unsafe_allow_html=True)
-                        if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
-                        st.markdown("")
-                st.divider()
-
-                st.header("🧬 Regime & Volatility ")
-                m1,m2,m3=st.columns(3)
-                m1.metric("Regime", regime); m2.metric("IHSG", ihsg_cond); m3.metric("ADX", f"{adx:.1f}")
-                st.markdown(f"EWMA Vol: `{ewma_vol:.2f}%` | Parkinson: `{parkinson_vol:.2f}%` | T(df={df_est:.1f})")
-                st.markdown(f"**Apa artinya?** {REGIME_INFO.get(regime, '')}")
-                st.markdown(f"**Kondisi IHSG:** {IHSG_CONDITION_INFO.get(ihsg_cond, '')}")
-                st.markdown(f"**ADX threshold adaptif:** {adx_threshold:.1f}")
-                st.divider()
-
-                # ANALISIS FUNDAMENTAL (dengan perbaikan kecil)
-                st.header("📊 Analisis Fundamental")
-                st.caption("Data fundamental dari laporan keuangan terbaru (jika tersedia).")
-                # Saran kecil: cek apakah setidaknya ada PER atau PBV
-                if ticker_info and (ticker_info.get('trailingPE') or ticker_info.get('priceToBook')):
-                    market_cap = ticker_info.get('marketCap')
-                    per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
-                    pbv = ticker_info.get('priceToBook')
-                    eps = ticker_info.get('trailingEps')
-                    roe = ticker_info.get('returnOnEquity')
-                    debt_equity = ticker_info.get('debtToEquity')
-                    dividend_yield = ticker_info.get('dividendYield')
-                    table_html = "<table class='fundamental-table'>"
-                    table_html += f"<tr><td>Market Cap</td><td>{market_cap:,.0f} IDR</td></tr>" if market_cap else ""
-                    table_html += f"<tr><td>PER</td><td>{per:.2f}x</td></tr>" if per else ""
-                    table_html += f"<tr><td>PBV</td><td>{pbv:.2f}x</td></tr>" if pbv else ""
-                    table_html += f"<tr><td>EPS</td><td>{eps:.2f}</td></tr>" if eps else ""
-                    table_html += f"<tr><td>ROE</td><td>{roe*100:.1f}%</td></tr>" if roe else ""
-                    table_html += f"<tr><td>Debt/Equity</td><td>{debt_equity:.2f}%</td></tr>" if debt_equity else ""
-                    table_html += f"<tr><td>Div Yield</td><td>{dividend_yield*100:.2f}%</td></tr>" if dividend_yield else ""
-                    table_html += "</table>"
-                    st.markdown(table_html, unsafe_allow_html=True)
-                    interpretation = []
-                    if per:
-                        if per < 10: per_status, per_color = "Rendah (undervalued)", "#10b981"
-                        elif per > 25: per_status, per_color = "Tinggi (overvalued)", "#ef4444"
-                        else: per_status, per_color = "Moderat", "#f59e0b"
-                        interpretation.append(f"PER {per:.1f}x <span style='color:{per_color}; font-weight:bold;'>{per_status}</span>.")
-                    if pbv:
-                        if pbv < 1: pbv_status, pbv_color = "di bawah 1 (undervalued)", "#10b981"
-                        elif pbv > 3: pbv_status, pbv_color = "di atas 3 (overvalued)", "#ef4444"
-                        else: pbv_status, pbv_color = "normal", "#f59e0b"
-                        interpretation.append(f"PBV {pbv:.1f}x <span style='color:{pbv_color}; font-weight:bold;'>{pbv_status}</span>.")
-                    if roe:
-                        if roe > 0.15: roe_status, roe_color = "baik (>15%)", "#10b981"
-                        elif roe < 0.05: roe_status, roe_color = "rendah", "#ef4444"
-                        else: roe_status, roe_color = "cukup", "#f59e0b"
-                        interpretation.append(f"ROE {roe*100:.1f}% <span style='color:{roe_color}; font-weight:bold;'>{roe_status}</span>.")
-                    if debt_equity:
-                        if debt_equity > 100: de_status, de_color = "tinggi", "#ef4444"
-                        else: de_status, de_color = "aman", "#10b981"
-                        interpretation.append(f"D/E {debt_equity:.1f}% <span style='color:{de_color}; font-weight:bold;'>{de_status}</span>.")
-                    if interpretation:
-                        st.markdown("**Interpretasi:** " + " ".join(interpretation), unsafe_allow_html=True)
-                    else:
-                        st.markdown("Data fundamental tidak mencukupi untuk interpretasi.")
+            with tab2:
+                if brk_res:
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        st.write("##### 🟢 Top 5 Net Buyers")
+                        buy_data = [{"Broker": b.broker_code, "Net Lot": b.net_lot, "Avg Buy Lot": b.avg_buy_lot, "Tipe": b.dominance} for b in brk_res["top_buyers"]]
+                        st.table(pd.DataFrame(buy_data))
+                    with col_b2:
+                        st.write("##### 🔴 Top 5 Net Sellers")
+                        sell_data = [{"Broker": b.broker_code, "Net Lot": b.net_lot, "Avg Sell Lot": b.avg_sell_lot, "Tipe": b.dominance} for b in brk_res["top_sellers"]]
+                        st.table(pd.DataFrame(sell_data))
+                    
+                    st.markdown("##### 🧮 Rumus Internal & Data Turunan")
+                    st.write(f"- **Net Flow Volume (Lot):** {brk_res['net_flow_lot']:,}")
+                    st.write(f"- **Price Pressure Index:** {brk_res['price_pressure']:.4f}")
+                    st.write(f"- **Whale Presence Detected:** {'YA' if brk_res['whale_presence'] else 'TIDAK'}")
                 else:
-                    st.markdown("Data fundamental tidak tersedia untuk saham ini.")
-                st.divider()
+                    st.info("Input data broker kosong. Silakan isi tabel input di atas untuk mengaktifkan modul Bandarmology.")
 
-                # MOMENTUM
-                st.header("📊 Momentum & Z‑Score")
-                mo1,mo2,mo3,mo4=st.columns(4)
-                mo1.metric("3D", f"{mom_3d:+.2f}%"); mo2.metric("5D", f"{mom_5d:+.2f}%"); mo3.metric("10D", f"{mom_10d:+.2f}%"); mo4.metric("Z", f"{z_score:+.2f}σ")
-                st.divider()
-
-                # PIVOT
-                st.header("🎯 Pivot & S/R")
-                st.write(f"Breakout Res20: `{breakout}`")
-                p1,p2,p3,p4,p5=st.columns(5)
-                p1.metric("R2", f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1", f"Rp {r1:,.0f}".replace(",",".")); p3.metric("PP", f"Rp {pp:,.0f}".replace(",",".")); p4.metric("S1", f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2", f"Rp {s2:,.0f}".replace(",","."))
-                st.divider()
-
-                # SIGNAL & BACKTEST
-                st.header("🔮 Signal & Trading Plan With Backtest ")
-                t1,t2,t3,t4=st.columns(4)
-                t1.metric("Signal", signal)
-                t2.metric("Est. Besok", f"Rp {est_besok:,.0f}".replace(",","."), f"25-75%: {low_est:,.0f} – {up_est:,.0f}".replace(",","."))
-                t3.metric("Entry", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",","."))
-                t4.metric("Target", f"Rp {r1:,.0f}".replace(",","."))
-                st.caption("💡 Interval 25%-75% adalah rentang harga besok yang paling mungkin (probabilitas 50%).")
-                st.markdown("**📈 Backtest 6 Bulan (Expanding Window):**")
-                b1,b2,b3,b4,b5,b6=st.columns(6)
-                b1.metric("Win Rate", f"{win_bt:.1%}" if trades_bt else "N/A")
-                b2.metric("Profit Factor", f"{pf_bt:.2f}" if trades_bt else "N/A")
-                b3.metric("Avg Return", f"{avg_bt:.2%}" if trades_bt else "N/A")
-                b4.metric("Max DD", f"{maxdd_bt:.2f}%" if trades_bt else "N/A")
-                b5.metric("Sharpe", f"{sharpe_bt:.2f}" if trades_bt else "N/A")
-                b6.metric("Trades", f"{trades_bt}")
-                st.divider()
-
-                # RISK
-                st.header("🛡️ Risk & Portfolio Sizing")
-                r1,r2,r3=st.columns(3)
-                r1.metric("Kelly Adj.", f"{kelly_adj*100:.1f}%")
-                r2.metric("Rekom. Modal", f"Rp {alloc:,.0f}".replace(",","."))
-                r3.metric("Beta", f"{beta_ihsg:.2f}x")
-                st.markdown(f"Max DD: `{max_dd:.2f}%` (30D: `{max_dd_30:.2f}%`) | Sharpe: `{sharpe:.2f}` | Sortino: `{sortino:.2f}` | Calmar: `{calmar:.2f}`")
-                st.divider()
-
-                # MONTE CARLO
-                st.header("🎲 Monte Carlo (OU, Student‑t, vol adaptif)")
-                pr1,pr2,pr3=st.columns(3)
-                pr1.metric("Prob Bullish Besok", f"{prob_bull:.1f}%"); pr2.metric("Prob TP 30D", f"{hit_tp:.1f}%"); pr3.metric("Prob SL 30D", f"{hit_sl:.1f}%")
-
-                # GRAFIK (jika plotly tersedia)
-                if PLOTLY_AVAILABLE:
-                    st.header("📈 Chart Harga & Indikator")
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='#00ffcc')))
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=20, adjust=False).mean(), name='EMA20', line=dict(color='#f59e0b', dash='dot')))
-                    fig.add_trace(go.Scatter(x=df.index, y=df['Close'].ewm(span=50, adjust=False).mean(), name='EMA50', line=dict(color='#ef4444', dash='dot')))
-                    for level, label in [(r1, 'R1'), (s1, 'S1'), (pp, 'PP')]:
-                        fig.add_hline(y=level, line_dash="dash", line_color="gray", annotation_text=label, annotation_position="right")
-                    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=0,r=0,t=20,b=0))
-                    st.plotly_chart(fig, use_container_width=True)
-
-                # KESIMPULAN
-                st.markdown("---")
-                st.header("📋 Kesimpulan & Rekomendasi Trading")
-                if "STRONG BUY" in signal:
-                    action_color, action_icon, action_text = "#10b981", "🟢", "Pertimbangkan untuk membeli dengan ukuran posisi sesuai alokasi Kelly. Pasang stop loss di bawah S1."
-                elif "BUY" in signal:
-                    action_color, action_icon, action_text = "#f59e0b", "🟡", "Sinyal beli taktis muncul, tetapi belum terlalu kuat. Bisa entry dengan porsi lebih kecil atau menunggu konfirmasi tambahan."
-                elif "HOLD" in signal:
-                    action_color, action_icon, action_text = "#3b82f6", "🔵", "Tahan posisi jika sudah ada, hindari entry baru sampai sinyal lebih jelas."
+            with tab3:
+                st.write(f"Total berita tersaring berdasarkan {len(SMART_KEYWORDS)} kata kunci utama:")
+                if news_titles:
+                    for idx, title in enumerate(news_titles[:20]):
+                        st.write(f"{idx+1}. {title}")
                 else:
-                    action_color, action_icon, action_text = "#ef4444", "🔴", "Hindari pembelian. Pertimbangkan untuk keluar dari posisi atau menunggu pullback ke support kuat."
-                col1, col2 = st.columns([1, 1])
-                with col1:
-                    st.markdown(f"""
-                    <div class="summary-card">
-                        <div class="section-title">📌 Ringkasan Kondisi</div>
-                        <div class="summary-item">🏷️ <b>Regime:</b> {regime}</div>
-                        <div class="summary-item">🌐 <b>IHSG Condition:</b> {ihsg_cond}</div>
-                        <div class="summary-item">📊 <b>ADX:</b> {adx:.1f}</div>
-                        <div class="summary-item">📰 <b>Sentimen:</b> {sentimen_status} ({avg_sentiment:.2f})</div>
-                        <div class="summary-item">🔮 <b>Sinyal:</b> {signal}</div>
-                        <div class="summary-item">💰 <b>Estimasi Besok:</b> Rp {est_besok:,.0f}<br><span style="font-size:13px; color:#94a3b8;">Range 25-75%: {low_est:,.0f} – {up_est:,.0f}</span></div>
-                        <div class="summary-item">🛡️ <b>Alokasi:</b> {kelly_adj*100:.1f}% (Rp {alloc:,.0f})</div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col2:
-                    st.markdown(f"""
-                    <div class="action-card" style="border-left-color: {action_color};">
-                        <div class="section-title">{action_icon} Rekomendasi Aksi</div>
-                        <div class="summary-item" style="font-size: 16px; margin-top: 8px;">
-                            {action_text}
-                        </div>
-                        <hr style="border-color: #334155; margin: 15px 0;">
-                        <div style="color: #94a3b8; font-size: 14px;">
-                            ⚠️ <i>Keputusan trading sepenuhnya ada di tangan Anda. Gunakan analisis ini sebagai konfirmasi tambahan.</i>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-            except Exception as e:
-                st.error(f"🚨 Kesalahan: {str(e)}")
+                    st.write("Tidak ada berita spesifik yang lolos filter temporal.")
