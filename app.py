@@ -455,16 +455,16 @@ with tab1:
 
             broker_analysis = analyze_broker_summary_ai(broker_entries, current_price)
             gemini_res = analyze_with_gemini(ticker, headlines, st.session_state["gemini_api_key"], selected_model)
-quant = compute_quantitative_matrix(df, current_price) if not df.empty else {"volatility": 0.2, "rsi": 50.0, "momentum_score": 0.0, "pivot": current_price, "r1": current_price*1.01, "s1": current_price*0.99, "r2": current_price*1.02, "s2": current_price*0.98}
-        # --- KARTU RINGKASAN SINYAL ---
-if run_btn:
-    with st.spinner("Mengambil data harga & berita..."):
-        # ... kode di dalam with ...
+            # Perbaikan: tambahkan r2 dan s2 di fallback
+            quant = compute_quantitative_matrix(df, current_price) if not df.empty else {
+                "volatility": 0.2, "rsi": 50.0, "momentum_score": 0.0,
+                "pivot": current_price, "r1": current_price*1.01, "s1": current_price*0.99,
+                "r2": current_price*1.02, "s2": current_price*0.98
+            }
 
-    # --- KARTU RINGKASAN SINYAL ---
-    st.markdown('<div class="section-title">📊 SINTESIS SINYAL & METRIK</div>', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    # ... dst ...        c1, c2, c3, c4 = st.columns(4)
+        # --- KARTU RINGKASAN SINYAL ---
+        st.markdown('<div class="section-title">📊 SINTESIS SINYAL & METRIK</div>', unsafe_allow_html=True)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             st.markdown('<div class="card">', unsafe_allow_html=True)
             st.metric("Harga Terakhir", f"Rp {current_price:,.0f}")
