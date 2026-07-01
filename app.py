@@ -515,7 +515,7 @@ if run_btn:
         st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime, 'Regime tidak terdefinisi.')}")
         st.divider()
 
-        # Fundamental
+                # Fundamental
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
             def clean_val(val, fmt="{:.2f}"):
@@ -538,9 +538,7 @@ if run_btn:
             """
             st.markdown(table_html, unsafe_allow_html=True)
 
-            # --- TAMBAHAN: Interpretasi Metrik Fundamental yang Lebih Rapi ---
-        if ticker_info:
-            # Bangun string HTML untuk interpretasi
+            # --- Interpretasi Metrik Fundamental ---
             interpretation_items = []
 
             # Market Cap
