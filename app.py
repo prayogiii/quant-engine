@@ -538,9 +538,10 @@ if run_btn:
             """
             st.markdown(table_html, unsafe_allow_html=True)
 
-            # Interpretasi dinamis setiap metrik
-            st.markdown("<div style='background-color: #1e293b; border-radius: 12px; padding: 15px; margin-top: 15px; color: #cbd5e1; font-size: 14px;'>", unsafe_allow_html=True)
-            st.markdown("<b style='color: #00ffcc;'>📝 Interpretasi Metrik:</b><ul style='margin-top: 8px; padding-left: 20px;'>", unsafe_allow_html=True)
+            # --- TAMBAHAN: Interpretasi Metrik Fundamental yang Lebih Rapi ---
+        if ticker_info:
+            # Bangun string HTML untuk interpretasi
+            interpretation_items = []
 
             # Market Cap
             if mc is not None:
@@ -554,7 +555,7 @@ if run_btn:
                     mc_text = f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
             else:
                 mc_text = "Market Cap tidak tersedia."
-            st.markdown(f"<li><b>Market Cap:</b> {mc_text}</li>", unsafe_allow_html=True)
+            interpretation_items.append(f"<li><b>Market Cap:</b> {mc_text}</li>")
 
             # PER
             if per is not None:
@@ -566,7 +567,7 @@ if run_btn:
                     per_text = f"PER {per:.2f}x tergolong tinggi (premium)."
             else:
                 per_text = "PER tidak tersedia."
-            st.markdown(f"<li><b>PER:</b> {per_text}</li>", unsafe_allow_html=True)
+            interpretation_items.append(f"<li><b>PER:</b> {per_text}</li>")
 
             # PBV
             if pbv is not None:
@@ -578,7 +579,7 @@ if run_btn:
                     pbv_text = f"PBV {pbv:.2f}x tinggi (premium)."
             else:
                 pbv_text = "PBV tidak tersedia."
-            st.markdown(f"<li><b>PBV:</b> {pbv_text}</li>", unsafe_allow_html=True)
+            interpretation_items.append(f"<li><b>PBV:</b> {pbv_text}</li>")
 
             # ROE
             if roe is not None:
@@ -591,7 +592,7 @@ if run_btn:
                     roe_text = f"ROE {roe_pct:.1f}% rendah."
             else:
                 roe_text = "ROE tidak tersedia."
-            st.markdown(f"<li><b>ROE:</b> {roe_text}</li>", unsafe_allow_html=True)
+            interpretation_items.append(f"<li><b>ROE:</b> {roe_text}</li>")
 
             # D/E
             if de is not None:
@@ -603,9 +604,17 @@ if run_btn:
                     de_text = f"D/E {de:.2f} rendah (konservatif)."
             else:
                 de_text = "D/E tidak tersedia."
-            st.markdown(f"<li><b>D/E:</b> {de_text}</li>", unsafe_allow_html=True)
+            interpretation_items.append(f"<li><b>D/E:</b> {de_text}</li>")
 
-            st.markdown("</ul></div>", unsafe_allow_html=True)
+            interpretation_html = f"""
+            <div style="background-color: #1e293b; border-radius: 12px; padding: 15px; margin-top: 15px; color: #cbd5e1; font-size: 14px;">
+                <b style="color: #00ffcc;">📝 Interpretasi Metrik:</b>
+                <ul style="margin-top: 8px; padding-left: 20px;">
+                    {''.join(interpretation_items)}
+                </ul>
+            </div>
+            """
+            st.markdown(interpretation_html, unsafe_allow_html=True)
         else:
             st.warning("⚠️ Data fundamental finansial tidak tersedia.")
         st.divider()
