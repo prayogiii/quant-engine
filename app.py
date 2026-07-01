@@ -10,6 +10,7 @@ import re
 import csv
 import os
 from datetime import datetime
+import google.generativeai as genai  # ← Ganti OpenAI dengan Gemini
 
 # ====================== FALLBACK HANDLERS ======================
 PLOTLY_AVAILABLE = True
@@ -65,13 +66,46 @@ def muat_riwayat_dari_csv():
     with open(RIWAYAT_FILE, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         riwayat = list(reader)
-    # Urutkan berdasarkan waktu (format string YYYY-MM-DD HH:MM)
     riwayat.sort(key=lambda x: x.get('Waktu', ''), reverse=True)
     return riwayat
 
-# Inisialisasi session state untuk riwayat (hanya sekali saat pertama kali)
+# Inisialisasi session state untuk riwayat
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
+
+# ==========================================
+# FUNGSI AI DENGAN GEMINI
+# ==========================================
+def analisis_ai_gemini(riwayat_data, api_key):
+    """Kirim riwayat ke Gemini dan kembalikan insight."""
+    if not api_key:
+        return None, "API key belum diisi."
+    if not riwayat_data:
+        return None, "Belum ada riwayat untuk dianalisis."
+
+    # Bangun prompt
+    prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
+    for r in riwayat_data[:20]:  # Maksimal 20 entri terakhir
+        prompt += (
+            f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
+            f"Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | "
+            f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
+        )
+    prompt += (
+        "\nBerdasarkan data di atas, berikan analisis ringkas (dalam Bahasa Indonesia):\n"
+        "- Pola sinyal yang sering muncul\n"
+        "- Saham dengan peluang terbaik menurut data\n"
+        "- Rekomendasi perbaikan strategi\n"
+        "- Insight tambahan yang berguna untuk trader"
+    )
+
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        return response.text.strip(), None
+    except Exception as e:
+        return None, f"Error: {str(e)}"
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & STYLING
@@ -125,7 +159,7 @@ with st.sidebar:
             st.success("Cache dibersihkan!")
     st.markdown("---")
 
-    # --- RIWAYAT ANALISIS (dari session_state) ---
+    # --- RIWAYAT ANALISIS ---
     st.subheader("📜 Riwayat Analisis")
     if st.session_state.riwayat:
         for r in st.session_state.riwayat[:10]:
@@ -142,13 +176,46 @@ with st.sidebar:
     else:
         st.caption("Belum ada riwayat.")
 
+    # --- AI ANALISIS RIWAYAT (GEMINI) ---
+    st.markdown("---")
+    st.subheader("🧠 AI Analisis Riwayat (Gemini)")
+
+    # Ambil API key dari secrets / env / session_state, dengan prioritas secrets
+    def get_api_key():
+        # Coba dari secrets.toml
+        try:
+            return st.secrets["GEMINI_API_KEY"]
+        except KeyError:
+            pass
+        # Coba dari environment variable
+        env_key = os.getenv("GEMINI_API_KEY")
+        if env_key:
+            return env_key
+        # Terakhir dari session_state (input manual)
+        return st.session_state.get("gemini_api_key", "")
+
+    if "gemini_api_key" not in st.session_state:
+        st.session_state.gemini_api_key = get_api_key()
+
+    # Jika API key sudah ada dari secrets/env, tampilkan sebagai placeholder (tidak perlu diisi ulang)
+    api_key = st.text_input(
+        "Gemini API Key",
+        type="password",
+        value=st.session_state.gemini_api_key,
+        placeholder="AIza... (isi manual atau set di secrets)",
+        help="Kunci API Gemini. Disimpan otomatis jika ada di secrets.toml."
+    )
+    if api_key:
+        st.session_state.gemini_api_key = api_key
+
+    ai_btn = st.button("📊 Analisis Riwayat dengan AI", use_container_width=True)
+
     # Tombol hapus riwayat
     if st.button("🗑️ Hapus Semua Riwayat"):
         if os.path.isfile(RIWAYAT_FILE):
             os.remove(RIWAYAT_FILE)
         st.session_state.riwayat = []
         st.success("Riwayat dihapus!")
-        # Tidak perlu rerun, sidebar langsung terupdate
 
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
@@ -470,7 +537,7 @@ if run_btn:
         rrr = tp_pct/sl_pct if sl_pct else 0
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
 
-        # --- SIMPAN KE RIWAYAT (tanpa st.rerun) ---
+        # --- SIMPAN KE RIWAYAT ---
         ringkasan = {
             "Waktu": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input,
@@ -485,9 +552,7 @@ if run_btn:
             "SL%": f"{sl_pct:.1f}"
         }
         simpan_riwayat(ringkasan)
-        # Update session_state (tanpa rerun) -> langsung muncul di sidebar
         st.session_state.riwayat.insert(0, ringkasan)
-        # Batasi hanya 50 riwayat di memori (opsional)
         if len(st.session_state.riwayat) > 50:
             st.session_state.riwayat.pop()
 
@@ -739,3 +804,19 @@ if run_btn:
         pr1.metric("Probabilitas Naik Besok", f"{prob_bull:.1f}%")
         pr2.metric("Probabilitas Kena R1 (30 Hari)", f"{hit_tp:.1f}%")
         pr3.metric("Probabilitas Turun S2 (30 Hari)", f"{hit_sl:.1f}%")
+
+# --- PROSES ANALISIS AI (GEMINI) ---
+if ai_btn:
+    if not st.session_state.gemini_api_key:
+        st.error("Masukkan Gemini API Key terlebih dahulu di sidebar!")
+    elif not st.session_state.riwayat:
+        st.warning("Belum ada riwayat analisis yang bisa dipelajari.")
+    else:
+        with st.spinner("🧠 AI (Gemini) sedang menganalisis riwayat..."):
+            hasil, error = analisis_ai_gemini(st.session_state.riwayat, st.session_state.gemini_api_key)
+        if error:
+            st.error(error)
+        elif hasil:
+            st.markdown("---")
+            st.header("📊 Insight AI dari Riwayat Analisis")
+            st.success(hasil)
