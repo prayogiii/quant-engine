@@ -271,7 +271,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         returns_thresh = df_thresh['Close'].pct_change().dropna()
         
         adx_threshold = np.percentile(df_thresh['ADX'].dropna(), 75) if not df_thresh['ADX'].dropna().empty else 20
-        z_oversold_th = np.percentile(df_thresh['ZScore'].dropna(), 30) if not df_thresh['ZScore'].dropna().empty else -1.0
+        # FIX 4: Oversold threshold menggunakan nilai tetap -1.5 agar lebih ketat (tidak lagi persentil 30)
+        z_oversold_th = -1.5  # Sebelumnya: np.percentile(..., 30)
         mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(), 50) if not df_thresh['Mom5D'].dropna().empty else 0.0
         
         vol_hist_th = returns_thresh.rolling(20).std().dropna() * np.sqrt(252) * 100
@@ -282,7 +283,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
             
         res_thresh = minimize(t_loglike, [5, returns_thresh.mean(), returns_thresh.std()],
-                             bounds=[(2.1, 100), (-0.1, 0.1), (1e-6, None)], args=(returns_thresh,), method='L-BFGS-B')
+                              bounds=[(2.1, 100), (-0.1, 0.1), (1e-6, None)], args=(returns_thresh,), method='L-BFGS-B')
         df_est, t_loc, t_scale = res_thresh.x if res_thresh.success else (5, returns_thresh.mean(), returns_thresh.std())
 
         # DETEKSI REGIME MARKET LENGKAP
@@ -337,7 +338,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
             score += is_uptrend.astype(int) * 2
             
-            # FIX 3: Menggunakan Mom5D agar selaras dengan periode penentuan mom_th (median Mom5D)
+            # FIX 3: Gunakan Mom5D agar konsisten dengan threshold yang dihitung dari Mom5D
             score += (dataframe['Mom5D'] > mom_th).astype(int)
             
             if 'Volume' in dataframe.columns:
@@ -348,11 +349,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             sig_series[score >= 2] = "⚡ BUY (TACTICAL)"
             sig_series[score >= 3] = "🔥 STRONG BUY"
             
-            # FIX 7: Menambahkan filter ADX. Jika pasar choppy/noise tinggi (ADX < 20), sinyal BUY diredam menjadi HOLD/WAIT
+            # FIX 7: Filter ADX – jika market choppy (ADX < 20), turunkan sinyal BUY menjadi HOLD/WAIT
             is_choppy = (dataframe['ADX'] < 20)
             sig_series[is_choppy & (sig_series.str.contains("BUY"))] = "⏸️ HOLD / WAIT"
             
-            # FIX 4: Menggunakan nilai tetap Z-Score < -1.5 untuk oversold ekstrem guna menghindari false buy saat downtrend kuat
+            # FIX 4: Oversold menggunakan threshold tetap ZScore < -1.5
             is_oversold = (dataframe['ZScore'] < -1.5) & (dataframe['Close'] < dataframe['EMA20'])
             sig_series[is_oversold] = "⚡ BUY (TACTICAL)"
             return sig_series
@@ -364,7 +365,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         backtest_periods = 126
         df_back = df.iloc[-backtest_periods:].copy()
         trades = []
-        daily_returns = []  # FIX 2: List baru untuk menampung return portofolio harian riil
+        # FIX 2: Melacak return portofolio harian (jika tidak ada posisi, return 0)
+        daily_returns = []
         in_position = False
         entry_price = 0.0
         
@@ -374,18 +376,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             prev_close = float(df_back['Close'].iloc[i-1]) if i > 0 else current_close
             
             if in_position:
-                # Jika sedang memegang aset, return harian portofolio mengikuti return harga penutupan aset
+                # return harian sesuai perubahan harga
                 asset_return = (current_close - prev_close) / prev_close if prev_close > 0 else 0.0
                 daily_returns.append(asset_return)
                 
-                # FIX 1: Mengeluarkan 'HOLD' dari kondisi keluar. Posisi hanya ditutup jika sinyal berubah menjadi 'AVOID' atau akhir periode
+                # FIX 1: Keluar hanya jika sinyal AVOID atau sudah hari terakhir (HOLD tidak trigger exit)
                 if "AVOID" in current_sig or i == len(df_back) - 1:
                     exit_price = current_close
                     trade_return = (exit_price - entry_price) / entry_price
                     trades.append(trade_return)
                     in_position = False
             else:
-                # Jika tidak sedang memegang posisi (cash), return harian portofolio adalah 0%
+                # tidak memegang posisi, return 0%
                 daily_returns.append(0.0)
                 
                 if "BUY" in current_sig:
@@ -401,7 +403,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             equity = np.cumprod([1 + r for r in trades])
             max_dd_bt = float(np.min(equity / np.maximum.accumulate(equity) - 1) * 100) if len(equity) > 0 else 0
             
-            # FIX 2: Menghitung Sharpe Ratio berbasis return harian portofolio (daily_returns) bukan dari return per trade
+            # FIX 2: Sharpe dihitung dari return harian portofolio, bukan return per trade
             daily_returns_arr = np.array(daily_returns)
             sharpe_bt = np.mean(daily_returns_arr) / np.std(daily_returns_arr) * np.sqrt(252) if np.std(daily_returns_arr) > 0 else 0
             trades_bt = len(trades)
@@ -448,17 +450,17 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             current_log = np.vstack([current_log, next_log])
             paths[day, :] = np.exp(next_log)
 
-        # FIX 6: Menghapus `t_loc` dari perhitungan drift harian agar selaras dengan model mean-reverting OU murni
+        # FIX 6: Hapus t_loc dari drift agar sesuai model OU murni
         mu_ou = theta_ou * (locked_log_mean20 - np.log(harga_terakhir))
         est_besok = float(np.exp(np.log(harga_terakhir) + mu_ou))
         
-        # Proyeksi distribusi esok hari disesuaikan dengan mean target dari drift OU murni
+        # Simulasi satu langkah ke depan dengan drift OU
         sim_h1 = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=2000)
         prices_besok = harga_terakhir * np.exp(mu_ou + sim_h1)
         low_est, up_est = float(np.percentile(prices_besok, 25)), float(np.percentile(prices_besok, 75))
         
         hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
-        # FIX 5: Menghitung probabilitas risiko jatuh ke S2 (bukan S1) agar konsisten dengan visualisasi Stop Loss target pengguna
+        # FIX 5: Probabilitas menyentuh Stop Loss di S2, bukan S1
         hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
         prob_bull = ((mu_ou + sim_h1 > 0).sum() / 2000) * 100
 
@@ -566,7 +568,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         pr1, pr2, pr3 = st.columns(3)
         pr1.metric("Probabilitas Naik Besok", f"{prob_bull:.1f}%")
         pr2.metric("Probabilitas Kena R1 (30 Hari)", f"{hit_tp:.1f}%")
-        # FIX 5: Mengubah label teks metrik dari S1 menjadi S2 demi konsistensi data visual
+        # FIX 5: Label disesuaikan menjadi S2
         pr3.metric("Probabilitas Turun S2 (30 Hari)", f"{hit_sl:.1f}%")
 
         # CHART PLOTLY
@@ -636,6 +638,5 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             st.markdown(html_summary, unsafe_allow_html=True)
             
         with col2:
-            # FIX PERBAIKAN AKHIR KODE: Melengkapi penutupan tag HTML dan string f-string yang sempat terpotong
             html_action = f'<div class="action-card" style="border-left-color: {action_color};"><div class="section-title">{action_icon} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size: 15px; margin-top: 8px; line-height: 1.6;">{action_text}</div><hr style="border-color: #334155; margin: 15px 0;"><div style="color: #94a3b8; font-size: 13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>'
             st.markdown(html_action, unsafe_allow_html=True)
