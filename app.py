@@ -48,31 +48,14 @@ warnings.filterwarnings("ignore")
 # ==========================================
 # 1. KONFIGURASI HALAMAN & ENGINE CACHING
 # ==========================================
-st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+
+# Custom CSS minimal untuk mempercantik tampilan card & responsivitas teks
 st.markdown("""
     <style>
-    .main { background-color: #0f1116; color: #ffffff; }
-    div[data-testid="stMetricValue"] { font-size: 24px; font-weight: bold; color: #00ffcc; }
-    div[data-testid="stMetricLabel"] { font-size: 14px; color: #8892b0; }
-    .stButton>button { width: 100%; background-color: #1f2937; color: white; border: 1px solid #374151; }
-    .stButton>button:hover { background-color: #374151; border-color: #00ffcc; }
-    h1, h2, h3 { color: #f3f4f6; }
-    div[data-testid="InputInstructions"] { display: none !important; }
-    .translated { color: #cbd5e1; font-size: 13px; }
-    .source { color: #6b7280; font-size: 11px; }
-    .summary-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px; padding: 20px; margin: 10px 0; border: 1px solid #334155;
-    }
-    .action-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px; padding: 20px; margin: 10px 0; border-left: 5px solid #00ffcc;
-    }
-    .section-title { color: #00ffcc; font-size: 18px; font-weight: bold; margin-bottom: 12px; }
-    .summary-item { color: #cbd5e1; font-size: 15px; margin-bottom: 8px; }
-    .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
-    .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
-    .fundamental-table td:first-child { color: #8892b0; width: 180px; }
+    div[data-testid="stMetricValue"] { font-size: 22px; font-weight: bold; }
+    .translated { color: #8892b0; font-size: 13px; font-style: italic; }
+    .source { color: #ff4b4b; font-size: 11px; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -172,7 +155,6 @@ def estimate_theta_ou(close_series):
     theta = -coeff[1] if coeff[1] < 0 else 0.05
     return theta
 
-# Kamus Referensi
 REGIME_INFO = {
     "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Ideal untuk swing buy agresif, waspadai overbought.",
     "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
@@ -191,19 +173,24 @@ REGIME_INFO = {
 }
 
 # ==========================================
-# 2. USER INTERFACE INPUT
+# 2. USER INTERFACE INPUT (SIDEBAR)
 # ==========================================
+with st.sidebar:
+    st.header("⚙️ Kontrol Engine")
+    ticker_raw = st.text_input("Kode Saham IHSG:", value="BBRI").upper().strip()
+    if ticker_raw and not ticker_raw.endswith(".JK"):
+        ticker_input = f"{ticker_raw}.JK"
+    else:
+        ticker_input = ticker_raw
+        
+    jalankan = st.button("JALANKAN QUANT ENGINE", use_container_width=True, type="primary")
+    st.markdown("---")
+    st.caption("Engine ini menggabungkan analisa volatilitas jangka pendek (OU Process), sinyal teknikal makro, sentimen berita terbobot, dan perhitungan alokasi risiko portofolio.")
+
+# Judul Utama Dashboard
 st.title("📊 Quant & Risk Engine Pro")
-st.write("Algoritma kuantitatif + Berita + Backtest Terintegrasi + Grafik Interaktif + Analisis Fundamental Saham.")
 
-ticker_raw = st.text_input("Masukkan Kode Saham IHSG (Contoh: BRMS, BBRI, BMRI):", value="BBRI").upper().strip()
-
-if ticker_raw and not ticker_raw.endswith(".JK"):
-    ticker_input = f"{ticker_raw}.JK"
-else:
-    ticker_input = ticker_raw
-
-if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
+if jalankan:
     if not ticker_input: 
         st.warning("⚠️ Kode saham tidak boleh kosong!")
         st.stop()
@@ -271,10 +258,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         returns_thresh = df_thresh['Close'].pct_change().dropna()
         
         adx_threshold = np.percentile(df_thresh['ADX'].dropna(), 75) if not df_thresh['ADX'].dropna().empty else 20
-        # FIX 4: Oversold threshold menggunakan nilai tetap -1.5 agar lebih ketat (tidak lagi persentil 30)
-        z_oversold_th = -1.5  # Sebelumnya: np.percentile(..., 30)
+        z_oversold_th = -1.5  
         mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(), 50) if not df_thresh['Mom5D'].dropna().empty else 0.0
-        
         vol_hist_th = returns_thresh.rolling(20).std().dropna() * np.sqrt(252) * 100
         
         # ESTIMASI DISTRIBUSI STUDENT-T
@@ -283,7 +268,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
             
         res_thresh = minimize(t_loglike, [5, returns_thresh.mean(), returns_thresh.std()],
-                              bounds=[(2.1, 100), (-0.1, 0.1), (1e-6, None)], args=(returns_thresh,), method='L-BFGS-B')
+                             bounds=[(2.1, 100), (-0.1, 0.1), (1e-6, None)], args=(returns_thresh,), method='L-BFGS-B')
         df_est, t_loc, t_scale = res_thresh.x if res_thresh.success else (5, returns_thresh.mean(), returns_thresh.std())
 
         # DETEKSI REGIME MARKET LENGKAP
@@ -338,9 +323,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
             score += is_uptrend.astype(int) * 2
             
-            # FIX 3: Gunakan Mom5D agar konsisten dengan threshold yang dihitung dari Mom5D
             score += (dataframe['Mom5D'] > mom_th).astype(int)
-            
             if 'Volume' in dataframe.columns:
                 score += (dataframe['Volume'] > dataframe['Vol_MA20']).astype(int)
                 
@@ -349,11 +332,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             sig_series[score >= 2] = "⚡ BUY (TACTICAL)"
             sig_series[score >= 3] = "🔥 STRONG BUY"
             
-            # FIX 7: Filter ADX – jika market choppy (ADX < 20), turunkan sinyal BUY menjadi HOLD/WAIT
             is_choppy = (dataframe['ADX'] < 20)
             sig_series[is_choppy & (sig_series.str.contains("BUY"))] = "⏸️ HOLD / WAIT"
             
-            # FIX 4: Oversold menggunakan threshold tetap ZScore < -1.5
             is_oversold = (dataframe['ZScore'] < -1.5) & (dataframe['Close'] < dataframe['EMA20'])
             sig_series[is_oversold] = "⚡ BUY (TACTICAL)"
             return sig_series
@@ -365,7 +346,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         backtest_periods = 126
         df_back = df.iloc[-backtest_periods:].copy()
         trades = []
-        # FIX 2: Melacak return portofolio harian (jika tidak ada posisi, return 0)
         daily_returns = []
         in_position = False
         entry_price = 0.0
@@ -376,20 +356,16 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             prev_close = float(df_back['Close'].iloc[i-1]) if i > 0 else current_close
             
             if in_position:
-                # return harian sesuai perubahan harga
                 asset_return = (current_close - prev_close) / prev_close if prev_close > 0 else 0.0
                 daily_returns.append(asset_return)
                 
-                # FIX 1: Keluar hanya jika sinyal AVOID atau sudah hari terakhir (HOLD tidak trigger exit)
                 if "AVOID" in current_sig or i == len(df_back) - 1:
                     exit_price = current_close
                     trade_return = (exit_price - entry_price) / entry_price
                     trades.append(trade_return)
                     in_position = False
             else:
-                # tidak memegang posisi, return 0%
                 daily_returns.append(0.0)
-                
                 if "BUY" in current_sig:
                     in_position = True
                     entry_price = current_close
@@ -403,7 +379,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             equity = np.cumprod([1 + r for r in trades])
             max_dd_bt = float(np.min(equity / np.maximum.accumulate(equity) - 1) * 100) if len(equity) > 0 else 0
             
-            # FIX 2: Sharpe dihitung dari return harian portofolio, bukan return per trade
             daily_returns_arr = np.array(daily_returns)
             sharpe_bt = np.mean(daily_returns_arr) / np.std(daily_returns_arr) * np.sqrt(252) if np.std(daily_returns_arr) > 0 else 0
             trades_bt = len(trades)
@@ -450,193 +425,192 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             current_log = np.vstack([current_log, next_log])
             paths[day, :] = np.exp(next_log)
 
-        # FIX 6: Hapus t_loc dari drift agar sesuai model OU murni
         mu_ou = theta_ou * (locked_log_mean20 - np.log(harga_terakhir))
         est_besok = float(np.exp(np.log(harga_terakhir) + mu_ou))
         
-        # Simulasi satu langkah ke depan dengan drift OU
         sim_h1 = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=2000)
         prices_besok = harga_terakhir * np.exp(mu_ou + sim_h1)
         low_est, up_est = float(np.percentile(prices_besok, 25)), float(np.percentile(prices_besok, 75))
         
         hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
-        # FIX 5: Probabilitas menyentuh Stop Loss di S2, bukan S1
         hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
         prob_bull = ((mu_ou + sim_h1 > 0).sum() / 2000) * 100
 
-        # ==========================================
-        # 3. RENDERING DASHBOARD STREAMLIT
-        # ==========================================
-        st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
-        
-        # SECTION BERITA
-        st.header("📰 Sentimen Berita Terbobot")
-        c1, c2 = st.columns([1, 2])
-        c1.metric("Sentimen Skor", f"{avg_sentiment:.2f}", sentimen_status)
-        with c2:
-            st.markdown("**5 Berita Utama Pasar:**")
-            for i, h in enumerate(headlines):
-                src = sources[i] if i < len(sources) else ""
-                t = translated[i] if i < len(translated) else ""
-                st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>", unsafe_allow_html=True)
-                if t and t != h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
-        st.divider()
-
-        # SECTION REGIME MARKET
-        st.header("🧬 Regime Pasar & Volatilitas")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Market Regime", regime)
-        m2.metric("Kondisi Makro IHSG", ihsg_cond)
-        m3.metric("ADX Adaptif", f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
-        st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime, 'Regime tidak terdefinisi.')}")
-        st.divider()
-
-        # SECTION ANALISIS FUNDAMENTAL
-        st.header("📊 Metrik Fundamental Saham (IDX)")
-        if ticker_info:
-            def clean_val(val, fmt="{:.2f}"):
-                return "N/A" if val is None else fmt.format(val)
-            mc = ticker_info.get('marketCap')
-            per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
-            pbv = ticker_info.get('priceToBook')
-            roe = ticker_info.get('returnOnEquity')
-            de = ticker_info.get('debtToEquity')
-            
-            table_html = f"""
-            <table class='fundamental-table'>
-                <tr><td>Market Cap</td><td>{clean_val(mc, "{:,.0f} IDR")}</td></tr>
-                <tr><td>Price to Earnings Ratio (PER)</td><td>{clean_val(per, "{:.2f}x")}</td></tr>
-                <tr><td>Price to Book Value (PBV)</td><td>{clean_val(pbv, "{:.2f}x")}</td></tr>
-                <tr><td>Return On Equity (ROE)</td><td>{clean_val(roe * 100 if roe else None, "{:.1f}%")}</td></tr>
-                <tr><td>Debt to Equity Ratio (D/E)</td><td>{clean_val(de, "{:.2f}%")}</td></tr>
-            </table>
-            """
-            st.markdown(table_html, unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ Data fundamental finansial tidak tersedia.")
-        st.divider()
-
-        # SECTION PIVOT ANALYSIS
-        st.header("🎯 Target Pivot & Support/Resistance")
-        p1, p2, p3, p4, p5 = st.columns(5)
-        p1.metric("Resistance 2 (R2)", f"Rp {r2:,.0f}".replace(",", "."))
-        p2.metric("Resistance 1 (R1)", f"Rp {r1:,.0f}".replace(",", "."))
-        p3.metric("Pivot Point (PP)", f"Rp {pp:,.0f}".replace(",", "."))
-        p4.metric("Support 1 (S1)", f"Rp {s1:,.0f}".replace(",", "."))
-        p5.metric("Support 2 (S2)", f"Rp {s2:,.0f}".replace(",", "."))
-        st.write(f"Kondisi Breakout 20 Hari: **{breakout}**")
-        st.divider()
-
-        # HITUNG PERSENTASE DINAMIS DARI HARGA SEKARANG
         tp_pct = ((r1 - harga_terakhir) / harga_terakhir) * 100 if harga_terakhir > 0 else 0
         sl_pct = ((harga_terakhir - s2) / harga_terakhir) * 100 if harga_terakhir > 0 else 0
-        
-        # PERHITUNGAN RISK-TO-REWARD RATIO (RRR)
         rrr = tp_pct / sl_pct if sl_pct > 0 else 0
-        rrr_status = "Ideal (≥ 1.5) 🟢" if rrr >= 1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr >= 1.0 else "Buruk (< 1.0) 🔴")
 
-        # SECTION SIGNAL & EXPANDING BACKTEST
-        st.header("🔮 Sinyal Kuantitatif & Hasil Backtest Realistis (6 Bulan)")
-        t1, t2, t3, t4, t5 = st.columns(5)
-        t1.metric("Sinyal Eksekusi", signal)
-        t2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",", "."), f"Rentang 50%: {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
-        t3.metric("Wilayah Entry Ideal", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
-        t4.metric("Take Profit Target", f"Rp {r1:,.0f} (+{tp_pct:.1f}%)".replace(",", "."), "Target Resist R1")
-        t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f} (-{sl_pct:.1f}%)".replace(",", "."), "Proteksi Batas S2")
+        # ==========================================
+        # 3. PENYUSUNAN UI EKSEKUTIF UTAMA (TOP AREA)
+        # ==========================================
+        st.subheader(f"📊 Live Report: {ticker_input}")
         
-        st.markdown("**Hasil Pengujian Algoritma (Stateful Tracking Backtest 126 Hari):**")
-        b1, b2, b3, b4, b5, b6 = st.columns(6)
-        b1.metric("Win Rate", f"{win_bt:.1%}" if trades_bt else "N/A")
-        b2.metric("Profit Factor", f"{pf_bt:.2f}" if trades_bt and pf_bt != np.inf else "N/A")
-        b3.metric("Rata-rata Return/Trade", f"{avg_bt:.2%}" if trades_bt else "N/A")
-        b4.metric("Max Drawdown Strategi", f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
-        b5.metric("Sharpe Ratio", f"{sharpe_bt:.2f}" if trades_bt else "N/A")
-        b6.metric("Total Trades Riil", f"{trades_bt}")
-        st.divider()
+        # Grid Atas untuk Ringkasan Cepat Harga & Alokasi Modal
+        top_c1, top_c2, top_c3, top_c4 = st.columns(4)
+        with top_c1:
+            st.metric("Harga Terakhir", f"Rp {harga_terakhir:,.0f}".replace(",", "."))
+        with top_c2:
+            st.metric("Sinyal Eksekusi", signal)
+        with top_c3:
+            st.metric("Porsi Portofolio (Kelly)", f"{kelly_adj*100:.1f}%")
+        with top_c4:
+            st.metric("Risk-Reward Ratio", f"{rrr:.2f}")
 
-        # SECTION ALOKASI MANAJEMEN RISIKO
-        st.header("🛡️ Kriteria Manajemen Risiko Portofolio Terkalibrasi (Kelly)")
-        r_c1, r_c2 = st.columns(2)
-        r_c1.metric("Rekomendasi Ukuran Posisi (Kelly)", f"{kelly_adj*100:.1f}%")
-        r_c2.metric("Beta Terhadap IHSG", f"{beta_ihsg:.2f}x")
-        st.markdown(f"**Interpretasi Posisi:** Berdasarkan akurasi *Win Rate* strategi kuantitatif Anda senilai **{win_bt:.1%}**, sistem menyarankan batas maksimal ukuran tunggal saham ini adalah **{kelly_adj*100:.1f}%** dari total seluruh ekuitas modal portofolio Anda.")
-        st.markdown(f"Statistik Historis Sektor -> Max DD: `{max_dd:.2f}%` | Drawdown 30 Hari: `{max_dd_30:.2f}%`")
-        st.divider()
-
-        # SECTION MONTE CARLO PROYEKSI MAJU
-        st.header("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck")
-        pr1, pr2, pr3 = st.columns(3)
-        pr1.metric("Probabilitas Naik Besok", f"{prob_bull:.1f}%")
-        pr2.metric("Probabilitas Kena R1 (30 Hari)", f"{hit_tp:.1f}%")
-        # FIX 5: Label disesuaikan menjadi S2
-        pr3.metric("Probabilitas Turun S2 (30 Hari)", f"{hit_sl:.1f}%")
-
-        # CHART PLOTLY
-        if PLOTLY_AVAILABLE:
-            st.header("📈 Chart Harga & Pemetaan Histori Sinyal")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Harga Close', line=dict(color='#00ffcc', width=2)))
-            fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], name='EMA20 (Trend Pendek)', line=dict(color='#f59e0b', dash='dot')))
-            fig.add_trace(go.Scatter(x=df.index, y=df['EMA50'], name='EMA50 (Trend Menengah)', line=dict(color='#ef4444', dash='dot')))
-            
-            buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
-            fig.add_trace(go.Scatter(
-                x=buy_signals.index, y=buy_signals['Close'],
-                mode='markers', name='Sinyal Transaksi Buy',
-                marker=dict(symbol='triangle-up', size=11, color='#10b981', line=dict(width=1, color='white'))
-            ))
-            
-            for level, label, col in [(r1, 'R1', 'orange'), (s1, 'S1', 'red'), (pp, 'PP', 'gray')]:
-                fig.add_hline(y=level, line_dash="dash", line_color=col, annotation_text=label, annotation_position="right")
-                
-            fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
-
-        # TRADING RECOMMENDATION EXECUTIVE SUMMARY
-        st.markdown("---")
-        st.header("📋 Ringkasan Eksekutif & Rekomendasi")
-        
+        # LOGIC WARNA CARD REKOMENDASI EKSEKUTIF
         if rrr < 1.0 and ("BUY" in signal):
-            action_color, action_icon = "#ef4444", "⚠️"
-            action_text = (
-                f"• <b>KONDISI:</b> Sinyal Kuantitatif {signal} tapi <b>RRR BURUK ({rrr:.2f})</b><br>"
-                f"• <b>REKOMENDASI:</b> WAIT & SEE (Tunda Entry)<br>"
-                f"• <b>LANGKAH TAKTIS:</b> Jangan kejar harga atas. Jarak Stop Loss (-{sl_pct:.1f}%) lebih lebar dari target TP (+{tp_pct:.1f}%). Tunggu koreksi sehat mendekati area Support 1 (Rp {s1:,.0f}) untuk memperkecil risiko modal."
-            )
+            action_color, action_icon = "orange", "⚠️"
+            action_title = "WAIT & SEE (Tunda Entry)"
+            action_text = f"Sinyal Kuantitatif merekomendasikan {signal}, namun nilai **Risk-to-Reward Ratio BURUK ({rrr:.2f})**. Jarak batas Stop Loss (-{sl_pct:.1f}%) saat ini lebih lebar dibandingkan target Take Profit (+{tp_pct:.1f}%). Jangan mengejar harga atas; tunggu koreksi sehat mendekati area Support 1 (Rp {s1:,.0f}) untuk memperkecil risiko modal."
         elif "STRONG BUY" in signal:
-            action_color, action_icon = "#10b981", "🟢"
-            action_text = (
-                f"• <b>KONDISI:</b> Konfirmasi Tren Kuat & Akumulasi Volume Tinggi<br>"
-                f"• <b>REKOMENDASI:</b> AGGRESSIVE BUY / ACCUMULATE<br>"
-                f"• <b>LANGKAH TAKTIS:</b> Lakukan pembelian bertahap hingga alokasi maksimal {kelly_adj*100:.1f}% portofolio. Pasang pembatas risiko disiplin di level Stop Loss S2 Rp {s2:,.0f} (-{sl_pct:.1f}%)."
-            )
+            action_color, action_icon = "green", "🟢"
+            action_title = "AGGRESSIVE BUY / ACCUMULATE"
+            action_text = f"Terdeteksi konfirmasi tren kuat berlandaskan akumulasi volume transaksi yang signifikan. Disarankan melakukan akumulasi pembelian secara bertahap hingga alokasi maksimal **{kelly_adj*100:.1f}%** dari total dana portofolio Anda. Amankan pembatas risiko ketat pada batas Stop Loss S2 di level Rp {s2:,.0f} (-{sl_pct:.1f}%)."
         elif "BUY" in signal:
-            action_color, action_icon = "#f59e0b", "🟡"
-            action_text = (
-                f"• <b>KONDISI:</b> Tren Valid & Risk-to-Reward Ratio Memadai ({rrr:.2f})<br>"
-                f"• <b>REKOMENDASI:</b> BUY ON WEAKNESS (BoW)<br>"
-                f"• <b>LANGKAH TAKTIS:</b> Tempatkan antrean beli di area ideal Rp {s1:,.0f} - {pp:,.0f}. Jual rugi tanpa kompromi jika harga merosot dan menembus batas bawah Rp {s2:,.0f} (-{sl_pct:.1f}%)."
-            )
+            action_color, action_icon = "green", "🟡"
+            action_title = "BUY ON WEAKNESS (BoW)"
+            action_text = f"Struktur tren valid dengan dukungan nilai Risk-to-Reward Ratio yang memadai. Anda dapat menempatkan antrean order beli di wilayah ideal antara **Rp {s1:,.0f} - {pp:,.0f}**. Disiplin untuk melakukan proteksi modal atau cut-loss tanpa kompromi apabila harga merosot di bawah jangkar pertahanan Rp {s2:,.0f} (-{sl_pct:.1f}%)."
         elif "HOLD" in signal:
-            action_color, action_icon = "#3b82f6", "🔵"
-            action_text = (
-                f"• <b>KONDISI:</b> Fase Konsolidasi / Transisi Sideways<br>"
-                f"• <b>REKOMENDASI:</b> HOLD POSITION (Pertahankan Barang)<br>"
-                f"• <b>LANGKAH TAKTIS:</b> Jangan lakukan penambahan posisi modal baru (no average up/down). Pantau pergerakan dengan pertahanan batas akhir di level Rp {s2:,.0f}."
-            )
+            action_color, action_icon = "blue", "🔵"
+            action_title = "HOLD POSITION"
+            action_text = "Instrumen berada dalam fase konsolidasi transisi atau pergerakan sideways yang stabil. Diimbau untuk mempertahankan sisa kepemilikan saham yang ada tanpa melakukan penambahan posisi modal baru (*no average up/down*). Pantau kekuatan area support terbawah di level Rp {s2:,.0f}."
         else:
-            action_color, action_icon = "#ef4444", "🔴"
-            action_text = (
-                f"• <b>KONDISI:</b> Risiko Penurunan Tinggi / Fase Distribusi ({regime})<br>"
-                f"• <b>REKOMENDASI:</b> AVOID / LIQUIDATE / SHORT<br>"
-                f"• <b>LANGKAH TAKTIS:</b> Amankan modal ke bentuk cash. Jauhi emiten ini sementara waktu atau realisasikan Cut Loss/Take Profit dini sebelum penurunan berlanjut."
-            )
+            action_color, action_icon = "red", "🔴"
+            action_title = "AVOID / LIQUIDATE"
+            action_text = f"Engine mendeteksi probabilitas penurunan yang tinggi akibat pengaruh fase distribusi pasar (**{regime}**). Langkah taktis terbaik saat ini adalah mengamankan modal Anda ke dalam instrumen kas, menjauhi emiten ini untuk sementara waktu, atau merealisasikan aksi *Take Profit/Cut Loss* dari kepemilikan Anda saat ini."
+
+        # Tampilkan Kotak Panduan Utama Menggunakan Desain Native Container Streamlit
+        with st.container(border=True):
+            st.markdown(f"### {action_icon} Panduan Strategi Eksekutif: **{action_title}**")
+            st.write(action_text)
+
+        st.markdown("### 🔍 Detail Analitika Komprehensif")
+        
+        # ==========================================
+        # 4. IMPLEMENTASI SISTEM TABS UI
+        # ==========================================
+        tab_chart, tab_tech, tab_funda, tab_quant = st.tabs([
+            "📈 Grafik & Sinyal", 
+            "🎯 Pivot & Struktur Tren", 
+            "🏛️ Data Fundamental", 
+            "🎲 Sentimen & Proyeksi Kuantitatif"
+        ])
+
+        # --- TAB 1: GRAFIK & SINYAL HISTORIS ---
+        with tab_chart:
+            if PLOTLY_AVAILABLE:
+                st.markdown("#### Histori Pergerakan Harga & Titik Eksekusi")
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Harga Close', line=dict(color='#00ffcc', width=2)))
+                fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], name='EMA20 (Tren Pendek)', line=dict(color='#f59e0b', dash='dot')))
+                fig.add_trace(go.Scatter(x=df.index, y=df['EMA50'], name='EMA50 (Tren Menengah)', line=dict(color='#ef4444', dash='dot')))
+                
+                buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
+                fig.add_trace(go.Scatter(
+                    x=buy_signals.index, y=buy_signals['Close'],
+                    mode='markers', name='Sinyal Transaksi Buy',
+                    marker=dict(symbol='triangle-up', size=11, color='#10b981', line=dict(width=1, color='white'))
+                ))
+                
+                for level, label, col in [(r1, 'R1', 'orange'), (s1, 'S1', 'red'), (pp, 'PP', 'gray')]:
+                    fig.add_hline(y=level, line_dash="dash", line_color=col, annotation_text=label, annotation_position="right")
+                    
+                fig.update_layout(template="plotly_dark", height=480, margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Visualisasi grafik interaktif dinonaktifkan karena library Plotly tidak dimuat.")
+
+        # --- TAB 2: PIVOT & TEKNIKAL TREN ---
+        with tab_tech:
+            st.markdown("#### Pemetaan Struktur Level Klasik & Kondisi Tren")
             
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            html_summary = f'<div class="summary-card"><div class="section-title">📌 Profil Risiko Saham Terkalibrasi</div><div class="summary-item">🛡️ <b>Jarak Stop Loss:</b> -{sl_pct:.1f}% (Rp {s2:,.0f})</div><div class="summary-item">🎯 <b>Potensi Keuntungan:</b> +{tp_pct:.1f}% (Rp {r1:,.0f})</div><div class="summary-item">⚖️ <b>Risk:Reward Ratio:</b> 1 : {rrr:.2f} ({rrr_status})</div><div class="summary-item">🏷️ <b>Kategori Rezim & Makro:</b> {regime} | {ihsg_cond}</div><div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div></div>'
-            st.markdown(html_summary, unsafe_allow_html=True)
+            c_p1, c_p2 = st.columns(2)
+            with c_p1:
+                with st.container(border=True):
+                    st.markdown("**Matriks Batas Pivot Saham (IDR):**")
+                    st.write(f"🔹 **Resistance 2 (R2):** Rp {r2:,.0f}".replace(",", "."))
+                    st.write(f"🔹 **Resistance 1 (R1):** Rp {r1:,.0f}".replace(",", "."))
+                    st.write(f"📍 **Pivot Point (PP):** Rp {pp:,.0f}".replace(",", "."))
+                    st.write(f"🔸 **Support 1 (S1):** Rp {s1:,.0f}".replace(",", "."))
+                    st.write(f"🔸 **Support 2 (S2):** Rp {s2:,.0f}".replace(",", "."))
+                    st.write(f"🔥 **Kondisi Breakout 20 Hari:** {breakout}")
             
-        with col2:
-            html_action = f'<div class="action-card" style="border-left-color: {action_color};"><div class="section-title">{action_icon} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size: 15px; margin-top: 8px; line-height: 1.6;">{action_text}</div><hr style="border-color: #334155; margin: 15px 0;"><div style="color: #94a3b8; font-size: 13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>'
-            st.markdown(html_action, unsafe_allow_html=True)
+            with c_p2:
+                with st.container(border=True):
+                    st.markdown("**Kondisi Karakteristik Regime:**")
+                    st.write(f"🧬 **Regime Saham:** {regime}")
+                    st.write(f"🌏 **Kondisi Makro IHSG:** {ihsg_cond}")
+                    st.write(f"📊 **ADX Adaptif:** {adx:.1f} *(Ambang Batas: {adx_threshold:.1f})*")
+                    st.write(f"ℹ️ **Insight:** {REGIME_INFO.get(regime, 'Kondisi tidak terdefinisi.')}")
+
+        # --- TAB 3: DATA FUNDAMENTAL ---
+        with tab_funda:
+            st.markdown("#### Laporan Rasio Fundamental Keuangan (Yahoo Finance)")
+            if ticker_info:
+                def clean_val(val, fmt="{:.2f}"):
+                    return "N/A" if val is None else fmt.format(val)
+                
+                mc = ticker_info.get('marketCap')
+                per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
+                pbv = ticker_info.get('priceToBook')
+                roe = ticker_info.get('returnOnEquity')
+                de = ticker_info.get('debtToEquity')
+                
+                f_c1, f_c2 = st.columns(2)
+                with f_c1:
+                    st.metric("Total Market Cap", clean_val(mc, "Rp {:,.0f} IDR").replace(",", "."))
+                    st.metric("Price to Earnings Ratio (PER)", clean_val(per, "{:.2f}x"))
+                    st.metric("Price to Book Value (PBV)", clean_val(pbv, "{:.2f}x"))
+                with f_c2:
+                    st.metric("Return On Equity (ROE)", clean_val(roe * 100 if roe else None, "{:.1f}%"))
+                    st.metric("Debt to Equity Ratio (D/E)", clean_val(de, "{:.2f}%"))
+            else:
+                st.warning("⚠️ Data indikator fundamental finansial emiten tidak berhasil ditarik dari server API.")
+
+        # --- TAB 4: SENTIMEN & PROYEKSI KUANTITATIF ---
+        with tab_quant:
+            st.markdown("#### Pengujian Algoritma & Model Prediksi Ke Depan")
+            
+            # Sub-blok Hasil Backtest Riil
+            st.markdown("**🎯 Kinerja Histori Model Kuantitatif (Backtest 126 Hari Terakhir):**")
+            b_c1, b_c2, b_c3 = st.columns(3)
+            with b_c1:
+                st.metric("Win Rate Strategi", f"{win_bt:.1%}" if trades_bt else "N/A")
+                st.metric("Profit Factor", f"{pf_bt:.2f}" if trades_bt and pf_bt != np.inf else "N/A")
+            with b_c2:
+                st.metric("Rata-rata Return/Trade", f"{avg_bt:.2%}" if trades_bt else "N/A")
+                st.metric("Max Drawdown Strategi", f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
+            with b_c3:
+                st.metric("Sharpe Ratio Tahunan", f"{sharpe_bt:.2f}" if trades_bt else "N/A")
+                st.metric("Total Eksekusi Trades", f"{trades_bt}")
+            
+            st.markdown("---")
+            
+            # Sub-blok Simulasi Volatilitas Masa Depan
+            st.markdown("**🎲 Hasil Proyeksi Simulasi Monte Carlo (Ornstein-Uhlenbeck 30 Hari Ke Depan):**")
+            p_c1, p_c2 = st.columns(2)
+            with p_c1:
+                with st.container(border=True):
+                    st.write(f"📈 **Estimasi Harga Esok Hari:** Rp {est_besok:,.0f}".replace(",", "."))
+                    st.write(f"🔮 **Rentang Probabilitas (50%):** Rp {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
+                    st.write(f"🟢 **Probabilitas Hari Esok Ditutup Naik:** {prob_bull:.1f}%")
+            with p_c2:
+                with st.container(border=True):
+                    st.write(f"🎯 **Probabilitas Menyentuh Target R1:** {hit_tp:.1f}%")
+                    st.write(f"🛑 **Probabilitas Jebol Batas Risiko S2:** {hit_sl:.1f}%")
+                    st.write(f"📉 **Statistik Max Drawdown Historis:** {max_dd:.2f}%")
+            
+            st.markdown("---")
+            
+            # Sub-blok Berita & Sentimen Pasar
+            st.markdown("#### 📰 Analisis Sentimen Berita Terbobot")
+            s_col1, s_col2 = st.columns([1, 2])
+            with s_col1:
+                st.metric("Skor Sentimen Berita", f"{avg_sentiment:.2f}", sentimen_status)
+            with s_col2:
+                st.markdown("**Arus Berita Terkini:**")
+                for idx, h in enumerate(headlines):
+                    src = sources[idx] if idx < len(sources) else ""
+                    t = translated[idx] if idx < len(translated) else ""
+                    st.markdown(f"{idx+1}. **{h}** <span class='source'>({src})</span>", unsafe_allow_html=True)
+                    if t and t != h: 
+                        st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
