@@ -7,6 +7,9 @@ from scipy.optimize import minimize
 import warnings
 import urllib.parse
 import re
+import csv
+import os
+from datetime import datetime
 
 # ====================== FALLBACK HANDLERS ======================
 PLOTLY_AVAILABLE = True
@@ -40,6 +43,31 @@ except ImportError:
 # =================================================================
 
 warnings.filterwarnings("ignore")
+
+# ==========================================
+# KONFIGURASI FILE RIWAYAT
+# ==========================================
+RIWAYAT_FILE = "riwayat_analisis.csv"
+
+def simpan_riwayat(ringkasan):
+    """Simpan satu baris ringkasan ke file CSV."""
+    file_exists = os.path.isfile(RIWAYAT_FILE)
+    with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(ringkasan)
+
+def muat_riwayat():
+    """Baca semua riwayat dari CSV, urutkan terbaru di atas."""
+    if not os.path.isfile(RIWAYAT_FILE):
+        return []
+    with open(RIWAYAT_FILE, mode='r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        riwayat = list(reader)
+    # Urutkan berdasarkan waktu (format string YYYY-MM-DD HH:MM)
+    riwayat.sort(key=lambda x: x.get('Waktu', ''), reverse=True)
+    return riwayat
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & STYLING
@@ -88,9 +116,36 @@ with st.sidebar:
     with col1:
         run_btn = st.button("🚀 ANALISIS", use_container_width=True)
     with col2:
-        if st.button("🗑️ Reset", use_container_width=True):
+        if st.button("🗑️ Reset Cache", use_container_width=True):
             st.cache_data.clear()
             st.success("Cache dibersihkan!")
+    st.markdown("---")
+
+    # --- RIWAYAT ANALISIS ---
+    st.subheader("📜 Riwayat Analisis")
+    riwayat = muat_riwayat()
+    if riwayat:
+        for r in riwayat[:10]:
+            with st.expander(f"{r['Saham']} - {r['Sinyal']} ({r['Waktu']})"):
+                st.markdown(f"**Harga:** Rp {r['Harga']}")
+                st.markdown(f"**Estimasi Besok:** Rp {r['Estimasi']}")
+                st.markdown(f"**Prob Naik:** {r['Prob Naik']}")
+                st.markdown(f"**RRR:** {r['RRR']}")
+                st.markdown(f"**Sentimen:** {r['Sentimen']}")
+                st.markdown(f"**Rezim:** {r['Rezim']}")
+                st.markdown(f"**TP%:** {r['TP%']}% | **SL%:** {r['SL%']}%")
+        if len(riwayat) > 10:
+            st.caption(f"Menampilkan 10 dari {len(riwayat)} riwayat.")
+    else:
+        st.caption("Belum ada riwayat.")
+
+    # Tombol hapus riwayat
+    if st.button("🗑️ Hapus Semua Riwayat"):
+        if os.path.isfile(RIWAYAT_FILE):
+            os.remove(RIWAYAT_FILE)
+        st.success("Riwayat dihapus!")
+        st.rerun()
+
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
 
@@ -411,6 +466,24 @@ if run_btn:
         rrr = tp_pct/sl_pct if sl_pct else 0
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
 
+        # --- SIMPAN KE RIWAYAT ---
+        ringkasan = {
+            "Waktu": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "Saham": ticker_input,
+            "Harga": f"{harga_terakhir:,.0f}",
+            "Sinyal": signal,
+            "Estimasi": f"{est_besok:,.0f}",
+            "Prob Naik": f"{prob_bull:.1f}%",
+            "RRR": f"{rrr:.2f}",
+            "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
+            "Rezim": regime,
+            "TP%": f"{tp_pct:.1f}",
+            "SL%": f"{sl_pct:.1f}"
+        }
+        simpan_riwayat(ringkasan)
+        # Refresh sidebar setelah simpan
+        st.rerun()
+
     # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest Terintegrasi + Grafik Interaktif + Analisis Fundamental Saham.")
@@ -515,7 +588,7 @@ if run_btn:
         st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime, 'Regime tidak terdefinisi.')}")
         st.divider()
 
-                # Fundamental
+        # Fundamental
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
             def clean_val(val, fmt="{:.2f}"):
