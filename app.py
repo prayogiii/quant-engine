@@ -189,12 +189,6 @@ REGIME_INFO = {
     "Sideways Calm 😴": "Sideways sepi, menjelang breakout.",
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
-IHSG_CONDITION_INFO = {
-    "RISK-ON 🔥": "Sentimen pasar positif, cocok untuk beli saham agresif.",
-    "RISK-OFF 🛑": "Sentimen pasar negatif, tahan diri atau pindah ke defensif.",
-    "NEUTRAL ⚖️": "Pasar tanpa arah jelas, strategi konservatif.",
-    "TRANSISI ⚠️": "Pasar dalam transisi, volatilitas tinggi, entry hati-hati."
-}
 
 # ==========================================
 # 2. USER INTERFACE INPUT
@@ -509,6 +503,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         # HITUNG PERSENTASE DINAMIS DARI HARGA SEKARANG (ENTRY PROXY)
         tp_pct = ((r1 - harga_terakhir) / harga_terakhir) * 100 if harga_terakhir > 0 else 0
         sl_pct = ((harga_terakhir - s2) / harga_terakhir) * 100 if harga_terakhir > 0 else 0
+        
+        # PERHITUNGAN RISK-TO-REWARD RATIO (RRR)
+        rrr = tp_pct / sl_pct if sl_pct > 0 else 0
+        rrr_status = "Ideal (≥ 1.5) 🟢" if rrr >= 1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr >= 1.0 else "Buruk (< 1.0) 🔴")
 
         # SECTION SIGNAL & EXPANDING BACKTEST
         st.header("🔮 Sinyal Kuantitatif & Hasil Backtest Realistis (6 Bulan)")
@@ -566,43 +564,48 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
 
-        # TRADING RECOMMENDATION EXECUTIVE SUMMARY
+        # TRADING RECOMMENDATION EXECUTIVE SUMMARY (MODIFIKASI PENYESUAIAN RRR & STOPLOSS)
         st.markdown("---")
         st.header("📋 Ringkasan Eksekutif & Rekomendasi")
         
-        if "STRONG BUY" in signal:
-            action_color, action_icon, action_text = "#10b981", "🟢", f"Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Masuk secara berkala hingga batas maksimal {kelly_adj*100:.1f}% dari portfolio, dengan pembatasan risiko ketat di area Stop Loss Rp {s2:,.0f} (-{sl_pct:.1f}%)."
+        # Logika Penentuan Tindakan Berdasarkan Sinyal + Proteksi RRR
+        if rrr < 1.0 and ("BUY" in signal):
+            action_color, action_icon, action_text = "#ef4444", "⚠️", f"Sinyal kuantitatif menunjukkan <b>{signal}</b>, namun struktur Risk-to-Reward Ratio saat ini <b>BURUK ({rrr:.2f})</b>. Jarak ke Stop Loss Target (-{sl_pct:.1f}%) lebih lebar dibandingkan potensi profit ke R1 (+{tp_pct:.1f}%). <b>Saran:</b> Tunda entry langsung, tunggu harga koreksi mendekati area Support 1 (Rp {s1:,.0f}) untuk memperkecil risiko."
+        elif "STRONG BUY" in signal:
+            action_color, action_icon, action_text = "#10b981", "🟢", f"Sistem mengonfirmasi momentum penguatan penuh berkat dukungan volume transaksi di atas rata-rata. Anda direkomendasikan melakukan entri bertahap (skala prioritas tinggi) hingga batas alokasi modal maksimal sebesar {kelly_adj*100:.1f}%. Tempatkan proteksi ketat di level Stop Loss Rp {s2:,.0f} (-{sl_pct:.1f}%)."
         elif "BUY" in signal:
-            action_color, action_icon, action_text = "#f59e0b", "🟡", f"Sinyal beli taktis terdeteksi secara parsial. Anda bisa melakukan buy-on-weakness di dekat area Support 1, batasi risiko jika harga menembus Rp {s2:,.0f} (-{sl_pct:.1f}%)."
+            action_color, action_icon, action_text = "#f59e0b", "🟡", f"Sinyal beli taktis terdeteksi dalam koridor tren yang valid dengan rasio RRR yang memadai ({rrr:.2f}). Metode pembelian terbaik adalah <i>Buy on Weakness</i> di area Rp {s1:,.0f} sampai {pp:,.0f}. Batasi kerugian tanpa kompromi apabila pertahanan di Rp {s2:,.0f} (-{sl_pct:.1f}%) ditembus pasar."
         elif "HOLD" in signal:
-            action_color, action_icon, action_text = "#3b82f6", "🔵", "Pasar bergerak konsolidasi tanpa arah yang dominan. Pertimbangkan Hold posisi yang ada dan batasi porsi penambahan modal."
+            action_color, action_icon, action_text = "#3b82f6", "🔵", f"Struktur pasar saat ini berada dalam fase konsolidasi atau transisi sideways. Pertahankan posisi yang sudah dibeli sebelumnya tanpa menambah amunisi modal baru. Level krusial batas toleransi akhir Anda ada di Rp {s2:,.0f}."
         else:
-            action_color, action_icon, action_text = "#ef4444", "🔴", "Sinyal menunjukkan risiko penurunan tinggi atau kondisi pasar jenuh beli. Amankan profit dan hindari entry baru."
+            action_color, action_icon, action_text = "#ef4444", "🔴", f"Sinyal mendeteksi risiko penurunan tajam (Regime: {regime}). Sangat direkomendasikan untuk mengamankan keuntungan (Take Profit) atau melakukan pemangkasan kerugian dini. Hindari membuka posisi baru sampai kondisi pasar kembali stabil."
             
         col1, col2 = st.columns([1, 1])
         with col1:
             st.markdown(f"""
             <div class="summary-card">
-                <div class="section-title">📌 Profil Risiko Saham Saat Ini</div>
-                <div class="summary-item">🏷️ <b>Kategori Rezim:</b> {regime}</div>
-                <div class="summary-item">🌐 <b>Kondisi Makro:</b> {ihsg_cond}</div>
-                <div class="summary-item">📊 <b>Skor Sentimen Berita:</b> {avg_sentiment:.2f} ({sentimen_status})</div>
-                <div class="summary-item">🛡️ <b>Maks. Batas Ukuran Posisi:</b> {kelly_adj*100:.1f}% dari Total Portfolio</div>
+                <div class="section-title">📌 Profil Risiko Saham Terkalibrasi</div>
+                <div class="summary-item">🛡️ <b>Jarak Stop Loss:</b> -{sl_pct:.1f}% (Rp {s2:,.0f})</div>
+                <div class="summary-item">🎯 <b>Potensi Keuntungan:</b> +{tp_pct:.1f}% (Rp {r1:,.0f})</div>
+                <div class="summary-item">⚖️ <b>Risk:Reward Ratio:</b> 1 : {rrr:.2f} ({rrr_status})</div>
+                <div class="summary-item">🏷️ <b>Kategori Rezim & Makro:</b> {regime} | {ihsg_cond}</div>
+                <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
             </div>
             """, unsafe_allow_html=True)
         with col2:
             st.markdown(f"""
             <div class="action-card" style="border-left-color: {action_color};">
-                <div class="section-title">{action_icon} Panduan Tindakan</div>
+                <div class="section-title">{action_icon} Panduan Eksekusi Trader</div>
                 <div class="summary-item" style="font-size: 16px; margin-top: 8px;">
                     {action_text}
                 </div>
                 <hr style="border-color: #334155; margin: 15px 0;">
                 <div style="color: #94a3b8; font-size: 13px;">
-                    ⚠️ <i>Disclaimer: Hasil analisis ini berbasis permodelan matematika probabilitas kuantitatif. Keputusan investasi tetap berada pada kendali dan tanggung jawab penuh Anda pribadi.</i>
+                    ⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab mandiri masing-masing investor.</i>
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
 
 
