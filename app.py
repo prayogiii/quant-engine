@@ -514,8 +514,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         t1.metric("Sinyal Eksekusi", signal)
         t2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",", "."), f"Rentang 50%: {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
         t3.metric("Wilayah Entry Ideal", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
-        
-        # MODIFIKASI DISINI: Persentase dimasukkan langsung ke display angka utama metric
         t4.metric("Take Profit Target", f"Rp {r1:,.0f} (+{tp_pct:.1f}%)".replace(",", "."), "Target Resist R1")
         t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f} (-{sl_pct:.1f}%)".replace(",", "."), "Proteksi Batas S2")
         
@@ -566,20 +564,46 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
 
-        # TRADING RECOMMENDATION EXECUTIVE SUMMARY
+        # TRADING RECOMMENDATION EXECUTIVE SUMMARY (MODIFIKASI: POIN TAKTIS STRATEGIS)
         st.markdown("---")
         st.header("📋 Ringkasan Eksekutif & Rekomendasi")
         
+        # Logika Penentuan Tindakan Berdasarkan Sinyal + Proteksi RRR (Format Per Poin Terstruktur)
         if rrr < 1.0 and ("BUY" in signal):
-            action_color, action_icon, action_text = "#ef4444", "⚠️", f"Sinyal kuantitatif menunjukkan <b>{signal}</b>, namun struktur Risk-to-Reward Ratio saat ini <b>BURUK ({rrr:.2f})</b>. Jarak ke Stop Loss Target (-{sl_pct:.1f}%) lebih lebar dibandingkan potensi profit ke R1 (+{tp_pct:.1f}%). <b>Saran:</b> Tunda entry langsung, tunggu harga koreksi mendekati area Support 1 (Rp {s1:,.0f}) untuk memperkecil risiko."
+            action_color, action_icon = "#ef4444", "⚠️"
+            action_text = f"""
+            • <b>KONDISI:</b> Sinyal Kuantitatif {signal} tapi <b>RRR BURUK ({rrr:.2f})</b><br>
+            • <b>REKOMENDASI:</b> WAIT & SEE (Tunda Entry)<br>
+            • <b>LANGKAH TAKTIS:</b> Jangan kejar harga atas. Jarak Stop Loss (-{sl_pct:.1f}%) lebih lebar dari target TP (+{tp_pct:.1f}%). Tunggu koreksi sehat mendekati area Support 1 (Rp {s1:,.0f}) untuk memperkecil risiko modal.
+            """
         elif "STRONG BUY" in signal:
-            action_color, action_icon, action_text = "#10b981", "🟢", f"Sistem mengonfirmasi momentum penguatan penuh berkat dukungan volume transaksi di atas rata-rata. Anda direkomendasikan melakukan entri bertahap (skala prioritas tinggi) hingga batas alokasi modal maksimal sebesar {kelly_adj*100:.1f}%. Tempatkan proteksi ketat di level Stop Loss Rp {s2:,.0f} (-{sl_pct:.1f}%)."
+            action_color, action_icon = "#10b981", "🟢"
+            action_text = f"""
+            • <b>KONDISI:</b> Konfirmasi Tren Kuat & Akumulasi Volume Tinggi<br>
+            • <b>REKOMENDASI:</b> AGGRESSIVE BUY / ACCUMULATE<br>
+            • <b>LANGKAH TAKTIS:</b> Lakukan pembelian bertahap hingga alokasi maksimal {kelly_adj*100:.1f}% portofolio. Pasang pembatas risiko disiplin di level Stop Loss S2 Rp {s2:,.0f} (-{sl_pct:.1f}%).
+            """
         elif "BUY" in signal:
-            action_color, action_icon, action_text = "#f59e0b", "🟡", f"Sinyal beli taktis terdeteksi dalam koridor tren yang valid dengan rasio RRR yang memadai ({rrr:.2f}). Metode pembelian terbaik adalah <i>Buy on Weakness</i> di area Rp {s1:,.0f} sampai {pp:,.0f}. Batasi kerugian tanpa kompromi apabila pertahanan di Rp {s2:,.0f} (-{sl_pct:.1f}%) ditembus pasar."
+            action_color, action_icon = "#f59e0b", "🟡"
+            action_text = f"""
+            • <b>KONDISI:</b> Tren Valid & Risk-to-Reward Ratio Memadai ({rrr:.2f})<br>
+            • <b>REKOMENDASI:</b> BUY ON WEAKNESS (BoW)<br>
+            • <b>LANGKAH TAKTIS:</b> Tempatkan antrean beli di area ideal Rp {s1:,.0f} - {pp:,.0f}. Jual rugi tanpa kompromi jika harga merosot dan menembus batas bawah Rp {s2:,.0f} (-{sl_pct:.1f}%).
+            """
         elif "HOLD" in signal:
-            action_color, action_icon, action_text = "#3b82f6", "🔵", f"Struktur pasar saat ini berada dalam fase konsolidasi atau transisi sideways. Pertahankan posisi yang sudah dibeli sebelumnya tanpa menambah amunisi modal baru. Level krusial batas toleransi akhir Anda ada di Rp {s2:,.0f}."
+            action_color, action_icon = "#3b82f6", "🔵"
+            action_text = f"""
+            • <b>KONDISI:</b> Fase Konsolidasi / Transisi Sideways<br>
+            • <b>REKOMENDASI:</b> HOLD POSITION (Pertahankan Barang)<br>
+            • <b>LANGKAH TAKTIS:</b> Jangan lakukan penambahan posisi modal baru (no average up/down). Pantau pergerakan dengan pertahanan batas akhir di level Rp {s2:,.0f}.
+            """
         else:
-            action_color, action_icon, action_text = "#ef4444", "🔴", f"Sinyal mendeteksi risiko penurunan tajam (Regime: {regime}). Sangat direkomendasikan untuk mengamankan keuntungan (Take Profit) atau melakukan pemangkasan kerugian dini. Hindari membuka posisi baru sampai kondisi pasar kembali stabil."
+            action_color, action_icon = "#ef4444", "🔴"
+            action_text = f"""
+            • <b>KONDISI:</b> Risiko Penurunan Tinggi / Fase Distribusi ({regime})<br>
+            • <b>REKOMENDASI:</b> AVOID / LIQUIDATE / SHORT<br>
+            • <b>LANGKAH TAKTIS:</b> Amankan modal ke bentuk cash. Jauhi emiten ini sementara waktu atau realisasikan Cut Loss/Take Profit dini sebelum penurunan berlanjut.
+            """
             
         col1, col2 = st.columns([1, 1])
         with col1:
@@ -597,7 +621,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             st.markdown(f"""
             <div class="action-card" style="border-left-color: {action_color};">
                 <div class="section-title">{action_icon} Panduan Eksekusi Trader</div>
-                <div class="summary-item" style="font-size: 16px; margin-top: 8px;">
+                <div class="summary-item" style="font-size: 15px; margin-top: 8px; line-height: 1.6;">
                     {action_text}
                 </div>
                 <hr style="border-color: #334155; margin: 15px 0;">
@@ -606,6 +630,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
 
 
