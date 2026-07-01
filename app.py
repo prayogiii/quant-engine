@@ -46,7 +46,6 @@ warnings.filterwarnings("ignore")
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
-# CSS dasar untuk tema dark dan card yang sudah ada
 st.markdown("""
     <style>
     .main { background-color: #0f1116; color: #ffffff; }
@@ -71,10 +70,7 @@ st.markdown("""
     .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
-    /* styling tambahan untuk sidebar */
-    .sidebar .sidebar-content {
-        background-color: #0f1116;
-    }
+    .sidebar .sidebar-content { background-color: #0f1116; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -539,6 +535,19 @@ if run_btn:
             </table>
             """
             st.markdown(table_html, unsafe_allow_html=True)
+            # --- TAMBAHAN: Penjelasan metrik fundamental ---
+            st.markdown("""
+            <div style="background-color: #1e293b; border-radius: 12px; padding: 15px; margin-top: 15px; color: #cbd5e1; font-size: 14px;">
+                <b style="color: #00ffcc;">📝 Keterangan Metrik:</b>
+                <ul style="margin-top: 8px; padding-left: 20px;">
+                    <li><b>Market Cap:</b> Total kapitalisasi pasar (harga saham × jumlah saham beredar). Menunjukkan skala perusahaan.</li>
+                    <li><b>PER (Price to Earnings):</b> Harga per lembar dibanding laba per saham. PER rendah bisa berarti saham undervalue, PER tinggi mencerminkan ekspektasi pertumbuhan tinggi.</li>
+                    <li><b>PBV (Price to Book Value):</b> Perbandingan harga pasar dengan nilai buku per saham. PBV < 1 sering dianggap murah.</li>
+                    <li><b>ROE (Return on Equity):</b> Seberapa efisien perusahaan menghasilkan laba dari modal sendiri. Semakin tinggi semakin baik.</li>
+                    <li><b>D/E (Debt to Equity):</b> Rasio utang terhadap ekuitas; mengukur leverage. Angka yang terlalu tinggi bisa menandakan risiko keuangan.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
         else:
             st.warning("⚠️ Data fundamental finansial tidak tersedia.")
         st.divider()
