@@ -514,8 +514,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         t1.metric("Sinyal Eksekusi", signal)
         t2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",", "."), f"Rentang 50%: {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
         t3.metric("Wilayah Entry Ideal", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
-        t4.metric("Take Profit Target", f"Rp {r1:,.0f}".replace(",", "."), f"+{tp_pct:.1f}% Potensi")
-        t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f}".replace(",", "."), f"-{sl_pct:.1f}% Risk")
+        
+        # MODIFIKASI DISINI: Persentase dimasukkan langsung ke display angka utama metric
+        t4.metric("Take Profit Target", f"Rp {r1:,.0f} (+{tp_pct:.1f}%)".replace(",", "."), "Target Resist R1")
+        t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f} (-{sl_pct:.1f}%)".replace(",", "."), "Proteksi Batas S2")
         
         st.markdown("**Hasil Pengujian Algoritma (Stateful Tracking Backtest 126 Hari):**")
         b1, b2, b3, b4, b5, b6 = st.columns(6)
@@ -564,11 +566,10 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified")
             st.plotly_chart(fig, use_container_width=True)
 
-        # TRADING RECOMMENDATION EXECUTIVE SUMMARY (MODIFIKASI PENYESUAIAN RRR & STOPLOSS)
+        # TRADING RECOMMENDATION EXECUTIVE SUMMARY
         st.markdown("---")
         st.header("📋 Ringkasan Eksekutif & Rekomendasi")
         
-        # Logika Penentuan Tindakan Berdasarkan Sinyal + Proteksi RRR
         if rrr < 1.0 and ("BUY" in signal):
             action_color, action_icon, action_text = "#ef4444", "⚠️", f"Sinyal kuantitatif menunjukkan <b>{signal}</b>, namun struktur Risk-to-Reward Ratio saat ini <b>BURUK ({rrr:.2f})</b>. Jarak ke Stop Loss Target (-{sl_pct:.1f}%) lebih lebar dibandingkan potensi profit ke R1 (+{tp_pct:.1f}%). <b>Saran:</b> Tunda entry langsung, tunggu harga koreksi mendekati area Support 1 (Rp {s1:,.0f}) untuk memperkecil risiko."
         elif "STRONG BUY" in signal:
@@ -605,6 +606,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
 
 
