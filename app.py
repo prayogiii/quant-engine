@@ -614,15 +614,3 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             # FIX PERBAIKAN: String template dirapatkan tanpa spasi baris baru ilegal agar tidak bocor kode HTML-nya
             html_action = f'<div class="action-card" style="border-left-color: {action_color};"><div class="section-title">{action_icon} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size: 15px; margin-top: 8px; line-height: 1.6;">{action_text}</div><hr style="border-color: #334155; margin: 15px 0;"><div style="color: #94a3b8; font-size: 13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab mandiri masing-masing investor.</i></div></div>'
             st.markdown(html_action, unsafe_allow_html=True)
-
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-
-
-
-
-
-
-
