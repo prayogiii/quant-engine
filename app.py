@@ -76,10 +76,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# UPGRADE FITUR 1: Caching Data Historis untuk Mencegah Rate Limiting & Lag
 @st.cache_data(ttl=3600)
 def load_stock_data(ticker):
-    # Menarik data 2 tahun agar fitting distribusi Student-t dan threshold jauh lebih presisi
     df = yf.download(ticker, period="2y")
     if df.empty:
         return pd.DataFrame()
@@ -164,7 +162,7 @@ def estimate_theta_ou(close_series):
     theta = -coeff[1] if coeff[1] < 0 else 0.05
     return theta
 
-# Kamus Data Referensi
+# Kamus Referensi
 REGIME_INFO = {
     "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi. Ideal untuk swing buy agresif, waspadai overbought.",
     "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
@@ -191,11 +189,11 @@ IHSG_CONDITION_INFO = {
 # ==========================================
 # 2. USER INTERFACE INPUT
 # ==========================================
-st.title("📊 Quant & Risk Engine Pro (Optimized)")
+st.title("📊 Quant & Risk Engine Pro")
 st.write("Algoritma kuantitatif + Berita + Backtest Terintegrasi + Grafik Interaktif + Analisis Fundamental Saham.")
 
+# MODIFIKASI: Input total modal dihapus sepenuhnya agar tidak rancu
 ticker_raw = st.text_input("Masukkan Kode Saham IHSG (Contoh: BRMS, BBRI, BMRI):", value="BBRI").upper().strip()
-total_capital = st.number_input("Total Modal Portofolio Anda (Rp):", min_value=0, value=10000000, step=10000)
 
 if ticker_raw and not ticker_raw.endswith(".JK"):
     ticker_input = f"{ticker_raw}.JK"
@@ -208,7 +206,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.stop()
         
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        # Panggil fungsi caching
         df = load_stock_data(ticker_input)
         if df.empty:
             st.error("❌ Data tidak ditemukan untuk ticker tersebut.")
@@ -220,7 +217,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             st.error("❌ Data historis kurang untuk analisa kuantitatif.")
             st.stop()
 
-        # PRE-COMPUTE INDICATORS (Vectorized - Menghindari Loop Lambat)
+        # PRE-COMPUTE INDICATORS
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['ADX'] = compute_adx_series(df)
@@ -230,11 +227,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
         df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
 
-        # === DATA FUNDAMENTAL SAHAM INDONESIA (IDX FAIL-SAFE) ===
-        try:
-            ticker_info = yf.Ticker(ticker_input).info
-        except:
-            ticker_info = {}
+        # DATA FUNDAMENTAL
+        try: ticker_info = yf.Ticker(ticker_input).info
+        except: ticker_info = {}
 
         # BERITA & SENTIMEN
         news_pool = []
@@ -267,7 +262,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             
         sentimen_status = "Positif 🟢" if avg_sentiment >= 0.05 else ("Negatif 🔴" if avg_sentiment <= -0.05 else "Netral ⚪")
 
-        # ESTIMASI AMBANG BATAS HISTORIS (Benchmark 6 bulan pertama dari window)
+        # ESTIMASI AMBANG BATAS HISTORIS
         split_idx = max(126, len(df) - 126)
         df_thresh = df.iloc[:split_idx]
         returns_thresh = df_thresh['Close'].pct_change().dropna()
@@ -277,10 +272,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(), 50) if not df_thresh['Mom5D'].dropna().empty else 0.0
         
         vol_hist_th = returns_thresh.rolling(20).std().dropna() * np.sqrt(252) * 100
-        high_vol_th = np.percentile(vol_hist_th, 70) if not vol_hist_th.empty else 25
-        low_vol_th = np.percentile(vol_hist_th, 30) if not vol_hist_th.empty else 12
-
-        # ESTIMASI DISTRIBUSI STUDENT-T (Mencari Fat-Tails Parameter)
+        
+        # ESTIMASI DISTRIBUSI STUDENT-T
         def t_loglike(p, d):
             if p[0] <= 2 or p[2] <= 0: return np.inf
             return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
@@ -311,10 +304,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 elif h < ema20s and ema20s < ema50s: return ("Bearish Accumulation 🧊", "NEUTRAL ⚖️")
                 elif h > ema20s and ema20s < ema50s: return ("Sideways Bias Naik ↗️", "NEUTRAL ⚖️")
                 elif h < ema20s and ema20s > ema50s: return ("Sideways Bias Turun ↘️", "NEUTRAL ⚖️")
-                else:
-                    return ("Sideways Normal ↔️", "NEUTRAL ⚖️")
+                else: return ("Sideways Normal ↔️", "NEUTRAL ⚖️")
 
-        # Hitung regime untuk baris terakhir
         regime, ihsg_cond = get_regime_row(df.iloc[-1])
         adx = df['ADX'].iloc[-1]
 
@@ -337,9 +328,8 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         res20 = float(df['High'].iloc[-21:-1].max())
         breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-        # UPGRADE FITUR 2: Sinkronisasi Aturan Sinyal antara Backtest & Live Signal
+        # GENERATE SIGNALS
         def generate_signals_vectorized(dataframe):
-            # Rumus skoring kuantitatif yang konsisten
             score = pd.Series(0, index=dataframe.index)
             score += (dataframe['Mom3D'] > mom_median_th).astype(int)
             score += (dataframe['ZScore'] < z_oversold_th).astype(int)
@@ -347,7 +337,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             if 'Volume' in dataframe.columns:
                 score += (dataframe['Volume'] > dataframe['Vol_MA20']).astype(int)
                 
-            # Mapping status sinyal
             sig_series = pd.Series("🚨 AVOID", index=dataframe.index)
             sig_series[score == 1] = "⏸️ HOLD / WAIT"
             sig_series[score >= 2] = "⚡ BUY (TACTICAL)"
@@ -357,12 +346,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         df['Signal'] = generate_signals_vectorized(df)
         signal = df['Signal'].iloc[-1]
 
-        # BACKTEST EXPANDING WINDOW (Optimized via Vectorized Flags)
+        # BACKTEST EXPANDING WINDOW
         backtest_periods = 126
         df_back = df.iloc[-backtest_periods:].copy()
         trades = []
         
-        # Eksekusi simulasi transaksi backtest
         for i in range(len(df_back) - 1):
             current_sig = df_back['Signal'].iloc[i]
             if "BUY" in current_sig:
@@ -383,7 +371,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         else:
             win_bt, pf_bt, avg_bt, max_dd_bt, sharpe_bt, trades_bt = 0, 0, 0, 0, 0, 0
 
-        # RISK METRICS & KELLY ALLOCATION
+        # RISK METRICS & KELLY ALLOCATION PERCENTAGE
         roll_max_th = df_thresh['Close'].cummax()
         drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
         max_dd = float(drawdown_th.min() * 100)
@@ -398,35 +386,32 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         ret_skew = float(skew(returns_thresh))
         ret_kurt = float(kurtosis(returns_thresh, fisher=True))
         kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
+        
+        # MODIFIKASI: Output Kelly murni persentase batas atas portofolio
         kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1.0) * kurt_penalty))
-        alloc = total_capital * kelly_adj
 
-        # UPGRADE FITUR 3: Perbaikan Bug Proyeksi Maju Monte Carlo Ornstein-Uhlenbeck (OU)
+        # MONTE CARLO PROYEKSI MAJU (OU PROCESS)
         n_sim, n_days = 2000, 30
         latest_vol_daily = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
         scale_corrected = latest_vol_daily / np.sqrt(df_est / (df_est - 2)) if df_est > 2 else latest_vol_daily
         theta_ou = estimate_theta_ou(df['Close'])
         
-        # FIX: Target mean-reversion dikunci pada nilai historis 20 hari terakhir untuk simulasi ke depan
         locked_log_mean20 = np.log(df['Close']).tail(20).mean()
         paths = np.zeros((n_days, n_sim))
         current_log = np.expand_dims(np.log(harga_terakhir) * np.ones(n_sim), axis=0)
         
         for day in range(n_days):
             innovations = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
-            # Proses OU: Merapat kembali ke nilai rata-rata fundamental (locked_log_mean20)
             next_log = current_log[-1, :] + theta_ou * (locked_log_mean20 - current_log[-1, :]) + innovations
             current_log = np.vstack([current_log, next_log])
             paths[day, :] = np.exp(next_log)
 
-        # Estimasi besok hari tunggal
         mu_ou = theta_ou * (locked_log_mean20 - np.log(harga_terakhir)) + t_loc
         est_besok = float(np.exp(np.log(harga_terakhir) + mu_ou))
         sim_h1 = student_t.rvs(df_est, loc=t_loc, scale=scale_corrected, size=2000)
         prices_besok = harga_terakhir * np.exp(sim_h1)
         low_est, up_est = float(np.percentile(prices_besok, 25)), float(np.percentile(prices_besok, 75))
         
-        # Probabilitas target hit
         hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
         hit_sl = (np.any(paths <= s1, axis=0).sum() / n_sim) * 100
         prob_bull = ((sim_h1 > 0).sum() / 2000) * 100
@@ -439,7 +424,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         # SECTION BERITA
         st.header("📰 Sentimen Berita Terbobot")
         c1, c2 = st.columns([1, 2])
-        c1.metric("Sentimen Skor (Compound)", f"{avg_sentiment:.2f}", sentimen_status)
+        c1.metric("Sentimen Skor", f"{avg_sentiment:.2f}", sentimen_status)
         with c2:
             st.markdown("**5 Berita Utama Pasar:**")
             for i, h in enumerate(headlines):
@@ -458,12 +443,11 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime, 'Regime tidak terdefinisi.')}")
         st.divider()
 
-        # SECTION ANALISIS FUNDAMENTAL (FAIL-SAFE AGAR TIDAK ERROR JIKA DATA IDX KOSONG)
+        # SECTION ANALISIS FUNDAMENTAL
         st.header("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
             def clean_val(val, fmt="{:.2f}"):
                 return "N/A" if val is None else fmt.format(val)
-                
             mc = ticker_info.get('marketCap')
             per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
             pbv = ticker_info.get('priceToBook')
@@ -481,7 +465,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             """
             st.markdown(table_html, unsafe_allow_html=True)
         else:
-            st.warning("⚠️ Data fundamental finansial dari Yahoo Finance tidak tersedia atau dibatasi.")
+            st.warning("⚠️ Data fundamental finansial tidak tersedia.")
         st.divider()
 
         # SECTION PIVOT ANALYSIS
@@ -513,12 +497,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         b6.metric("Total Trades", f"{trades_bt}")
         st.divider()
 
-        # SECTION ALOKASI MANAJEMEN RISIKO
+        # SECTION ALOKASI MANAJEMEN RISIKO (MODIFIKASI: Dibuat 2 Kolom Tanpa Nominal Nominal)
         st.header("🛡️ Manajemen Risiko Portofolio (Kelly Criterion)")
-        r_c1, r_c2, r_c3 = st.columns(3)
-        r_c1.metric("Fraksi Modal Kelly", f"{kelly_adj*100:.1f}%")
-        r_c2.metric("Maksimal Pembelian", f"Rp {alloc:,.0f}".replace(",", "."))
-        r_c3.metric("Beta Terhadap IHSG", f"{beta_ihsg:.2f}x")
+        r_c1, r_c2 = st.columns(2)
+        r_c1.metric("Rekomendasi Ukuran Posisi (Kelly)", f"{kelly_adj*100:.1f}%")
+        r_c2.metric("Beta Terhadap IHSG", f"{beta_ihsg:.2f}x")
+        st.markdown(f"**Interpretasi Posisi:** Sistem menyarankan batas maksimum alokasi untuk saham ini adalah **{kelly_adj*100:.1f}%** dari **total nilai seluruh portofolio Anda** (modal dingin Anda). Sisa kapasitas dana disimpan sebagai *cash* atau disebar ke saham dengan korelasi rendah.")
         st.markdown(f"Statistik Historis Sektor -> Max DD: `{max_dd:.2f}%` | Drawdown 30 Hari: `{max_dd_30:.2f}%`")
         st.divider()
 
@@ -529,17 +513,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         pr2.metric("Probabilitas Kena R1 (30 Hari)", f"{hit_tp:.1f}%")
         pr3.metric("Probabilitas Turun S1 (30 Hari)", f"{hit_sl:.1f}%")
 
-        # UPGRADE FITUR 4: Visualisasi Titik Beli/Jual Backtest pada Chart Plotly Interaktif
+        # CHART PLOTLY
         if PLOTLY_AVAILABLE:
             st.header("📈 Chart Harga & Pemetaan Histori Sinyal")
             fig = go.Figure()
-            
-            # Line chart harga penutupan dan MA
             fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Harga Close', line=dict(color='#00ffcc', width=2)))
             fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], name='EMA20 (Trend Pendek)', line=dict(color='#f59e0b', dash='dot')))
             fig.add_trace(go.Scatter(x=df.index, y=df['EMA50'], name='EMA50 (Trend Menengah)', line=dict(color='#ef4444', dash='dot')))
             
-            # Plot Sinyal Transaksi dari Backtest untuk validasi visual user
             buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
             fig.add_trace(go.Scatter(
                 x=buy_signals.index, y=buy_signals['Close'],
@@ -547,7 +528,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 marker=dict(symbol='triangle-up', size=11, color='#10b981', line=dict(width=1, color='white'))
             ))
             
-            # Garis horizontal S/R hari ini
             for level, label, col in [(r1, 'R1', 'orange'), (s1, 'S1', 'red'), (pp, 'PP', 'gray')]:
                 fig.add_hline(y=level, line_dash="dash", line_color=col, annotation_text=label, annotation_position="right")
                 
@@ -559,7 +539,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.header("📋 Ringkasan Eksekutif & Rekomendasi")
         
         if "STRONG BUY" in signal:
-            action_color, action_icon, action_text = "#10b981", "🟢", "Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Pertimbangkan masuk bertahap mengacu pada alokasi Kelly."
+            action_color, action_icon, action_text = "#10b981", "🟢", f"Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Masuk secara berkala hingga batas maksimal {kelly_adj*100:.1f}% dari portfolio."
         elif "BUY" in signal:
             action_color, action_icon, action_text = "#f59e0b", "🟡", "Sinyal beli taktis terdeteksi secara parsial. Anda bisa melakukan buy-on-weakness di dekat area Support 1."
         elif "HOLD" in signal:
@@ -575,7 +555,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 <div class="summary-item">🏷️ <b>Kategori Rezim:</b> {regime}</div>
                 <div class="summary-item">🌐 <b>Kondisi Makro:</b> {ihsg_cond}</div>
                 <div class="summary-item">📊 <b>Skor Sentimen Berita:</b> {avg_sentiment:.2f} ({sentimen_status})</div>
-                <div class="summary-item">🛡️ <b>Rekomendasi Alokasi Dana:</b> {kelly_adj*100:.1f}% (Maks: Rp {alloc:,.0f})</div>
+                <div class="summary-item">🛡️ <b>Maks. Batas Ukuran Posisi:</b> {kelly_adj*100:.1f}% dari Total Portfolio</div>
             </div>
             """, unsafe_allow_html=True)
         with col2:
@@ -591,4 +571,5 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
