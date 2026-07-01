@@ -525,6 +525,8 @@ if run_btn:
             pbv = ticker_info.get('priceToBook')
             roe = ticker_info.get('returnOnEquity')
             de = ticker_info.get('debtToEquity')
+
+            # Tabel
             table_html = f"""
             <table class='fundamental-table'>
                 <tr><td>Market Cap</td><td>{clean_val(mc, "{:,.0f} IDR")}</td></tr>
@@ -535,19 +537,75 @@ if run_btn:
             </table>
             """
             st.markdown(table_html, unsafe_allow_html=True)
-            # --- TAMBAHAN: Penjelasan metrik fundamental ---
-            st.markdown("""
-            <div style="background-color: #1e293b; border-radius: 12px; padding: 15px; margin-top: 15px; color: #cbd5e1; font-size: 14px;">
-                <b style="color: #00ffcc;">📝 Keterangan Metrik:</b>
-                <ul style="margin-top: 8px; padding-left: 20px;">
-                    <li><b>Market Cap:</b> Total kapitalisasi pasar (harga saham × jumlah saham beredar). Menunjukkan skala perusahaan.</li>
-                    <li><b>PER (Price to Earnings):</b> Harga per lembar dibanding laba per saham. PER rendah bisa berarti saham undervalue, PER tinggi mencerminkan ekspektasi pertumbuhan tinggi.</li>
-                    <li><b>PBV (Price to Book Value):</b> Perbandingan harga pasar dengan nilai buku per saham. PBV < 1 sering dianggap murah.</li>
-                    <li><b>ROE (Return on Equity):</b> Seberapa efisien perusahaan menghasilkan laba dari modal sendiri. Semakin tinggi semakin baik.</li>
-                    <li><b>D/E (Debt to Equity):</b> Rasio utang terhadap ekuitas; mengukur leverage. Angka yang terlalu tinggi bisa menandakan risiko keuangan.</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
+
+            # Interpretasi dinamis setiap metrik
+            st.markdown("<div style='background-color: #1e293b; border-radius: 12px; padding: 15px; margin-top: 15px; color: #cbd5e1; font-size: 14px;'>", unsafe_allow_html=True)
+            st.markdown("<b style='color: #00ffcc;'>📝 Interpretasi Metrik:</b><ul style='margin-top: 8px; padding-left: 20px;'>", unsafe_allow_html=True)
+
+            # Market Cap
+            if mc is not None:
+                if mc >= 1e13:
+                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
+                elif mc >= 1e12:
+                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
+                elif mc >= 1e10:
+                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong menengah (Mid Cap)."
+                else:
+                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
+            else:
+                mc_text = "Market Cap tidak tersedia."
+            st.markdown(f"<li><b>Market Cap:</b> {mc_text}</li>", unsafe_allow_html=True)
+
+            # PER
+            if per is not None:
+                if per < 10:
+                    per_text = f"PER {per:.2f}x tergolong rendah (potensi undervalue)."
+                elif per < 20:
+                    per_text = f"PER {per:.2f}x moderat."
+                else:
+                    per_text = f"PER {per:.2f}x tergolong tinggi (premium)."
+            else:
+                per_text = "PER tidak tersedia."
+            st.markdown(f"<li><b>PER:</b> {per_text}</li>", unsafe_allow_html=True)
+
+            # PBV
+            if pbv is not None:
+                if pbv < 1:
+                    pbv_text = f"PBV {pbv:.2f}x di bawah 1 (di bawah nilai buku, bisa undervalue)."
+                elif pbv < 3:
+                    pbv_text = f"PBV {pbv:.2f}x moderat."
+                else:
+                    pbv_text = f"PBV {pbv:.2f}x tinggi (premium)."
+            else:
+                pbv_text = "PBV tidak tersedia."
+            st.markdown(f"<li><b>PBV:</b> {pbv_text}</li>", unsafe_allow_html=True)
+
+            # ROE
+            if roe is not None:
+                roe_pct = roe * 100
+                if roe_pct > 20:
+                    roe_text = f"ROE {roe_pct:.1f}% sangat baik (profitabilitas tinggi)."
+                elif roe_pct > 10:
+                    roe_text = f"ROE {roe_pct:.1f}% cukup baik."
+                else:
+                    roe_text = f"ROE {roe_pct:.1f}% rendah."
+            else:
+                roe_text = "ROE tidak tersedia."
+            st.markdown(f"<li><b>ROE:</b> {roe_text}</li>", unsafe_allow_html=True)
+
+            # D/E
+            if de is not None:
+                if de > 1:
+                    de_text = f"D/E {de:.2f} tinggi (leverage tinggi, risiko lebih besar)."
+                elif de > 0.5:
+                    de_text = f"D/E {de:.2f} moderat."
+                else:
+                    de_text = f"D/E {de:.2f} rendah (konservatif)."
+            else:
+                de_text = "D/E tidak tersedia."
+            st.markdown(f"<li><b>D/E:</b> {de_text}</li>", unsafe_allow_html=True)
+
+            st.markdown("</ul></div>", unsafe_allow_html=True)
         else:
             st.warning("⚠️ Data fundamental finansial tidak tersedia.")
         st.divider()
@@ -585,7 +643,7 @@ if run_btn:
         r_c1, r_c2 = st.columns(2)
         r_c1.metric("Rekomendasi Ukuran Posisi (Kelly)", f"{kelly_adj*100:.1f}%")
         r_c2.metric("Beta Terhadap IHSG", f"{beta_ihsg:.2f}x")
-        st.markdown(f"**Interpretasi Posisi:** Berdasarkan akurasi *Win Rate* strategi kuantitatif Anda senilai **{win_bt:.1%}**, sistem menyarankan batas maksimal ukuran tunggal saham ini adalah **{kelly_adj*100:.1f}%** dari total seluruh ekuitas modal portofolio Anda.")
+        st.markdown(f"**Interpretasi Posisi:** Berdasarkan akurasi *Win Rate* strategi kuantitatif Anda senilai **{win_bt:.1%}**, sistem menyarankan batas maksimal ukuran tunggal saham ini adalah **{kelly_adj*100:.1f}** dari total seluruh ekuitas modal portofolio Anda.")
         st.markdown(f"Statistik Historis Sektor -> Max DD: `{max_dd:.2f}%` | Drawdown 30 Hari: `{max_dd_30:.2f}%`")
         st.divider()
 
