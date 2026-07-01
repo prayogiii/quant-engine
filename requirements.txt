@@ -7,3 +7,4 @@ nltk
 deep-translator
 feedparser
 easyocr
+plotly
