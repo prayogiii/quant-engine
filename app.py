@@ -45,7 +45,7 @@ except ImportError:
 warnings.filterwarnings("ignore")
 
 # ==========================================
-# KONFIGURASI FILE RIWAYAT
+# KONFIGURASI FILE RIWAYAT & SESSION STATE
 # ==========================================
 RIWAYAT_FILE = "riwayat_analisis.csv"
 
@@ -58,7 +58,7 @@ def simpan_riwayat(ringkasan):
             writer.writeheader()
         writer.writerow(ringkasan)
 
-def muat_riwayat():
+def muat_riwayat_dari_csv():
     """Baca semua riwayat dari CSV, urutkan terbaru di atas."""
     if not os.path.isfile(RIWAYAT_FILE):
         return []
@@ -68,6 +68,10 @@ def muat_riwayat():
     # Urutkan berdasarkan waktu (format string YYYY-MM-DD HH:MM)
     riwayat.sort(key=lambda x: x.get('Waktu', ''), reverse=True)
     return riwayat
+
+# Inisialisasi session state untuk riwayat (hanya sekali saat pertama kali)
+if "riwayat" not in st.session_state:
+    st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
 # 1. KONFIGURASI HALAMAN & STYLING
@@ -121,11 +125,10 @@ with st.sidebar:
             st.success("Cache dibersihkan!")
     st.markdown("---")
 
-    # --- RIWAYAT ANALISIS ---
+    # --- RIWAYAT ANALISIS (dari session_state) ---
     st.subheader("📜 Riwayat Analisis")
-    riwayat = muat_riwayat()
-    if riwayat:
-        for r in riwayat[:10]:
+    if st.session_state.riwayat:
+        for r in st.session_state.riwayat[:10]:
             with st.expander(f"{r['Saham']} - {r['Sinyal']} ({r['Waktu']})"):
                 st.markdown(f"**Harga:** Rp {r['Harga']}")
                 st.markdown(f"**Estimasi Besok:** Rp {r['Estimasi']}")
@@ -134,8 +137,8 @@ with st.sidebar:
                 st.markdown(f"**Sentimen:** {r['Sentimen']}")
                 st.markdown(f"**Rezim:** {r['Rezim']}")
                 st.markdown(f"**TP%:** {r['TP%']}% | **SL%:** {r['SL%']}%")
-        if len(riwayat) > 10:
-            st.caption(f"Menampilkan 10 dari {len(riwayat)} riwayat.")
+        if len(st.session_state.riwayat) > 10:
+            st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
         st.caption("Belum ada riwayat.")
 
@@ -143,8 +146,9 @@ with st.sidebar:
     if st.button("🗑️ Hapus Semua Riwayat"):
         if os.path.isfile(RIWAYAT_FILE):
             os.remove(RIWAYAT_FILE)
+        st.session_state.riwayat = []
         st.success("Riwayat dihapus!")
-        st.rerun()
+        # Tidak perlu rerun, sidebar langsung terupdate
 
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
@@ -466,7 +470,7 @@ if run_btn:
         rrr = tp_pct/sl_pct if sl_pct else 0
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
 
-        # --- SIMPAN KE RIWAYAT ---
+        # --- SIMPAN KE RIWAYAT (tanpa st.rerun) ---
         ringkasan = {
             "Waktu": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input,
@@ -481,8 +485,11 @@ if run_btn:
             "SL%": f"{sl_pct:.1f}"
         }
         simpan_riwayat(ringkasan)
-        # Refresh sidebar setelah simpan
-        st.rerun()
+        # Update session_state (tanpa rerun) -> langsung muncul di sidebar
+        st.session_state.riwayat.insert(0, ringkasan)
+        # Batasi hanya 50 riwayat di memori (opsional)
+        if len(st.session_state.riwayat) > 50:
+            st.session_state.riwayat.pop()
 
     # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
