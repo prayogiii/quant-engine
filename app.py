@@ -71,7 +71,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI DENGAN GEMINI (FALLBACK MODEL)
+# FUNGSI AI DENGAN GEMINI (DINAMIS MEMILIH MODEL YANG TERSEDIA)
 # ==========================================
 def analisis_ai_gemini(riwayat_data, api_key):
     if not api_key:
@@ -93,17 +93,32 @@ def analisis_ai_gemini(riwayat_data, api_key):
 
     try:
         genai.configure(api_key=api_key)
-        # Coba model yang paling mungkin tersedia
-        for model_name in ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash']:
+        
+        # Dapatkan daftar model yang mendukung generateContent
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                # Nama model biasanya 'models/...' jadi ambil bagian akhirnya saja
+                model_id = m.name.split('/')[-1]
+                available_models.append(model_id)
+        
+        if not available_models:
+            return None, "Tidak ada model Gemini yang mendukung generateContent. Periksa kembali API key Anda."
+        
+        # Coba setiap model yang tersedia, gunakan model pertama yang berhasil
+        last_error = ""
+        for model_id in available_models:
             try:
-                model = genai.GenerativeModel(model_name)
+                model = genai.GenerativeModel(model_id)
                 response = model.generate_content(prompt)
                 return response.text.strip(), None
-            except Exception:
+            except Exception as e:
+                last_error = str(e)
                 continue
-        return None, "Semua model Gemini gagal. Coba perbarui library: pip install --upgrade google-generativeai, atau cek daftar model dengan tombol di bawah."
+        
+        return None, f"Semua model yang tersedia gagal. Error terakhir: {last_error}"
     except Exception as e:
-        return None, f"Error: {str(e)}"
+        return None, f"Error saat menghubungi Gemini: {str(e)}"
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
@@ -172,7 +187,7 @@ with st.sidebar:
     else:
         st.caption("Belum ada riwayat.")
 
-    # --- AI ANALISIS & DEBUG ---
+    # --- AI ANALISIS ---
     st.markdown("---")
     st.subheader("🧠 AI Analisis Riwayat (Gemini)")
 
@@ -201,7 +216,7 @@ with st.sidebar:
 
     ai_btn = st.button("📊 Analisis Riwayat dengan AI", use_container_width=True)
 
-    # Tombol debug untuk cek model yang tersedia
+    # Tombol debug (tidak wajib, tapi bisa dipertahankan)
     if st.button("🔍 Cek Model Tersedia"):
         if not st.session_state.gemini_api_key:
             st.warning("Isi API key dulu.")
