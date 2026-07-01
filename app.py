@@ -51,7 +51,6 @@ warnings.filterwarnings("ignore")
 RIWAYAT_FILE = "riwayat_analisis.csv"
 
 def simpan_riwayat(ringkasan):
-    """Simpan satu baris ringkasan ke file CSV."""
     file_exists = os.path.isfile(RIWAYAT_FILE)
     with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
@@ -60,7 +59,6 @@ def simpan_riwayat(ringkasan):
         writer.writerow(ringkasan)
 
 def muat_riwayat_dari_csv():
-    """Baca semua riwayat dari CSV, urutkan terbaru di atas."""
     if not os.path.isfile(RIWAYAT_FILE):
         return []
     with open(RIWAYAT_FILE, mode='r', encoding='utf-8') as f:
@@ -73,16 +71,15 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI DENGAN GEMINI (DIPERBAIKI)
+# FUNGSI AI DENGAN GEMINI (FALLBACK MODEL)
 # ==========================================
 def analisis_ai_gemini(riwayat_data, api_key):
-    """Kirim riwayat ke Gemini dan kembalikan insight."""
     if not api_key:
         return None, "API key belum diisi."
     if not riwayat_data:
         return None, "Belum ada riwayat untuk dianalisis."
 
-    prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
+    prompt = "Berikut adalah riwayat analisis saham:\n\n"
     for r in riwayat_data[:20]:
         prompt += (
             f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
@@ -90,23 +87,26 @@ def analisis_ai_gemini(riwayat_data, api_key):
             f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
         )
     prompt += (
-        "\nBerdasarkan data di atas, berikan analisis ringkas (dalam Bahasa Indonesia):\n"
-        "- Pola sinyal yang sering muncul\n"
-        "- Saham dengan peluang terbaik menurut data\n"
-        "- Rekomendasi perbaikan strategi\n"
-        "- Insight tambahan yang berguna untuk trader"
+        "\nBerdasarkan data, berikan analisis ringkas (Bahasa Indonesia):\n"
+        "- Pola sinyal\n- Saham terbaik\n- Rekomendasi strategi\n- Insight tambahan"
     )
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text.strip(), None
+        # Coba model yang paling mungkin tersedia
+        for model_name in ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash']:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                return response.text.strip(), None
+            except Exception:
+                continue
+        return None, "Semua model Gemini gagal. Coba perbarui library: pip install --upgrade google-generativeai, atau cek daftar model dengan tombol di bawah."
     except Exception as e:
         return None, f"Error: {str(e)}"
 
 # ==========================================
-# 1. KONFIGURASI HALAMAN & STYLING
+# KONFIGURASI HALAMAN & STYLING
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
@@ -118,7 +118,6 @@ st.markdown("""
     .stButton>button { width: 100%; background-color: #1f2937; color: white; border: 1px solid #374151; }
     .stButton>button:hover { background-color: #374151; border-color: #00ffcc; }
     h1, h2, h3 { color: #f3f4f6; }
-    div[data-testid="InputInstructions"] { display: none !important; }
     .translated { color: #cbd5e1; font-size: 13px; }
     .source { color: #6b7280; font-size: 11px; }
     .summary-card {
@@ -134,7 +133,6 @@ st.markdown("""
     .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
-    .sidebar .sidebar-content { background-color: #0f1116; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -174,7 +172,7 @@ with st.sidebar:
     else:
         st.caption("Belum ada riwayat.")
 
-    # --- AI ANALISIS RIWAYAT (GEMINI) ---
+    # --- AI ANALISIS & DEBUG ---
     st.markdown("---")
     st.subheader("🧠 AI Analisis Riwayat (Gemini)")
 
@@ -195,13 +193,26 @@ with st.sidebar:
         "Gemini API Key",
         type="password",
         value=st.session_state.gemini_api_key,
-        placeholder="AIza... (isi manual atau set di secrets)",
-        help="Kunci API Gemini. Disimpan otomatis jika ada di secrets.toml."
+        placeholder="AIza...",
+        help="Kunci API Gemini. Disimpan di secrets atau env."
     )
     if api_key:
         st.session_state.gemini_api_key = api_key
 
     ai_btn = st.button("📊 Analisis Riwayat dengan AI", use_container_width=True)
+
+    # Tombol debug untuk cek model yang tersedia
+    if st.button("🔍 Cek Model Tersedia"):
+        if not st.session_state.gemini_api_key:
+            st.warning("Isi API key dulu.")
+        else:
+            try:
+                genai.configure(api_key=st.session_state.gemini_api_key)
+                models = genai.list_models()
+                available = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
+                st.write("Model yang tersedia:", available)
+            except Exception as e:
+                st.error(f"Gagal mendapatkan daftar model: {e}")
 
     if st.button("🗑️ Hapus Semua Riwayat"):
         if os.path.isfile(RIWAYAT_FILE):
@@ -212,7 +223,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
 
-# ==================== FUNGSI DATA & INDIKATOR ====================
+# ==================== FUNGSI DATA & INDIKATOR (tidak diubah) ====================
 @st.cache_data(ttl=3600)
 def load_stock_data(ticker):
     df = yf.download(ticker, period="2y")
@@ -319,7 +330,7 @@ REGIME_INFO = {
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
 
-# ==================== PROSES ANALISIS ====================
+# ==================== PROSES ANALISIS (tidak diubah) ====================
 if run_btn:
     if not ticker_input:
         st.warning("⚠️ Kode saham tidak boleh kosong!")
@@ -536,6 +547,7 @@ if run_btn:
         if len(st.session_state.riwayat) > 50:
             st.session_state.riwayat.pop()
 
+    # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest Terintegrasi + Grafik Interaktif + Analisis Fundamental Saham.")
     st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
