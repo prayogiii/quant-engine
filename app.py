@@ -92,14 +92,13 @@ def load_ihsg_data():
         df.columns = df.columns.get_level_values(0)
     return df
 
-# ==================== PERBAIKAN AKURASI UTILITIES & INDICATORS ====================
+# ==================== UTILITIES & INDICATORS ====================
 def compute_adx_series(df, period=14):
     high, low, close = df['High'], df['Low'], df['Close']
     
     up = high.diff()
     down = -low.diff()
     
-    # AKURASI: Implementasi Kondisi Eksklusif J. Welles Wilder untuk DM
     plus_dm = np.where((up > down) & (up > 0), up, 0.0)
     minus_dm = np.where((down > up) & (down > 0), down, 0.0)
     
@@ -338,11 +337,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         res20 = float(df['High'].iloc[-21:-1].max())
         breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-        # AKURASI: Perbaikan Logika Sinyal tanpa Kontradiksi Regime
+        # GENERATE SIGNALS
         def generate_signals_vectorized(dataframe, mom_th, z_th):
             score = pd.Series(0, index=dataframe.index)
-            
-            # Tren Utama (Trend-Following)
             is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
             score += is_uptrend.astype(int) * 2
             score += (dataframe['Mom3D'] > mom_th).astype(int)
@@ -354,16 +351,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             sig_series[score >= 2] = "⚡ BUY (TACTICAL)"
             sig_series[score >= 3] = "🔥 STRONG BUY"
             
-            # Koreksi Mean-Reversion: Hanya deteksi oversold saat fase bottoming/sideways (bukan panic sell berlanjut)
             is_oversold = (dataframe['ZScore'] < z_th) & (dataframe['Close'] < dataframe['EMA20'])
             sig_series[is_oversold] = "⚡ BUY (TACTICAL)"
-            
             return sig_series
 
         df['Signal'] = generate_signals_vectorized(df, mom_median_th, z_oversold_th)
         signal = df['Signal'].iloc[-1]
 
-        # AKURASI: Pembenahan Menjadi Stateful Trade-Driven Backtest Engine
+        # BACKTEST STATEFUL TRACKING
         backtest_periods = 126
         df_back = df.iloc[-backtest_periods:].copy()
         trades = []
@@ -379,7 +374,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                     in_position = True
                     entry_price = current_close
             else:
-                # Kondisi Keluar Posisi: Sinyal berubah ke AVOID/HOLD atau batas akhir data tercapai
                 if "AVOID" in current_sig or "HOLD" in current_sig or i == len(df_back) - 1:
                     exit_price = current_close
                     trade_return = (exit_price - entry_price) / entry_price
@@ -399,13 +393,12 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         else:
             win_bt, pf_bt, avg_bt, max_dd_bt, sharpe_bt, trades_bt = 0, 0, 0, 0, 0, 0
 
-        # AKURASI: Sinkronisasi Metrik Kelly Berbasis Data Riil Hasil Backtest Strategi
+        # RISK METRICS & KELLY ALLOCATION
         roll_max_th = df_thresh['Close'].cummax()
         drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
         max_dd = float(drawdown_th.min() * 100)
         max_dd_30 = float(drawdown_th.tail(30).min() * 100) if len(drawdown_th) >= 30 else max_dd
         
-        # Hitung formula Kelly murni berdasarkan performa perdagangan indikator
         if trades_bt >= 2:
             win_r = win_bt
             avg_g = np.mean(profit_trades) if len(profit_trades) > 0 else 0.01
@@ -413,7 +406,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
             wl = avg_g / avg_l if avg_l > 0 else 1
             kelly_raw = win_r - (1 - win_r) / wl
         else:
-            # Fallback statistik murni jika tidak ada riwayat perdagangan di sistem backtest
             win_r = len(returns_thresh[returns_thresh > 0]) / len(returns_thresh)
             avg_g = returns_thresh[returns_thresh > 0].mean() if win_r > 0 else 0.01
             avg_l = abs(returns_thresh[returns_thresh < 0].mean()) if len(returns_thresh[returns_thresh < 0]) > 0 else 0.01
@@ -423,8 +415,6 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         ret_skew = float(skew(returns_thresh))
         ret_kurt = float(kurtosis(returns_thresh, fisher=True))
         kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
-        
-        # Fraksional Kelly yang disesuaikan dengan profil deviasi risiko instrumen keuangan
         kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1.0) * kurt_penalty))
 
         # MONTE CARLO PROYEKSI MAJU (OU PROCESS)
@@ -516,13 +506,14 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.write(f"Kondisi Breakout 20 Hari: **{breakout}**")
         st.divider()
 
-        # SECTION SIGNAL & EXPANDING BACKTEST
+        # SECTION SIGNAL & EXPANDING BACKTEST (MODIFIKASI: Ditambahkan Stop Loss Target di t5)
         st.header("🔮 Sinyal Kuantitatif & Hasil Backtest Realistis (6 Bulan)")
-        t1, t2, t3, t4 = st.columns(4)
+        t1, t2, t3, t4, t5 = st.columns(5)
         t1.metric("Sinyal Eksekusi", signal)
         t2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",", "."), f"Rentang 50%: {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
         t3.metric("Wilayah Entry Ideal", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
         t4.metric("Take Profit Target", f"Rp {r1:,.0f}".replace(",", "."))
+        t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f}".replace(",", "."))
         
         st.markdown("**Hasil Pengujian Algoritma (Stateful Tracking Backtest 126 Hari):**")
         b1, b2, b3, b4, b5, b6 = st.columns(6)
@@ -576,9 +567,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.header("📋 Ringkasan Eksekutif & Rekomendasi")
         
         if "STRONG BUY" in signal:
-            action_color, action_icon, action_text = "#10b981", "🟢", f"Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Masuk secara berkala hingga batas maksimal {kelly_adj*100:.1f}% dari portfolio."
+            action_color, action_icon, action_text = "#10b981", "🟢", f"Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Masuk secara berkala hingga batas maksimal {kelly_adj*100:.1f}% dari portfolio, dengan pembatasan risiko ketat di area Stop Loss Rp {s2:,.0f}."
         elif "BUY" in signal:
-            action_color, action_icon, action_text = "#f59e0b", "🟡", "Sinyal beli taktis terdeteksi secara parsial. Anda bisa melakukan buy-on-weakness di dekat area Support 1."
+            action_color, action_icon, action_text = "#f59e0b", "🟡", f"Sinyal beli taktis terdeteksi secara parsial. Anda bisa melakukan buy-on-weakness di dekat area Support 1, batasi risiko jika harga menembus Rp {s2:,.0f}."
         elif "HOLD" in signal:
             action_color, action_icon, action_text = "#3b82f6", "🔵", "Pasar bergerak konsolidasi tanpa arah yang dominan. Pertimbangkan Hold posisi yang ada dan batasi porsi penambahan modal."
         else:
@@ -608,6 +599,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
 
 
