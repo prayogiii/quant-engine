@@ -506,14 +506,18 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.write(f"Kondisi Breakout 20 Hari: **{breakout}**")
         st.divider()
 
-        # SECTION SIGNAL & EXPANDING BACKTEST (MODIFIKASI: Ditambahkan Stop Loss Target di t5)
+        # HITUNG PERSENTASE DINAMIS DARI HARGA SEKARANG (ENTRY PROXY)
+        tp_pct = ((r1 - harga_terakhir) / harga_terakhir) * 100 if harga_terakhir > 0 else 0
+        sl_pct = ((harga_terakhir - s2) / harga_terakhir) * 100 if harga_terakhir > 0 else 0
+
+        # SECTION SIGNAL & EXPANDING BACKTEST
         st.header("🔮 Sinyal Kuantitatif & Hasil Backtest Realistis (6 Bulan)")
         t1, t2, t3, t4, t5 = st.columns(5)
         t1.metric("Sinyal Eksekusi", signal)
         t2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",", "."), f"Rentang 50%: {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
         t3.metric("Wilayah Entry Ideal", f"Rp {s1:,.0f} - {pp:,.0f}".replace(",", "."))
-        t4.metric("Take Profit Target", f"Rp {r1:,.0f}".replace(",", "."))
-        t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f}".replace(",", "."))
+        t4.metric("Take Profit Target", f"Rp {r1:,.0f}".replace(",", "."), f"+{tp_pct:.1f}% Potensi")
+        t5.metric("Stop Loss Target (S2)", f"Rp {s2:,.0f}".replace(",", "."), f"-{sl_pct:.1f}% Risk")
         
         st.markdown("**Hasil Pengujian Algoritma (Stateful Tracking Backtest 126 Hari):**")
         b1, b2, b3, b4, b5, b6 = st.columns(6)
@@ -567,9 +571,9 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
         st.header("📋 Ringkasan Eksekutif & Rekomendasi")
         
         if "STRONG BUY" in signal:
-            action_color, action_icon, action_text = "#10b981", "🟢", f"Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Masuk secara berkala hingga batas maksimal {kelly_adj*100:.1f}% dari portfolio, dengan pembatasan risiko ketat di area Stop Loss Rp {s2:,.0f}."
+            action_color, action_icon, action_text = "#10b981", "🟢", f"Algoritma mendeteksi penguatan momentum penuh dengan konfirmasi volume tinggi. Masuk secara berkala hingga batas maksimal {kelly_adj*100:.1f}% dari portfolio, dengan pembatasan risiko ketat di area Stop Loss Rp {s2:,.0f} (-{sl_pct:.1f}%)."
         elif "BUY" in signal:
-            action_color, action_icon, action_text = "#f59e0b", "🟡", f"Sinyal beli taktis terdeteksi secara parsial. Anda bisa melakukan buy-on-weakness di dekat area Support 1, batasi risiko jika harga menembus Rp {s2:,.0f}."
+            action_color, action_icon, action_text = "#f59e0b", "🟡", f"Sinyal beli taktis terdeteksi secara parsial. Anda bisa melakukan buy-on-weakness di dekat area Support 1, batasi risiko jika harga menembus Rp {s2:,.0f} (-{sl_pct:.1f}%)."
         elif "HOLD" in signal:
             action_color, action_icon, action_text = "#3b82f6", "🔵", "Pasar bergerak konsolidasi tanpa arah yang dominan. Pertimbangkan Hold posisi yang ada dan batasi porsi penambahan modal."
         else:
@@ -599,6 +603,7 @@ if st.button("JALANKAN QUANT ENGINE PRO + BACKTEST"):
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
 
 
 
