@@ -8,3 +8,5 @@ deep-translator
 feedparser
 easyocr
 plotly
+google-generativeai
+python-dotenv
