@@ -10,7 +10,7 @@ import re
 import csv
 import os
 from datetime import datetime
-import google.generativeai as genai  # ← Ganti OpenAI dengan Gemini
+import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
 PLOTLY_AVAILABLE = True
@@ -69,12 +69,11 @@ def muat_riwayat_dari_csv():
     riwayat.sort(key=lambda x: x.get('Waktu', ''), reverse=True)
     return riwayat
 
-# Inisialisasi session state untuk riwayat
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI DENGAN GEMINI
+# FUNGSI AI DENGAN GEMINI (DIPERBAIKI)
 # ==========================================
 def analisis_ai_gemini(riwayat_data, api_key):
     """Kirim riwayat ke Gemini dan kembalikan insight."""
@@ -83,9 +82,8 @@ def analisis_ai_gemini(riwayat_data, api_key):
     if not riwayat_data:
         return None, "Belum ada riwayat untuk dianalisis."
 
-    # Bangun prompt
     prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
-    for r in riwayat_data[:20]:  # Maksimal 20 entri terakhir
+    for r in riwayat_data[:20]:
         prompt += (
             f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
             f"Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | "
@@ -101,9 +99,7 @@ def analisis_ai_gemini(riwayat_data, api_key):
 
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')   # Gratis (terbatas)
-        # atau
-        model = genai.GenerativeModel('gemini-1.5-pro')        
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         return response.text.strip(), None
     except Exception as e:
@@ -182,24 +178,19 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("🧠 AI Analisis Riwayat (Gemini)")
 
-    # Ambil API key dari secrets / env / session_state, dengan prioritas secrets
     def get_api_key():
-        # Coba dari secrets.toml
         try:
             return st.secrets["GEMINI_API_KEY"]
         except KeyError:
             pass
-        # Coba dari environment variable
         env_key = os.getenv("GEMINI_API_KEY")
         if env_key:
             return env_key
-        # Terakhir dari session_state (input manual)
         return st.session_state.get("gemini_api_key", "")
 
     if "gemini_api_key" not in st.session_state:
         st.session_state.gemini_api_key = get_api_key()
 
-    # Jika API key sudah ada dari secrets/env, tampilkan sebagai placeholder (tidak perlu diisi ulang)
     api_key = st.text_input(
         "Gemini API Key",
         type="password",
@@ -212,7 +203,6 @@ with st.sidebar:
 
     ai_btn = st.button("📊 Analisis Riwayat dengan AI", use_container_width=True)
 
-    # Tombol hapus riwayat
     if st.button("🗑️ Hapus Semua Riwayat"):
         if os.path.isfile(RIWAYAT_FILE):
             os.remove(RIWAYAT_FILE)
@@ -347,7 +337,6 @@ if run_btn:
             st.error("❌ Data historis kurang untuk analisa kuantitatif.")
             st.stop()
 
-        # Pre-compute indicators
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['ADX'] = compute_adx_series(df)
@@ -357,11 +346,9 @@ if run_btn:
         df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
         df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
 
-        # Fundamental
         try: ticker_info = yf.Ticker(ticker_input).info
         except: ticker_info = {}
 
-        # Berita & Sentimen
         news_pool = []
         translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
         translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
@@ -388,7 +375,6 @@ if run_btn:
             else: translated.append("")
         sentimen_status = "Positif 🟢" if avg_sentiment >= 0.05 else ("Negatif 🔴" if avg_sentiment <= -0.05 else "Netral ⚪")
 
-        # Threshold historis
         split_idx = max(126, len(df) - 126)
         df_thresh = df.iloc[:split_idx]
         returns_thresh = df_thresh['Close'].pct_change().dropna()
@@ -403,7 +389,6 @@ if run_btn:
                        bounds=[(2.1, 100), (-0.1, 0.1), (1e-6, None)], args=(returns_thresh,), method='L-BFGS-B')
         df_est, t_loc, t_scale = res.x if res.success else (5, returns_thresh.mean(), returns_thresh.std())
 
-        # Regime
         def get_regime_row(row):
             h, e20, e50, a, z, m = row['Close'], row['EMA20'], row['EMA50'], row['ADX'], row['ZScore'], row['Mom5D']
             if a > adx_threshold:
@@ -423,7 +408,6 @@ if run_btn:
         regime, ihsg_cond = get_regime_row(df.iloc[-1])
         adx = df['ADX'].iloc[-1]
 
-        # Beta
         try:
             ihsg = load_ihsg_data()
             ihsg_ret = ihsg['Close'].pct_change().dropna()
@@ -434,7 +418,6 @@ if run_btn:
             else: beta_ihsg = 1.0
         except: beta_ihsg = 1.0
 
-        # Pivot
         hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
         pp = (hi + lo + harga_terakhir) / 3
         r1, s1 = 2*pp - lo, 2*pp - hi
@@ -442,7 +425,6 @@ if run_btn:
         res20 = float(df['High'].iloc[-21:-1].max())
         breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-        # Sinyal
         def generate_signals_vectorized(dataframe, mom_th):
             score = pd.Series(0, index=dataframe.index)
             is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
@@ -462,7 +444,6 @@ if run_btn:
         df['Signal'] = generate_signals_vectorized(df, mom_median_th)
         signal = df['Signal'].iloc[-1]
 
-        # Backtest
         df_back = df.iloc[-126:].copy()
         trades, daily_returns = [], []
         in_position, entry_price = False, 0.0
@@ -494,7 +475,6 @@ if run_btn:
         else:
             win_bt = pf_bt = avg_bt = max_dd_bt = sharpe_bt = trades_bt = 0
 
-        # Kelly
         roll_max_th = df_thresh['Close'].cummax()
         drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
         max_dd = float(drawdown_th.min() * 100)
@@ -512,7 +492,6 @@ if run_btn:
         kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
         kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
 
-        # Monte Carlo
         n_sim, n_days = 2000, 30
         latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
         scale_corrected = latest_vol / np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
@@ -539,7 +518,6 @@ if run_btn:
         rrr = tp_pct/sl_pct if sl_pct else 0
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
 
-        # --- SIMPAN KE RIWAYAT ---
         ringkasan = {
             "Waktu": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input,
@@ -558,12 +536,10 @@ if run_btn:
         if len(st.session_state.riwayat) > 50:
             st.session_state.riwayat.pop()
 
-    # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest Terintegrasi + Grafik Interaktif + Analisis Fundamental Saham.")
     st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
 
-    # --- HEADER METRICS ---
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"**Sinyal Eksekusi:** {signal}")
@@ -572,7 +548,6 @@ if run_btn:
     with col3:
         st.markdown(f"**Prob. Naik Besok:** {prob_bull:.1f}%")
 
-    # --- CHART ---
     if PLOTLY_AVAILABLE:
         st.header("📈 Chart Harga & Pemetaan Histori Sinyal")
         fig = go.Figure()
@@ -590,7 +565,6 @@ if run_btn:
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- RINGKASAN EKSEKUTIF (CARD EXISTING) ---
     st.markdown("---")
     st.header("📋 Ringkasan Eksekutif & Rekomendasi")
 
@@ -638,9 +612,7 @@ if run_btn:
         html_action = f'<div class="action-card" style="border-left-color: {action_color};"><div class="section-title">{action_icon} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size: 15px; margin-top: 8px; line-height: 1.6;">{action_text}</div><hr style="border-color: #334155; margin: 15px 0;"><div style="color: #94a3b8; font-size: 13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>'
         st.markdown(html_action, unsafe_allow_html=True)
 
-    # --- DETAIL EXPANDER ---
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
-        # Berita
         st.subheader("📰 Sentimen Berita Terbobot")
         c1, c2 = st.columns([1, 2])
         c1.metric("Sentimen Skor", f"{avg_sentiment:.2f}", sentimen_status)
@@ -653,7 +625,6 @@ if run_btn:
                 if t and t != h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
         st.divider()
 
-        # Regime
         st.subheader("🧬 Regime Pasar & Volatilitas")
         m1, m2, m3 = st.columns(3)
         m1.metric("Market Regime", regime)
@@ -662,7 +633,6 @@ if run_btn:
         st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime, 'Regime tidak terdefinisi.')}")
         st.divider()
 
-        # Fundamental
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
             def clean_val(val, fmt="{:.2f}"):
@@ -673,7 +643,6 @@ if run_btn:
             roe = ticker_info.get('returnOnEquity')
             de = ticker_info.get('debtToEquity')
 
-            # Tabel
             table_html = f"""
             <table class='fundamental-table'>
                 <tr><td>Market Cap</td><td>{clean_val(mc, "{:,.0f} IDR")}</td></tr>
@@ -685,70 +654,42 @@ if run_btn:
             """
             st.markdown(table_html, unsafe_allow_html=True)
 
-            # --- Interpretasi Metrik Fundamental ---
             interpretation_items = []
-
-            # Market Cap
             if mc is not None:
-                if mc >= 1e13:
-                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
-                elif mc >= 1e12:
-                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
-                elif mc >= 1e10:
-                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong menengah (Mid Cap)."
-                else:
-                    mc_text = f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
-            else:
-                mc_text = "Market Cap tidak tersedia."
+                if mc >= 1e13: mc_text = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
+                elif mc >= 1e12: mc_text = f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
+                elif mc >= 1e10: mc_text = f"Market Cap Rp {mc:,.0f} tergolong menengah (Mid Cap)."
+                else: mc_text = f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
+            else: mc_text = "Market Cap tidak tersedia."
             interpretation_items.append(f"<li><b>Market Cap:</b> {mc_text}</li>")
 
-            # PER
             if per is not None:
-                if per < 10:
-                    per_text = f"PER {per:.2f}x tergolong rendah (potensi undervalue)."
-                elif per < 20:
-                    per_text = f"PER {per:.2f}x moderat."
-                else:
-                    per_text = f"PER {per:.2f}x tergolong tinggi (premium)."
-            else:
-                per_text = "PER tidak tersedia."
+                if per < 10: per_text = f"PER {per:.2f}x tergolong rendah (potensi undervalue)."
+                elif per < 20: per_text = f"PER {per:.2f}x moderat."
+                else: per_text = f"PER {per:.2f}x tergolong tinggi (premium)."
+            else: per_text = "PER tidak tersedia."
             interpretation_items.append(f"<li><b>PER:</b> {per_text}</li>")
 
-            # PBV
             if pbv is not None:
-                if pbv < 1:
-                    pbv_text = f"PBV {pbv:.2f}x di bawah 1 (di bawah nilai buku, bisa undervalue)."
-                elif pbv < 3:
-                    pbv_text = f"PBV {pbv:.2f}x moderat."
-                else:
-                    pbv_text = f"PBV {pbv:.2f}x tinggi (premium)."
-            else:
-                pbv_text = "PBV tidak tersedia."
+                if pbv < 1: pbv_text = f"PBV {pbv:.2f}x di bawah 1 (di bawah nilai buku, bisa undervalue)."
+                elif pbv < 3: pbv_text = f"PBV {pbv:.2f}x moderat."
+                else: pbv_text = f"PBV {pbv:.2f}x tinggi (premium)."
+            else: pbv_text = "PBV tidak tersedia."
             interpretation_items.append(f"<li><b>PBV:</b> {pbv_text}</li>")
 
-            # ROE
             if roe is not None:
                 roe_pct = roe * 100
-                if roe_pct > 20:
-                    roe_text = f"ROE {roe_pct:.1f}% sangat baik (profitabilitas tinggi)."
-                elif roe_pct > 10:
-                    roe_text = f"ROE {roe_pct:.1f}% cukup baik."
-                else:
-                    roe_text = f"ROE {roe_pct:.1f}% rendah."
-            else:
-                roe_text = "ROE tidak tersedia."
+                if roe_pct > 20: roe_text = f"ROE {roe_pct:.1f}% sangat baik (profitabilitas tinggi)."
+                elif roe_pct > 10: roe_text = f"ROE {roe_pct:.1f}% cukup baik."
+                else: roe_text = f"ROE {roe_pct:.1f}% rendah."
+            else: roe_text = "ROE tidak tersedia."
             interpretation_items.append(f"<li><b>ROE:</b> {roe_text}</li>")
 
-            # D/E
             if de is not None:
-                if de > 1:
-                    de_text = f"D/E {de:.2f} tinggi (leverage tinggi, risiko lebih besar)."
-                elif de > 0.5:
-                    de_text = f"D/E {de:.2f} moderat."
-                else:
-                    de_text = f"D/E {de:.2f} rendah (konservatif)."
-            else:
-                de_text = "D/E tidak tersedia."
+                if de > 1: de_text = f"D/E {de:.2f} tinggi (leverage tinggi, risiko lebih besar)."
+                elif de > 0.5: de_text = f"D/E {de:.2f} moderat."
+                else: de_text = f"D/E {de:.2f} rendah (konservatif)."
+            else: de_text = "D/E tidak tersedia."
             interpretation_items.append(f"<li><b>D/E:</b> {de_text}</li>")
 
             interpretation_html = f"""
@@ -764,7 +705,6 @@ if run_btn:
             st.warning("⚠️ Data fundamental finansial tidak tersedia.")
         st.divider()
 
-        # Pivot
         st.subheader("🎯 Target Pivot & Support/Resistance")
         p1, p2, p3, p4, p5 = st.columns(5)
         p1.metric("Resistance 2 (R2)", f"Rp {r2:,.0f}".replace(",", "."))
@@ -775,7 +715,6 @@ if run_btn:
         st.write(f"Kondisi Breakout 20 Hari: **{breakout}**")
         st.divider()
 
-        # Backtest & Alokasi
         st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest Realistis (6 Bulan)")
         t1, t2, t3, t4, t5 = st.columns(5)
         t1.metric("Sinyal Eksekusi", signal)
