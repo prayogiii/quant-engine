@@ -105,7 +105,8 @@ def analisis_ai_gemini(riwayat_data, api_key):
         # atau
         model = genai.GenerativeModel('gemini-1.5-pro')
         # atau
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')        response = model.generate_content(prompt)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')        
+        response = model.generate_content(prompt)
         return response.text.strip(), None
     except Exception as e:
         return None, f"Error: {str(e)}"
