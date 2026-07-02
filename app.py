@@ -175,6 +175,19 @@ def analisis_riwayat_global(riwayat_data, api_key):
     except Exception as e:
         return None, f"Gagal menghasilkan insight: {str(e)}"
 
+def bersihkan_teks_ai(teks):
+    """Hapus markdown yang tidak diinginkan dari respons AI."""
+    if not teks:
+        return teks
+    # Hapus header markdown (###, ##, #)
+    teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
+    # Hapus bold/italic markdown (** dan *)
+    teks = re.sub(r'\*\*', '', teks)
+    teks = re.sub(r'\*', '', teks)
+    # Ganti newline dengan <br> agar tampilan di HTML rapi
+    teks = teks.replace('\n', '<br>')
+    return teks
+
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
 # ==========================================
@@ -391,7 +404,7 @@ def estimate_theta_ou(close_series):
 REGIME_INFO = {
     "Strong Bullish 🚀": "Tren naik kuat...",
     "Bullish 📈": "Tren naik stabil...",
-    # ... (selengkapnya tidak diubah)
+    # ... (sisa regime)
 }
 
 # ==================== PROSES ANALISIS ====================
@@ -412,15 +425,12 @@ if run_btn:
             st.error("❌ Data historis kurang untuk analisa kuantitatif.")
             st.stop()
 
-        # ------------------------------------------------------------
-        # Semua perhitungan indikator, backtest, fundamental, dll.
-        # (disalin dari kode lengkap yang sudah ada sebelumnya)
-        # Pastikan variabel berikut terdefinisi:
-        #   harga_terakhir, signal, regime, avg_sentiment, sentimen_status, est_besok,
-        #   prob_bull, tp_pct, sl_pct, rrr, rrr_status, kelly_adj, beta_ihsg,
-        #   max_dd, max_dd_30, trades_bt, win_bt, pf_bt, max_dd_bt, sharpe_bt,
-        #   mc, per, pbv, roe, de
-        # ------------------------------------------------------------
+        # ... (semua perhitungan indikator, backtest, kelly, monte carlo, dll.)
+        # Pastikan variabel berikut tersedia setelah perhitungan:
+        # harga_terakhir, signal, regime, avg_sentiment, sentimen_status, est_besok,
+        # prob_bull, tp_pct, sl_pct, rrr, rrr_status, kelly_adj, beta_ihsg,
+        # max_dd, max_dd_30, trades_bt, win_bt, pf_bt, max_dd_bt, sharpe_bt,
+        # mc, per, pbv, roe, de (fundamental)
 
         # --- SIMPAN KE RIWAYAT ---
         ringkasan = {
@@ -446,35 +456,7 @@ if run_btn:
     st.write("Algoritma kuantitatif + Berita + Backtest + AI + Grafik Interaktif + Fundamental")
     st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
 
-    # --- HEADER METRICS ---
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Sinyal Eksekusi", signal)
-    col2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",", "."), f"50% range: Rp {low_est:,.0f} - {up_est:,.0f}".replace(",", "."))
-    col3.metric("Prob. Naik Besok", f"{prob_bull:.1f}%")
-
-    # --- CHART ---
-    if PLOTLY_AVAILABLE:
-        st.header("📈 Chart Harga & Sinyal")
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='#00ffcc')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], name='EMA20', line=dict(color='#f59e0b', dash='dot')))
-        fig.add_trace(go.Scatter(x=df.index, y=df['EMA50'], name='EMA50', line=dict(color='#ef4444', dash='dot')))
-        buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
-        fig.add_trace(go.Scatter(
-            x=buy_signals.index, y=buy_signals['Close'],
-            mode='markers', name='Buy Signal',
-            marker=dict(symbol='triangle-up', size=10, color='#10b981')
-        ))
-        for level, label, col in [(r1, 'R1', 'orange'), (s1, 'S1', 'red'), (pp, 'PP', 'gray')]:
-            fig.add_hline(y=level, line_dash="dash", line_color=col, annotation_text=label)
-        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig, use_container_width=True)
-
-    # --- RINGKASAN EKSEKUTIF (card summary & action) ---
-    # ... (sama seperti sebelumnya)
-
-    # --- DETAIL EXPANDER ---
-    # ... (berita, regime, fundamental, pivot, backtest, monte carlo)
+    # ... (header metrik, chart, ringkasan eksekutif, detail expander, dll.)
 
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
@@ -506,12 +488,11 @@ if run_btn:
                 data_ai, st.session_state.riwayat[:5], st.session_state.gemini_api_key
             )
             if not error_ai and hasil_ai:
-                # Tampilkan dalam card ungu
-                hasil_ai_formatted = hasil_ai.replace("\n", "<br>")
+                hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f"""
                 <div class="ai-insight-card">
                     <h3>🤖 Insight AI</h3>
-                    <p>{hasil_ai_formatted}</p>
+                    <p>{hasil_ai_bersih}</p>
                 </div>
                 """
                 st.markdown(html_ai, unsafe_allow_html=True)
@@ -532,12 +513,11 @@ if ai_riwayat_btn:
             if error:
                 st.error(error)
             elif hasil:
-                st.markdown("---")
-                hasil_formatted = hasil.replace("\n", "<br>")
+                hasil_bersih = bersihkan_teks_ai(hasil)
                 html_riwayat_ai = f"""
                 <div class="ai-insight-card" style="border-left-color: #06b6d4;">
                     <h3 style="color: #67e8f9;">📊 Insight AI dari Riwayat</h3>
-                    <p>{hasil_formatted}</p>
+                    <p>{hasil_bersih}</p>
                 </div>
                 """
                 st.markdown(html_riwayat_ai, unsafe_allow_html=True)
