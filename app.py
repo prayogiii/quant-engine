@@ -80,7 +80,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI
+# FUNGSI AI GEMINI (DIPERBAIKI)
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -157,13 +157,7 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 
 {riwayat_text}
 
-Berdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
-- Makna sinyal dalam konteks saat ini
-- Kekuatan dan kelemahan saham
-- Risiko utama
-- Rekomendasi langkah selanjutnya (buy/hold/sell) dengan alasan singkat
-- Jika ada pola dari riwayat, sebutkan.
-Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
+Tulis analisis ringkas dalam BAHASA INDONESIA, 4 paragraf pendek, mengalir tanpa label paragraf, bullet poin, atau header. Jangan gunakan kata 'Paragraph' atau 'Paragraf'. Jangan ulangi instruksi ini dalam jawaban. Fokus pada makna sinyal, kekuatan/kelemahan, risiko, dan rekomendasi.
 """
     try:
         response = model.generate_content(prompt)
@@ -186,12 +180,12 @@ def analisis_riwayat_global(riwayat_data, api_key):
             f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
         )
     prompt += (
-        "\n\nTULIS HANYA ANALISIS ANDA DALAM BENTUK PARAGRAF NARATIF YANG MENGALIR. "
-        "JANGAN GUNAKAN BULLET POIN, HEADER, ATAU FORMAT LAINNYA. "
-        "JANGAN MENYERTAKAN KATA 'Format:', 'Columns:', 'Timestamp', 'Total entries', 'Timeframe', "
-        "ATAU NOTASI MATEMATIKA SEPERTI $. "
-        "Sampaikan analisis Anda dalam 4-5 paragraf pendek yang mencakup: "
-        "pola sinyal yang sering muncul, saham dengan peluang terbaik, rekomendasi perbaikan strategi, dan insight tambahan."
+        "\n\nTULIS HANYA ANALISIS NARATIF DALAM BAHASA INDONESIA, 4-5 PARAGRAF PENDEK. "
+        "JANGAN GUNAKAN BULLET POIN, HEADER, ATAU FORMAT LAIN. "
+        "JANGAN MENYEBUTKAN KATA 'Constraint', 'Content Requirements', 'Paragraph', 'Drafting', 'Self-Correction', "
+        "'Format:', 'Columns:', 'Timestamp', 'Total entries', 'Timeframe', ATAU NOTASI MATEMATIKA $. "
+        "JANGAN MENULIS ULANG INSTRUKSI INI DALAM JAWABAN. "
+        "FOKUS PADA: pola sinyal, saham terbaik, perbaikan strategi, insight tambahan."
     )
     try:
         response = model.generate_content(prompt)
@@ -209,22 +203,39 @@ def bersihkan_teks_ai(teks):
     teks = re.sub(r'\*', '', teks)
     # Hapus tanda $ (LaTeX)
     teks = re.sub(r'\$', '', teks)
-    # Hapus baris yang mengandung kata-kunci tidak diinginkan
+    # Hapus baris yang mengandung kata-kunci instruksional atau label data
     baris = teks.split('\n')
     baris_bersih = []
     for b in baris:
         b_lower = b.lower()
-        # Lewati baris yang hanya berisi "-" atau "*" (bullet kosong)
+        # Lewati baris kosong atau hanya bullet
         if b.strip() in ['-', '*', '']:
             continue
-        # Hapus baris yang mengandung kata kunci
-        if any(kata in b_lower for kata in ['format:', 'columns:', 'timestamp', 'total entries:', 'timeframe:']):
+        # Kata kunci yang menandakan meta-text atau label data
+        if any(kata in b_lower for kata in [
+            'constraint', 'content requirements', 'paragraph', 'drafting',
+            'self-correction', 'format:', 'columns:', 'timestamp', 'total entries:',
+            'timeframe:', 'ticker:', 'last price:', 'signal:', 'market regime:',
+            'news sentiment:', 'prob. up tomorrow:', 'tp (r1):', 'sl (s2):',
+            'estimated price tomorrow:', 'beta:', 'win rate:', 'profit factor:',
+            'max drawdown:', 'kelly allocation:', 'fundamentals:',
+            'signal meaning:', 'strengths/weakness:', 'risks:', 'recommendation:',
+            'patterns/history:', 'pola sinyal:', 'peluang terbaik:', 'perbaikan strategi:',
+            'insight tambahan:', 'sinyal & konteks', 'kekuatan & kelemahan',
+            'risiko utama', 'rekomendasi:', 'analisis ringkas', 'tulis analisis',
+            'anda adalah asisten', 'data analisis', 'harga terakhir:',
+            'sinyal saat ini:', 'rezim pasar:', 'sentimen berita:',
+            'risk/reward ratio', 'probabilitas naik', 'take profit', 'stop loss',
+            'estimasi harga besok', 'beta terhadap ihsg', 'win rate backtest',
+            'profit factor backtest', 'max drawdown backtest', 'alokasi kelly maks',
+            'fundamental: market cap', 'ringkasan analisis sebelumnya',
+        ]):
             continue
-        # Hapus tanda bullet di awal baris (misal "- " atau "* ")
+        # Hapus tanda bullet di awal baris
         b = re.sub(r'^[\s]*[-*]\s+', '', b)
-        baris_bersih.append(b)
+        if b.strip():
+            baris_bersih.append(b)
     teks = '\n'.join(baris_bersih)
-    # Ganti newline dengan <br> untuk HTML
     teks = teks.replace('\n', '<br>')
     return teks
 
