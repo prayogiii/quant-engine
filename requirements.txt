@@ -10,3 +10,4 @@ easyocr
 plotly
 google-generativeai
 python-dotenv
+pytz
