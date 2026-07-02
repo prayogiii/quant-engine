@@ -877,7 +877,8 @@ if run_btn:
                 "Fundamental_ROE": f"{roe*100:.1f}" if roe else "N/A",
                 "Fundamental_DE": f"{de:.2f}" if de else "N/A"
             }
-            riwayat_konteks = st.session_state.riwayat[:10]
+            # 🔥 FILTER RIWAYAT HANYA UNTUK SAHAM YANG SAMA
+            riwayat_konteks = [r for r in st.session_state.riwayat if r['Saham'] == ticker_input][:10]
             hasil_ai, error_ai = analisis_saham_dengan_ai(
                 data_ai, riwayat_konteks, st.session_state.gemini_api_key
             )
