@@ -102,14 +102,19 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     if error:
         return None, error
 
+    # Bangun konteks riwayat (10 terakhir) dengan insight AI jika ada
     riwayat_text = ""
     if riwayat:
         riwayat_text = "Riwayat analisis sebelumnya:\n"
-        for r in riwayat[:5]:
-            riwayat_text += (
-                f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
-                f"RRR: {r['RRR']} | Rezim: {r['Rezim']}\n"
-            )
+        for r in riwayat[:10]:
+            base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
+            # Tambahkan insight AI jika tersedia
+            ai_insight = r.get("AI_Insight", "").strip()
+            if ai_insight:
+                # Potong insight agar tidak terlalu panjang
+                short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
+                base += f" | AI Insight: {short_insight}"
+            riwayat_text += base + "\n"
     else:
         riwayat_text = "Belum ada riwayat sebelumnya."
 
@@ -176,15 +181,11 @@ def analisis_riwayat_global(riwayat_data, api_key):
         return None, f"Gagal menghasilkan insight: {str(e)}"
 
 def bersihkan_teks_ai(teks):
-    """Hapus markdown yang tidak diinginkan dari respons AI."""
     if not teks:
         return teks
-    # Hapus header markdown (###, ##, #)
     teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
-    # Hapus bold/italic markdown (** dan *)
     teks = re.sub(r'\*\*', '', teks)
     teks = re.sub(r'\*', '', teks)
-    # Ganti newline dengan <br> agar tampilan di HTML rapi
     teks = teks.replace('\n', '<br>')
     return teks
 
@@ -217,7 +218,6 @@ st.markdown("""
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
     
-    /* CARD AI BARU */
     .ai-insight-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
         border-radius: 16px;
@@ -269,6 +269,11 @@ with st.sidebar:
                 st.markdown(f"**Sentimen:** {r['Sentimen']}")
                 st.markdown(f"**Rezim:** {r['Rezim']}")
                 st.markdown(f"**TP%:** {r['TP%']}% | **SL%:** {r['SL%']}%")
+                # Tampilkan AI Insight jika ada
+                ai = r.get("AI_Insight", "").strip()
+                if ai:
+                    st.markdown("💬 **AI Insight:**")
+                    st.caption(ai[:200] + ("..." if len(ai) > 200 else ""))
         if len(st.session_state.riwayat) > 10:
             st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
@@ -404,7 +409,7 @@ def estimate_theta_ou(close_series):
 REGIME_INFO = {
     "Strong Bullish 🚀": "Tren naik kuat...",
     "Bullish 📈": "Tren naik stabil...",
-    # ... (sisa regime)
+    # ... (tidak diubah demi singkat)
 }
 
 # ==================== PROSES ANALISIS ====================
@@ -425,14 +430,17 @@ if run_btn:
             st.error("❌ Data historis kurang untuk analisa kuantitatif.")
             st.stop()
 
-        # ... (semua perhitungan indikator, backtest, kelly, monte carlo, dll.)
-        # Pastikan variabel berikut tersedia setelah perhitungan:
-        # harga_terakhir, signal, regime, avg_sentiment, sentimen_status, est_besok,
-        # prob_bull, tp_pct, sl_pct, rrr, rrr_status, kelly_adj, beta_ihsg,
-        # max_dd, max_dd_30, trades_bt, win_bt, pf_bt, max_dd_bt, sharpe_bt,
-        # mc, per, pbv, roe, de (fundamental)
+        # ------------------------------------------------------------
+        # Semua perhitungan indikator, backtest, fundamental, dll.
+        # (disalin dari kode lengkap yang sudah ada sebelumnya)
+        # Pastikan variabel berikut terdefinisi:
+        #   harga_terakhir, signal, regime, avg_sentiment, sentimen_status, est_besok,
+        #   prob_bull, tp_pct, sl_pct, rrr, rrr_status, kelly_adj, beta_ihsg,
+        #   max_dd, max_dd_30, trades_bt, win_bt, pf_bt, max_dd_bt, sharpe_bt,
+        #   mc, per, pbv, roe, de
+        # ------------------------------------------------------------
 
-        # --- SIMPAN KE RIWAYAT ---
+        # Siapkan ringkasan dengan field AI_Insight kosong dulu
         ringkasan = {
             "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input,
@@ -444,19 +452,18 @@ if run_btn:
             "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
             "Rezim": regime,
             "TP%": f"{tp_pct:.1f}",
-            "SL%": f"{sl_pct:.1f}"
+            "SL%": f"{sl_pct:.1f}",
+            "AI_Insight": ""  # akan diisi setelah AI selesai
         }
-        simpan_riwayat(ringkasan)
-        st.session_state.riwayat.insert(0, ringkasan)
-        if len(st.session_state.riwayat) > 50:
-            st.session_state.riwayat.pop()
+
+        # Jangan simpan dulu, tunggu AI selesai
 
     # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest + AI + Grafik Interaktif + Fundamental")
     st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
 
-    # ... (header metrik, chart, ringkasan eksekutif, detail expander, dll.)
+    # ... (header metrik, chart, ringkasan eksekutif, detail expander) ...
 
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
@@ -484,10 +491,14 @@ if run_btn:
                 "Fundamental_ROE": f"{roe*100:.1f}" if roe else "N/A",
                 "Fundamental_DE": f"{de:.2f}" if de else "N/A"
             }
+            # Gunakan 10 riwayat terakhir (sudah termasuk insight AI)
+            riwayat_konteks = st.session_state.riwayat[:10]
             hasil_ai, error_ai = analisis_saham_dengan_ai(
-                data_ai, st.session_state.riwayat[:5], st.session_state.gemini_api_key
+                data_ai, riwayat_konteks, st.session_state.gemini_api_key
             )
             if not error_ai and hasil_ai:
+                ringkasan["AI_Insight"] = hasil_ai  # simpan insight AI
+                # Tampilkan card AI
                 hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f"""
                 <div class="ai-insight-card">
@@ -496,10 +507,18 @@ if run_btn:
                 </div>
                 """
                 st.markdown(html_ai, unsafe_allow_html=True)
-            elif error_ai:
-                st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
+            else:
+                if error_ai:
+                    st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
+                # tetap simpan walaupun gagal (AI_Insight tetap "")
     else:
         st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
+
+    # Simpan riwayat setelah AI selesai (dengan atau tanpa insight)
+    simpan_riwayat(ringkasan)
+    st.session_state.riwayat.insert(0, ringkasan)
+    if len(st.session_state.riwayat) > 50:
+        st.session_state.riwayat.pop()
 
 # --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
