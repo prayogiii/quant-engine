@@ -186,9 +186,10 @@ def analisis_riwayat_global(riwayat_data, api_key):
             f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
         )
     prompt += (
-        "\nBerdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia) dalam bentuk NARASI yang mengalir, "
-        "TANPA bullet poin, TANPA header, TANPA kata 'Format:', 'Columns:', 'Timestamp', 'Total entries', 'Timeframe'. "
-        "JANGAN gunakan notasi $ atau LaTeX. "
+        "\n\nTULIS HANYA ANALISIS ANDA DALAM BENTUK PARAGRAF NARATIF YANG MENGALIR. "
+        "JANGAN GUNAKAN BULLET POIN, HEADER, ATAU FORMAT LAINNYA. "
+        "JANGAN MENYERTAKAN KATA 'Format:', 'Columns:', 'Timestamp', 'Total entries', 'Timeframe', "
+        "ATAU NOTASI MATEMATIKA SEPERTI $. "
         "Sampaikan analisis Anda dalam 4-5 paragraf pendek yang mencakup: "
         "pola sinyal yang sering muncul, saham dengan peluang terbaik, rekomendasi perbaikan strategi, dan insight tambahan."
     )
@@ -201,17 +202,29 @@ def analisis_riwayat_global(riwayat_data, api_key):
 def bersihkan_teks_ai(teks):
     if not teks:
         return teks
+    # Hapus header markdown
     teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
+    # Hapus bold/italic
     teks = re.sub(r'\*\*', '', teks)
     teks = re.sub(r'\*', '', teks)
+    # Hapus tanda $ (LaTeX)
     teks = re.sub(r'\$', '', teks)
+    # Hapus baris yang mengandung kata-kunci tidak diinginkan
     baris = teks.split('\n')
     baris_bersih = []
     for b in baris:
         b_lower = b.lower()
-        if not any(kata in b_lower for kata in ['format:', 'columns:', 'timestamp', 'total entries:', 'timeframe:']):
-            baris_bersih.append(b)
+        # Lewati baris yang hanya berisi "-" atau "*" (bullet kosong)
+        if b.strip() in ['-', '*', '']:
+            continue
+        # Hapus baris yang mengandung kata kunci
+        if any(kata in b_lower for kata in ['format:', 'columns:', 'timestamp', 'total entries:', 'timeframe:']):
+            continue
+        # Hapus tanda bullet di awal baris (misal "- " atau "* ")
+        b = re.sub(r'^[\s]*[-*]\s+', '', b)
+        baris_bersih.append(b)
     teks = '\n'.join(baris_bersih)
+    # Ganti newline dengan <br> untuk HTML
     teks = teks.replace('\n', '<br>')
     return teks
 
