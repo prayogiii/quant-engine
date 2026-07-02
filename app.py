@@ -80,7 +80,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI (DIPERBAIKI)
+# FUNGSI AI GEMINI (DIPERBAIKI & DIPERKUAT)
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -157,7 +157,7 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 
 {riwayat_text}
 
-Tulis analisis ringkas dalam BAHASA INDONESIA, 4 paragraf pendek, mengalir tanpa label paragraf, bullet poin, atau header. Jangan gunakan kata 'Paragraph' atau 'Paragraf'. Jangan ulangi instruksi ini dalam jawaban. Fokus pada makna sinyal, kekuatan/kelemahan, risiko, dan rekomendasi.
+Tulis analisis ringkas dalam BAHASA INDONESIA, 4 paragraf pendek, langsung ke inti. Jangan gunakan bullet poin atau header.
 """
     try:
         response = model.generate_content(prompt)
@@ -172,20 +172,16 @@ def analisis_riwayat_global(riwayat_data, api_key):
     if not riwayat_data:
         return None, "Belum ada riwayat."
 
-    prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
+    # Buat prompt super singkat, hanya data dan instruksi langsung
+    prompt = "Data riwayat:\n"
     for r in riwayat_data[:30]:
         prompt += (
-            f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
-            f"Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | "
-            f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
+            f"{r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
+            f"RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']}\n"
         )
     prompt += (
-        "\n\nTULIS HANYA ANALISIS NARATIF DALAM BAHASA INDONESIA, 4-5 PARAGRAF PENDEK. "
-        "JANGAN GUNAKAN BULLET POIN, HEADER, ATAU FORMAT LAIN. "
-        "JANGAN MENYEBUTKAN KATA 'Constraint', 'Content Requirements', 'Paragraph', 'Drafting', 'Self-Correction', "
-        "'Format:', 'Columns:', 'Timestamp', 'Total entries', 'Timeframe', ATAU NOTASI MATEMATIKA $. "
-        "JANGAN MENULIS ULANG INSTRUKSI INI DALAM JAWABAN. "
-        "FOKUS PADA: pola sinyal, saham terbaik, perbaikan strategi, insight tambahan."
+        "\nTulis 3-4 paragraf naratif dalam Bahasa Indonesia. Langsung ke pola sinyal, saham terbaik, "
+        "perbaikan strategi, dan insight. JANGAN tulis instruksi, proses berpikir, atau ulangi teks."
     )
     try:
         response = model.generate_content(prompt)
@@ -196,46 +192,55 @@ def analisis_riwayat_global(riwayat_data, api_key):
 def bersihkan_teks_ai(teks):
     if not teks:
         return teks
-    # Hapus header markdown
+    # 1. Hapus header markdown dan bold/italic
     teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
-    # Hapus bold/italic
     teks = re.sub(r'\*\*', '', teks)
     teks = re.sub(r'\*', '', teks)
-    # Hapus tanda $ (LaTeX)
     teks = re.sub(r'\$', '', teks)
-    # Hapus baris yang mengandung kata-kunci instruksional atau label data
+    # 2. Hapus baris yang mengandung kata/kalimat instruksional atau meta-text
     baris = teks.split('\n')
     baris_bersih = []
     for b in baris:
-        b_lower = b.lower()
-        # Lewati baris kosong atau hanya bullet
-        if b.strip() in ['-', '*', '']:
+        b_lower = b.lower().strip()
+        # Abaikan baris kosong atau hanya bullet
+        if not b_lower or b_lower in ['-', '*']:
             continue
-        # Kata kunci yang menandakan meta-text atau label data
+        # Daftar kata kunci yang menandakan instruksi / draft / pemikiran AI
         if any(kata in b_lower for kata in [
-            'constraint', 'content requirements', 'paragraph', 'drafting',
-            'self-correction', 'format:', 'columns:', 'timestamp', 'total entries:',
-            'timeframe:', 'ticker:', 'last price:', 'signal:', 'market regime:',
-            'news sentiment:', 'prob. up tomorrow:', 'tp (r1):', 'sl (s2):',
-            'estimated price tomorrow:', 'beta:', 'win rate:', 'profit factor:',
-            'max drawdown:', 'kelly allocation:', 'fundamentals:',
-            'signal meaning:', 'strengths/weakness:', 'risks:', 'recommendation:',
-            'patterns/history:', 'pola sinyal:', 'peluang terbaik:', 'perbaikan strategi:',
-            'insight tambahan:', 'sinyal & konteks', 'kekuatan & kelemahan',
-            'risiko utama', 'rekomendasi:', 'analisis ringkas', 'tulis analisis',
-            'anda adalah asisten', 'data analisis', 'harga terakhir:',
-            'sinyal saat ini:', 'rezim pasar:', 'sentimen berita:',
-            'risk/reward ratio', 'probabilitas naik', 'take profit', 'stop loss',
-            'estimasi harga besok', 'beta terhadap ihsg', 'win rate backtest',
-            'profit factor backtest', 'max drawdown backtest', 'alokasi kelly maks',
-            'fundamental: market cap', 'ringkasan analisis sebelumnya',
+            'input:', 'goal:', 'dates:', 'signals:', 'patterns:', 'draft', 'final polish',
+            'formatting:', 'indonesian language?', 'no bullets?', 'no headers?',
+            'no ?', 'check constraints', 'constraint', 'content requirements',
+            'paragraph', 'drafting', 'self-correction', 'tulis analisis',
+            'anda adalah asisten', 'data analisis', 'harga terakhir:', 'sinyal saat ini:',
+            'rezim pasar:', 'sentimen berita:', 'risk/reward ratio', 'probabilitas naik',
+            'take profit', 'stop loss', 'estimasi harga besok', 'beta terhadap ihsg',
+            'win rate backtest', 'profit factor backtest', 'max drawdown backtest',
+            'alokasi kelly maks', 'fundamental: market cap', 'ringkasan analisis sebelumnya',
+            'berdasarkan data di atas', 'tulis analisis ringkas', 'bahasa indonesia',
+            'langsung ke inti', 'jangan gunakan bullet poin', 'jangan ulangi instruksi',
+            'fokus pada makna sinyal', 'kekuatan/kelemahan', 'risiko utama',
+            'rekomendasi langkah selanjutnya', 'jika ada pola dari riwayat',
+            'format:', 'columns:', 'timestamp', 'total entries:', 'timeframe:',
         ]):
             continue
-        # Hapus tanda bullet di awal baris
+        # Hapus baris yang hanya berisi angka atau waktu
+        if re.match(r'^[\d\s\-:,.]+$', b_lower):
+            continue
+        # Hapus bullet di awal
         b = re.sub(r'^[\s]*[-*]\s+', '', b)
         if b.strip():
-            baris_bersih.append(b)
+            baris_bersih.append(b.strip())
     teks = '\n'.join(baris_bersih)
+    # 3. Hapus paragraf duplikat (jika ada yang sama persis)
+    paragraf = teks.split('\n')
+    paragraf_unik = []
+    for p in paragraf:
+        if p not in paragraf_unik:
+            paragraf_unik.append(p)
+    teks = '\n'.join(paragraf_unik)
+    # 4. Batasi panjang maksimal (opsional, tapi baik untuk mencegah teks terlalu panjang)
+    if len(teks) > 1500:
+        teks = teks[:1500] + "..."
     teks = teks.replace('\n', '<br>')
     return teks
 
@@ -964,7 +969,6 @@ if run_btn:
     else:
         st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
-    # Simpan riwayat setelah AI selesai
     simpan_riwayat(ringkasan)
     st.session_state.riwayat.insert(0, ringkasan)
     if len(st.session_state.riwayat) > 50:
