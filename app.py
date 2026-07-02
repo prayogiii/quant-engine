@@ -10,6 +10,7 @@ import re
 import csv
 import os
 from datetime import datetime
+import pytz  # ← untuk zona waktu
 import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
@@ -98,14 +99,12 @@ def analisis_ai_gemini(riwayat_data, api_key):
         available_models = []
         for m in genai.list_models():
             if 'generateContent' in m.supported_generation_methods:
-                # Nama model biasanya 'models/...' jadi ambil bagian akhirnya saja
                 model_id = m.name.split('/')[-1]
                 available_models.append(model_id)
         
         if not available_models:
             return None, "Tidak ada model Gemini yang mendukung generateContent. Periksa kembali API key Anda."
         
-        # Coba setiap model yang tersedia, gunakan model pertama yang berhasil
         last_error = ""
         for model_id in available_models:
             try:
@@ -216,7 +215,6 @@ with st.sidebar:
 
     ai_btn = st.button("📊 Analisis Riwayat dengan AI", use_container_width=True)
 
-    # Tombol debug (tidak wajib, tapi bisa dipertahankan)
     if st.button("🔍 Cek Model Tersedia"):
         if not st.session_state.gemini_api_key:
             st.warning("Isi API key dulu.")
@@ -238,7 +236,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
 
-# ==================== FUNGSI DATA & INDIKATOR (tidak diubah) ====================
+# ==================== FUNGSI DATA & INDIKATOR ====================
 @st.cache_data(ttl=3600)
 def load_stock_data(ticker):
     df = yf.download(ticker, period="2y")
@@ -345,7 +343,7 @@ REGIME_INFO = {
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
 
-# ==================== PROSES ANALISIS (tidak diubah) ====================
+# ==================== PROSES ANALISIS ====================
 if run_btn:
     if not ticker_input:
         st.warning("⚠️ Kode saham tidak boleh kosong!")
@@ -544,8 +542,9 @@ if run_btn:
         rrr = tp_pct/sl_pct if sl_pct else 0
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
 
+        # 🔧 GUNAKAN WAKTU WIB (ASIA/JAKARTA)
         ringkasan = {
-            "Waktu": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input,
             "Harga": f"{harga_terakhir:,.0f}",
             "Sinyal": signal,
