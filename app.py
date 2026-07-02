@@ -80,7 +80,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI (DIPERBAIKI & DIPERKUAT)
+# FUNGSI AI GEMINI (PROMPT & PEMBERSIHAN AGGRESIF)
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -172,16 +172,18 @@ def analisis_riwayat_global(riwayat_data, api_key):
     if not riwayat_data:
         return None, "Belum ada riwayat."
 
-    # Buat prompt super singkat, hanya data dan instruksi langsung
-    prompt = "Data riwayat:\n"
+    # Prompt ultra‑ketat: hanya data, larangan keras bahasa Inggris & proses berpikir
+    prompt = "Data riwayat analisis saham:\n"
     for r in riwayat_data[:30]:
         prompt += (
             f"{r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
             f"RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']}\n"
         )
     prompt += (
-        "\nTulis 3-4 paragraf naratif dalam Bahasa Indonesia. Langsung ke pola sinyal, saham terbaik, "
-        "perbaikan strategi, dan insight. JANGAN tulis instruksi, proses berpikir, atau ulangi teks."
+        "\nTULIS HANYA ANALISIS AKHIR DALAM BAHASA INDONESIA, 3-4 PARAGRAF PENDEK. "
+        "JANGAN SERTAKAN PROSES BERPIKIR, INSTRUKSI, DRAFT, ATAU BAHASA INGGRIS. "
+        "JANGAN MENGGUNAKAN BULLET POIN ATAU HEADER. "
+        "FOKUS PADA POLA SINYAL, SAHAM TERBAIK, PERBAIKAN STRATEGI, DAN INSIGHT TAMBAHAN."
     )
     try:
         response = model.generate_content(prompt)
@@ -192,30 +194,35 @@ def analisis_riwayat_global(riwayat_data, api_key):
 def bersihkan_teks_ai(teks):
     if not teks:
         return teks
-    # 1. Hapus header markdown dan bold/italic
+    # Hapus markdown dan karakter aneh
     teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
     teks = re.sub(r'\*\*', '', teks)
     teks = re.sub(r'\*', '', teks)
     teks = re.sub(r'\$', '', teks)
-    # 2. Hapus baris yang mengandung kata/kalimat instruksional atau meta-text
+    # Proses per baris
     baris = teks.split('\n')
     baris_bersih = []
     for b in baris:
-        b_lower = b.lower().strip()
-        # Abaikan baris kosong atau hanya bullet
-        if not b_lower or b_lower in ['-', '*']:
+        b_stripped = b.strip()
+        if not b_stripped:
             continue
-        # Daftar kata kunci yang menandakan instruksi / draft / pemikiran AI
+        # Buang baris yang hanya berisi bullet
+        if b_stripped in ['-', '*', '•']:
+            continue
+        # Buang baris yang merupakan pertanyaan retoris / pendek
+        if '?' in b_stripped and len(b_stripped) < 100:
+            continue
+        b_lower = b_stripped.lower()
+        # Daftar kata kunci instruksional / meta / bahasa Inggris yang tidak diinginkan
         if any(kata in b_lower for kata in [
-            'input:', 'goal:', 'dates:', 'signals:', 'patterns:', 'draft', 'final polish',
-            'formatting:', 'indonesian language?', 'no bullets?', 'no headers?',
-            'no ?', 'check constraints', 'constraint', 'content requirements',
-            'paragraph', 'drafting', 'self-correction', 'tulis analisis',
-            'anda adalah asisten', 'data analisis', 'harga terakhir:', 'sinyal saat ini:',
-            'rezim pasar:', 'sentimen berita:', 'risk/reward ratio', 'probabilitas naik',
-            'take profit', 'stop loss', 'estimasi harga besok', 'beta terhadap ihsg',
-            'win rate backtest', 'profit factor backtest', 'max drawdown backtest',
-            'alokasi kelly maks', 'fundamental: market cap', 'ringkasan analisis sebelumnya',
+            'no bullets?', 'no headers?', 'no ?', 'indonesian language?',
+            'check constraints', 'constraint', 'draft', 'final polish',
+            'self-correction', 'paragraph', 'input:', 'goal:', 'dates:',
+            'signals:', 'patterns:', 'formatting:', 'tone:', 'directly cover:',
+            'language:', 'date:', 'strong buy:', 'buy (tactical):', 'hold/wait:',
+            'avoid:', 'stocks analysis:', 'rrr (risk-reward ratio):',
+            'sentiments/regimes:', 'note the shift.', 'look at the', 'focus on',
+            'no instructions', 'no thinking process', 'just the final analysis',
             'berdasarkan data di atas', 'tulis analisis ringkas', 'bahasa indonesia',
             'langsung ke inti', 'jangan gunakan bullet poin', 'jangan ulangi instruksi',
             'fokus pada makna sinyal', 'kekuatan/kelemahan', 'risiko utama',
@@ -223,22 +230,31 @@ def bersihkan_teks_ai(teks):
             'format:', 'columns:', 'timestamp', 'total entries:', 'timeframe:',
         ]):
             continue
-        # Hapus baris yang hanya berisi angka atau waktu
+        # Buang baris yang hanya berisi angka/tanggal
         if re.match(r'^[\d\s\-:,.]+$', b_lower):
             continue
-        # Hapus bullet di awal
-        b = re.sub(r'^[\s]*[-*]\s+', '', b)
-        if b.strip():
-            baris_bersih.append(b.strip())
+        # Buang baris yang mayoritas karakter huruf kecil (indikasi bahasa Inggris)
+        alpha_count = sum(c.isalpha() for c in b_stripped)
+        if alpha_count > 0:
+            lower_alpha = sum(c.islower() for c in b_stripped if c.isalpha())
+            if lower_alpha / alpha_count > 0.7 and alpha_count > 10:
+                continue
+        # Buang baris yang terlalu pendek dan mengandung alfabet (mungkin sisa bullet)
+        if len(b_stripped) < 10 and alpha_count > 0:
+            continue
+        # Hapus bullet di awal baris
+        b_stripped = re.sub(r'^[\s]*[-*•]\s*', '', b_stripped)
+        baris_bersih.append(b_stripped)
+
     teks = '\n'.join(baris_bersih)
-    # 3. Hapus paragraf duplikat (jika ada yang sama persis)
+    # Hapus paragraf duplikat
     paragraf = teks.split('\n')
     paragraf_unik = []
     for p in paragraf:
         if p not in paragraf_unik:
             paragraf_unik.append(p)
     teks = '\n'.join(paragraf_unik)
-    # 4. Batasi panjang maksimal (opsional, tapi baik untuk mencegah teks terlalu panjang)
+    # Batasi panjang maksimal (opsional)
     if len(teks) > 1500:
         teks = teks[:1500] + "..."
     teks = teks.replace('\n', '<br>')
