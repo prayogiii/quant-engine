@@ -51,20 +51,12 @@ warnings.filterwarnings("ignore")
 # ==========================================
 RIWAYAT_FILE = "riwayat_analisis.csv"
 
-HEADER_RIWAYAT = [
-    "Waktu", "Saham", "Harga", "Sinyal", "Estimasi", "Prob Naik",
-    "RRR", "Sentimen", "Rezim", "TP%", "SL%", "AI_Insight", "Ringkasan_AI"
-]
-
 def simpan_riwayat(ringkasan):
     file_exists = os.path.isfile(RIWAYAT_FILE)
     with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=HEADER_RIWAYAT)
+        writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
         if not file_exists:
             writer.writeheader()
-        for key in HEADER_RIWAYAT:
-            if key not in ringkasan:
-                ringkasan[key] = ""
         writer.writerow(ringkasan)
 
 def muat_riwayat_dari_csv():
@@ -80,7 +72,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI (PROMPT & PEMBERSIHAN AGGRESIF)
+# FUNGSI AI GEMINI
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -105,34 +97,23 @@ def dapatkan_model_gemini(api_key):
     except Exception as e:
         return None, f"Error: {str(e)}"
 
-def buat_ringkasan_ai(insight_panjang, api_key):
-    model, error = dapatkan_model_gemini(api_key)
-    if error:
-        return ""
-    prompt = f"Ringkas insight berikut menjadi 1-2 kalimat dalam Bahasa Indonesia yang padat dan informatif:\n\n{insight_panjang}"
-    try:
-        resp = model.generate_content(prompt)
-        return resp.text.strip()
-    except:
-        return insight_panjang[:150] + "..."
-
-def analisis_saham_dengan_ai(data_saham, riwayat, api_key, semua_ringkasan=""):
+def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     model, error = dapatkan_model_gemini(api_key)
     if error:
         return None, error
 
     riwayat_text = ""
     if riwayat:
-        riwayat_text = "Riwayat analisis terbaru:\n"
-        for r in riwayat[:5]:
-            base = f"- {r['Waktu']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
+        riwayat_text = "Riwayat analisis sebelumnya:\n"
+        for r in riwayat[:10]:
+            base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
+            ai_insight = r.get("AI_Insight", "").strip()
+            if ai_insight:
+                short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
+                base += f" | AI Insight: {short_insight}"
             riwayat_text += base + "\n"
     else:
         riwayat_text = "Belum ada riwayat sebelumnya."
-
-    ringkasan_text = ""
-    if semua_ringkasan:
-        ringkasan_text = "Ringkasan analisis sebelumnya untuk saham ini:\n" + semua_ringkasan
 
     prompt = f"""
 Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
@@ -153,11 +134,15 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Alokasi Kelly Maks: {data_saham.get('Kelly', 'N/A')}%
 - Fundamental: Market Cap: {data_saham.get('Fundamental_MC', 'N/A')}, PER: {data_saham.get('Fundamental_PER', 'N/A')}, PBV: {data_saham.get('Fundamental_PBV', 'N/A')}, ROE: {data_saham.get('Fundamental_ROE', 'N/A')}, D/E: {data_saham.get('Fundamental_DE', 'N/A')}
 
-{ringkasan_text}
-
 {riwayat_text}
 
-Tulis analisis ringkas dalam BAHASA INDONESIA, 4 paragraf pendek, langsung ke inti. Jangan gunakan bullet poin atau header.
+Berdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
+- Makna sinyal dalam konteks saat ini
+- Kekuatan dan kelemahan saham
+- Risiko utama
+- Rekomendasi langkah selanjutnya (buy/hold/sell) dengan alasan singkat
+- Jika ada pola dari riwayat, sebutkan.
+Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
 """
     try:
         response = model.generate_content(prompt)
@@ -172,18 +157,19 @@ def analisis_riwayat_global(riwayat_data, api_key):
     if not riwayat_data:
         return None, "Belum ada riwayat."
 
-    # Prompt ultra‑ketat: hanya data, larangan keras bahasa Inggris & proses berpikir
-    prompt = "Data riwayat analisis saham:\n"
+    prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
     for r in riwayat_data[:30]:
         prompt += (
-            f"{r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
-            f"RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']}\n"
+            f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
+            f"Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | "
+            f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
         )
     prompt += (
-        "\nTULIS HANYA ANALISIS AKHIR DALAM BAHASA INDONESIA, 3-4 PARAGRAF PENDEK. "
-        "JANGAN SERTAKAN PROSES BERPIKIR, INSTRUKSI, DRAFT, ATAU BAHASA INGGRIS. "
-        "JANGAN MENGGUNAKAN BULLET POIN ATAU HEADER. "
-        "FOKUS PADA POLA SINYAL, SAHAM TERBAIK, PERBAIKAN STRATEGI, DAN INSIGHT TAMBAHAN."
+        "\nBerdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia):\n"
+        "- Pola sinyal yang sering muncul\n"
+        "- Saham dengan peluang terbaik menurut data\n"
+        "- Rekomendasi perbaikan strategi\n"
+        "- Insight tambahan yang berguna untuk trader"
     )
     try:
         response = model.generate_content(prompt)
@@ -194,76 +180,16 @@ def analisis_riwayat_global(riwayat_data, api_key):
 def bersihkan_teks_ai(teks):
     if not teks:
         return teks
-    # Hapus markdown dan karakter aneh
     teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
     teks = re.sub(r'\*\*', '', teks)
     teks = re.sub(r'\*', '', teks)
-    teks = re.sub(r'\$', '', teks)
-    # Proses per baris
-    baris = teks.split('\n')
-    baris_bersih = []
-    for b in baris:
-        b_stripped = b.strip()
-        if not b_stripped:
-            continue
-        # Buang baris yang hanya berisi bullet
-        if b_stripped in ['-', '*', '•']:
-            continue
-        # Buang baris yang merupakan pertanyaan retoris / pendek
-        if '?' in b_stripped and len(b_stripped) < 100:
-            continue
-        b_lower = b_stripped.lower()
-        # Daftar kata kunci instruksional / meta / bahasa Inggris yang tidak diinginkan
-        if any(kata in b_lower for kata in [
-            'no bullets?', 'no headers?', 'no ?', 'indonesian language?',
-            'check constraints', 'constraint', 'draft', 'final polish',
-            'self-correction', 'paragraph', 'input:', 'goal:', 'dates:',
-            'signals:', 'patterns:', 'formatting:', 'tone:', 'directly cover:',
-            'language:', 'date:', 'strong buy:', 'buy (tactical):', 'hold/wait:',
-            'avoid:', 'stocks analysis:', 'rrr (risk-reward ratio):',
-            'sentiments/regimes:', 'note the shift.', 'look at the', 'focus on',
-            'no instructions', 'no thinking process', 'just the final analysis',
-            'berdasarkan data di atas', 'tulis analisis ringkas', 'bahasa indonesia',
-            'langsung ke inti', 'jangan gunakan bullet poin', 'jangan ulangi instruksi',
-            'fokus pada makna sinyal', 'kekuatan/kelemahan', 'risiko utama',
-            'rekomendasi langkah selanjutnya', 'jika ada pola dari riwayat',
-            'format:', 'columns:', 'timestamp', 'total entries:', 'timeframe:',
-        ]):
-            continue
-        # Buang baris yang hanya berisi angka/tanggal
-        if re.match(r'^[\d\s\-:,.]+$', b_lower):
-            continue
-        # Buang baris yang mayoritas karakter huruf kecil (indikasi bahasa Inggris)
-        alpha_count = sum(c.isalpha() for c in b_stripped)
-        if alpha_count > 0:
-            lower_alpha = sum(c.islower() for c in b_stripped if c.isalpha())
-            if lower_alpha / alpha_count > 0.7 and alpha_count > 10:
-                continue
-        # Buang baris yang terlalu pendek dan mengandung alfabet (mungkin sisa bullet)
-        if len(b_stripped) < 10 and alpha_count > 0:
-            continue
-        # Hapus bullet di awal baris
-        b_stripped = re.sub(r'^[\s]*[-*•]\s*', '', b_stripped)
-        baris_bersih.append(b_stripped)
-
-    teks = '\n'.join(baris_bersih)
-    # Hapus paragraf duplikat
-    paragraf = teks.split('\n')
-    paragraf_unik = []
-    for p in paragraf:
-        if p not in paragraf_unik:
-            paragraf_unik.append(p)
-    teks = '\n'.join(paragraf_unik)
-    # Batasi panjang maksimal (opsional)
-    if len(teks) > 1500:
-        teks = teks[:1500] + "..."
     teks = teks.replace('\n', '<br>')
     return teks
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
 # ==========================================
-st.set_page_config(page_title="Quant Risk Engine Pro v8", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -340,10 +266,10 @@ with st.sidebar:
                 st.markdown(f"**Sentimen:** {r['Sentimen']}")
                 st.markdown(f"**Rezim:** {r['Rezim']}")
                 st.markdown(f"**TP%:** {r['TP%']}% | **SL%:** {r['SL%']}%")
-                ringkasan_ai = r.get("Ringkasan_AI", "").strip()
-                if ringkasan_ai:
-                    st.markdown("💬 **Ringkasan AI:**")
-                    st.caption(ringkasan_ai)
+                ai = r.get("AI_Insight", "").strip()
+                if ai:
+                    st.markdown("💬 **AI Insight:**")
+                    st.caption(ai[:200] + ("..." if len(ai) > 200 else ""))
         if len(st.session_state.riwayat) > 10:
             st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
@@ -737,8 +663,7 @@ if run_btn:
             "Rezim": regime,
             "TP%": f"{tp_pct:.1f}",
             "SL%": f"{sl_pct:.1f}",
-            "AI_Insight": "",
-            "Ringkasan_AI": ""
+            "AI_Insight": ""  # placeholder
         }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -952,26 +877,13 @@ if run_btn:
                 "Fundamental_ROE": f"{roe*100:.1f}" if roe else "N/A",
                 "Fundamental_DE": f"{de:.2f}" if de else "N/A"
             }
-
-            riwayat_saham = [r for r in st.session_state.riwayat if r['Saham'] == ticker_input]
-            
-            semua_ringkasan = "\n".join([
-                f"- {r['Waktu']}: {r.get('Ringkasan_AI', '').strip()}"
-                for r in riwayat_saham if r.get('Ringkasan_AI', '').strip()
-            ])
-            
+            # 🔥 FILTER RIWAYAT HANYA UNTUK SAHAM YANG SAMA
+            riwayat_konteks = [r for r in st.session_state.riwayat if r['Saham'] == ticker_input][:10]
             hasil_ai, error_ai = analisis_saham_dengan_ai(
-                data_ai,
-                riwayat_saham[:5],
-                st.session_state.gemini_api_key,
-                semua_ringkasan
+                data_ai, riwayat_konteks, st.session_state.gemini_api_key
             )
-            
             if not error_ai and hasil_ai:
-                ringkasan_baru = buat_ringkasan_ai(hasil_ai, st.session_state.gemini_api_key)
                 ringkasan["AI_Insight"] = hasil_ai
-                ringkasan["Ringkasan_AI"] = ringkasan_baru if ringkasan_baru else hasil_ai[:150]
-                
                 hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f"""
                 <div class="ai-insight-card">
@@ -985,6 +897,7 @@ if run_btn:
     else:
         st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
+    # Simpan riwayat setelah AI selesai
     simpan_riwayat(ringkasan)
     st.session_state.riwayat.insert(0, ringkasan)
     if len(st.session_state.riwayat) > 50:
