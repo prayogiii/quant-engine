@@ -51,12 +51,22 @@ warnings.filterwarnings("ignore")
 # ==========================================
 RIWAYAT_FILE = "riwayat_analisis.csv"
 
+# Tambahkan field Ringkasan_AI ke header CSV jika belum ada
+HEADER_RIWAYAT = [
+    "Waktu", "Saham", "Harga", "Sinyal", "Estimasi", "Prob Naik",
+    "RRR", "Sentimen", "Rezim", "TP%", "SL%", "AI_Insight", "Ringkasan_AI"
+]
+
 def simpan_riwayat(ringkasan):
     file_exists = os.path.isfile(RIWAYAT_FILE)
     with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
+        writer = csv.DictWriter(f, fieldnames=HEADER_RIWAYAT)
         if not file_exists:
             writer.writeheader()
+        # Pastikan semua key ada
+        for key in HEADER_RIWAYAT:
+            if key not in ringkasan:
+                ringkasan[key] = ""
         writer.writerow(ringkasan)
 
 def muat_riwayat_dari_csv():
@@ -97,23 +107,37 @@ def dapatkan_model_gemini(api_key):
     except Exception as e:
         return None, f"Error: {str(e)}"
 
-def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
+def buat_ringkasan_ai(insight_panjang, api_key):
+    """Minta AI meringkas insight menjadi 1-2 kalimat."""
+    model, error = dapatkan_model_gemini(api_key)
+    if error:
+        return ""
+    prompt = f"Ringkas insight berikut menjadi 1-2 kalimat dalam Bahasa Indonesia yang padat dan informatif:\n\n{insight_panjang}"
+    try:
+        resp = model.generate_content(prompt)
+        return resp.text.strip()
+    except:
+        return insight_panjang[:150] + "..."  # fallback
+
+def analisis_saham_dengan_ai(data_saham, riwayat, api_key, semua_ringkasan=""):
     model, error = dapatkan_model_gemini(api_key)
     if error:
         return None, error
 
+    # Konteks riwayat singkat (teknikal 5 terakhir)
     riwayat_text = ""
     if riwayat:
-        riwayat_text = "Riwayat analisis sebelumnya:\n"
-        for r in riwayat[:10]:
-            base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
-            ai_insight = r.get("AI_Insight", "").strip()
-            if ai_insight:
-                short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
-                base += f" | AI Insight: {short_insight}"
+        riwayat_text = "Riwayat analisis terbaru:\n"
+        for r in riwayat[:5]:
+            base = f"- {r['Waktu']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
             riwayat_text += base + "\n"
     else:
         riwayat_text = "Belum ada riwayat sebelumnya."
+
+    # Konteks ringkasan jangka panjang (semua ringkasan dari saham ini)
+    ringkasan_text = ""
+    if semua_ringkasan:
+        ringkasan_text = "Ringkasan analisis sebelumnya untuk saham ini:\n" + semua_ringkasan
 
     prompt = f"""
 Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
@@ -133,6 +157,8 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Max Drawdown Backtest: {data_saham.get('MaxDD', 'N/A')}
 - Alokasi Kelly Maks: {data_saham.get('Kelly', 'N/A')}%
 - Fundamental: Market Cap: {data_saham.get('Fundamental_MC', 'N/A')}, PER: {data_saham.get('Fundamental_PER', 'N/A')}, PBV: {data_saham.get('Fundamental_PBV', 'N/A')}, ROE: {data_saham.get('Fundamental_ROE', 'N/A')}, D/E: {data_saham.get('Fundamental_DE', 'N/A')}
+
+{ringkasan_text}
 
 {riwayat_text}
 
@@ -266,10 +292,11 @@ with st.sidebar:
                 st.markdown(f"**Sentimen:** {r['Sentimen']}")
                 st.markdown(f"**Rezim:** {r['Rezim']}")
                 st.markdown(f"**TP%:** {r['TP%']}% | **SL%:** {r['SL%']}%")
-                ai = r.get("AI_Insight", "").strip()
-                if ai:
-                    st.markdown("💬 **AI Insight:**")
-                    st.caption(ai[:200] + ("..." if len(ai) > 200 else ""))
+                # Tampilkan ringkasan jika ada
+                ringkasan_ai = r.get("Ringkasan_AI", "").strip()
+                if ringkasan_ai:
+                    st.markdown("💬 **Ringkasan AI:**")
+                    st.caption(ringkasan_ai)
         if len(st.session_state.riwayat) > 10:
             st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
@@ -663,7 +690,8 @@ if run_btn:
             "Rezim": regime,
             "TP%": f"{tp_pct:.1f}",
             "SL%": f"{sl_pct:.1f}",
-            "AI_Insight": ""  # placeholder
+            "AI_Insight": "",
+            "Ringkasan_AI": ""
         }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -877,13 +905,31 @@ if run_btn:
                 "Fundamental_ROE": f"{roe*100:.1f}" if roe else "N/A",
                 "Fundamental_DE": f"{de:.2f}" if de else "N/A"
             }
-            # 🔥 FILTER RIWAYAT HANYA UNTUK SAHAM YANG SAMA
-            riwayat_konteks = [r for r in st.session_state.riwayat if r['Saham'] == ticker_input][:10]
+
+            # 🔥 HANYA RIWAYAT SAHAM YANG SAMA (semua, untuk mencari ringkasan)
+            riwayat_saham = [r for r in st.session_state.riwayat if r['Saham'] == ticker_input]
+            
+            # 🔥 KUMPULKAN SEMUA RINGKASAN AI SEBELUMNYA
+            semua_ringkasan = "\n".join([
+                f"- {r['Waktu']}: {r.get('Ringkasan_AI', '').strip()}"
+                for r in riwayat_saham if r.get('Ringkasan_AI', '').strip()
+            ])
+            
+            # Panggil AI dengan riwayat teknikal (5 terakhir) + semua ringkasan
             hasil_ai, error_ai = analisis_saham_dengan_ai(
-                data_ai, riwayat_konteks, st.session_state.gemini_api_key
+                data_ai,
+                riwayat_saham[:5],          # data teknikal singkat
+                st.session_state.gemini_api_key,
+                semua_ringkasan             # ringkasan progresif
             )
+            
             if not error_ai and hasil_ai:
+                # 🔥 BUAT RINGKASAN DARI INSIGHT INI
+                ringkasan_baru = buat_ringkasan_ai(hasil_ai, st.session_state.gemini_api_key)
                 ringkasan["AI_Insight"] = hasil_ai
+                ringkasan["Ringkasan_AI"] = ringkasan_baru if ringkasan_baru else hasil_ai[:150]
+                
+                # Tampilkan card AI
                 hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f"""
                 <div class="ai-insight-card">
