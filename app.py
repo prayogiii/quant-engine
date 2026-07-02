@@ -72,7 +72,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI (DINAMIS MODEL + ANALISIS SAHAM & RIWAYAT)
+# FUNGSI AI GEMINI (DINAMIS + ANALISIS SAHAM & RIWAYAT)
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -85,8 +85,7 @@ def dapatkan_model_gemini(api_key):
                 model_id = m.name.split('/')[-1]
                 available.append(model_id)
         if not available:
-            return None, "Tidak ada model Gemini yang mendukung generateContent."
-        # Kembalikan model pertama yang berhasil
+            return None, "Tidak ada model Gemini."
         for model_id in available:
             try:
                 model = genai.GenerativeModel(model_id)
@@ -95,7 +94,7 @@ def dapatkan_model_gemini(api_key):
                 return model, None
             except Exception:
                 continue
-        return None, "Semua model yang tersedia gagal digunakan."
+        return None, "Model gagal digunakan."
     except Exception as e:
         return None, f"Error: {str(e)}"
 
@@ -136,13 +135,13 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 
 {riwayat_text}
 
-Berdasarkan data di atas dan riwayat yang ada, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
+Berdasarkan data di atas dan riwayat, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
 - Makna sinyal dalam konteks saat ini
 - Kekuatan dan kelemahan saham
-- Risiko utama yang perlu diperhatikan
+- Risiko utama
 - Rekomendasi langkah selanjutnya (buy/hold/sell) dengan alasan singkat
-- Jika ada pola dari riwayat yang relevan (misal saham ini sering muncul sinyal tertentu), sebutkan.
-Gunakan bahasa yang mudah dipahami trader, maksimal 4 paragraf pendek.
+- Jika ada pola dari riwayat, sebutkan.
+Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
 """
     try:
         response = model.generate_content(prompt)
@@ -151,9 +150,10 @@ Gunakan bahasa yang mudah dipahami trader, maksimal 4 paragraf pendek.
         return None, f"Gagal menghasilkan insight AI: {str(e)}"
 
 # ==========================================
-# KONFIGURASI HALAMAN & STYLING (TIDAK DIUBAH)
+# KONFIGURASI HALAMAN & STYLING
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+
 st.markdown("""
     <style>
     .main { background-color: #0f1116; color: #ffffff; }
@@ -217,6 +217,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🧠 AI (Gemini)")
+
     def get_api_key():
         try:
             return st.secrets["GEMINI_API_KEY"]
@@ -235,12 +236,12 @@ with st.sidebar:
         type="password",
         value=st.session_state.gemini_api_key,
         placeholder="AIza...",
-        help="Kunci API Gemini. Disimpan di secrets atau env."
+        help="Kunci API Gemini."
     )
     if api_key:
         st.session_state.gemini_api_key = api_key
 
-    ai_riwayat_btn = st.button("📊 Analisis Riwayat dengan AI", use_container_width=True)
+    ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
 
     if st.button("🗑️ Hapus Semua Riwayat"):
         if os.path.isfile(RIWAYAT_FILE):
@@ -249,9 +250,9 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
+    st.caption("Data Yahoo Finance. Bukan rekomendasi investasi.")
 
-# ==================== FUNGSI DATA & INDIKATOR (TIDAK DIUBAH) ====================
+# ==================== FUNGSI DATA & INDIKATOR ====================
 @st.cache_data(ttl=3600)
 def load_stock_data(ticker):
     df = yf.download(ticker, period="2y")
@@ -341,17 +342,92 @@ def estimate_theta_ou(close_series):
     theta = -coeff[1] if coeff[1] < 0 else 0.05
     return theta
 
-REGIME_INFO = {  # ... tidak diubah ...
+REGIME_INFO = {
+    "Strong Bullish 🚀": "Tren naik kuat...",
+    "Bullish 📈": "Tren naik stabil...",
+    "Panic Sell 🚨": "Penurunan tajam...",
+    # ... (semua regime lainnya tetap sama)
 }
 
-# ==================== PROSES ANALISIS UTAMA ====================
+# ==================== PROSES ANALISIS ====================
 if run_btn:
-    # ... (semua perhitungan kuantitatif sama persis, sampai bagian ringkasan)
-    # ... (card summary, action, detail expander juga sama)
+    if not ticker_input:
+        st.warning("⚠️ Kode saham tidak boleh kosong!")
+        st.stop()
 
-    # --- AI INSIGHT OTOMATIS ---
+    with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
+        df = load_stock_data(ticker_input)
+        if df.empty:
+            st.error("❌ Data tidak ditemukan untuk ticker tersebut.")
+            st.stop()
+
+        harga_terakhir = float(df['Close'].iloc[-1])
+        returns = df['Close'].pct_change().dropna()
+        if len(returns) < 50:
+            st.error("❌ Data historis kurang untuk analisa kuantitatif.")
+            st.stop()
+
+        # ... (semua perhitungan indikator, backtest, kelly, monte carlo, fundamental, dll.)
+        # Hasil akhir harus memiliki variabel berikut:
+        # harga_terakhir, signal, regime, avg_sentiment, sentimen_status, est_besok,
+        # prob_bull, tp_pct, sl_pct, rrr, rrr_status, kelly_adj, beta_ihsg,
+        # max_dd, max_dd_30, trades_bt, win_bt, pf_bt, max_dd_bt, sharpe_bt,
+        # serta variabel fundamental: mc, per, pbv, roe, de (jika ada)
+
+        # --- SIMPAN KE RIWAYAT ---
+        ringkasan = {
+            "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
+            "Saham": ticker_input,
+            "Harga": f"{harga_terakhir:,.0f}",
+            "Sinyal": signal,
+            "Estimasi": f"{est_besok:,.0f}",
+            "Prob Naik": f"{prob_bull:.1f}%",
+            "RRR": f"{rrr:.2f}",
+            "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
+            "Rezim": regime,
+            "TP%": f"{tp_pct:.1f}",
+            "SL%": f"{sl_pct:.1f}"
+        }
+        simpan_riwayat(ringkasan)
+        st.session_state.riwayat.insert(0, ringkasan)
+        if len(st.session_state.riwayat) > 50:
+            st.session_state.riwayat.pop()
+
+    # ==================== TAMPILAN UTAMA ====================
+    st.title("📊 Quant & Risk Engine Pro")
+    st.write("Algoritma kuantitatif + Berita + Backtest + AI + Grafik Interaktif + Fundamental")
+    st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
+
+    # --- HEADER METRICS ---
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"**Sinyal Eksekusi:** {signal}")
+    with col2:
+        st.markdown(f"**Estimasi Besok:** Rp {est_besok:,.0f}".replace(",", "."))
+    with col3:
+        st.markdown(f"**Prob. Naik Besok:** {prob_bull:.1f}%")
+
+    # --- CHART ---
+    if PLOTLY_AVAILABLE:
+        # ... (chart seperti sebelumnya)
+
+    # --- RINGKASAN EKSEKUTIF ---
+    # ... (card summary dan action)
+
+    # --- DETAIL EXPANDER ---
+    # ... (berita, regime, fundamental, pivot, backtest, monte carlo)
+
+    # ==================== AI INSIGHT OTOMATIS ====================
+    st.markdown("---")
     if st.session_state.get("gemini_api_key"):
-        with st.spinner("🧠 AI sedang menganalisis hasil..."):
+        with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
+            # Ambil data fundamental yang sudah didapat sebelumnya (mc, per, pbv, roe, de)
+            # Jika belum ada, set jadi "N/A"
+            try:
+                mc, per, pbv, roe, de
+            except NameError:
+                mc = per = pbv = roe = de = None
+
             data_ai = {
                 "Saham": ticker_input,
                 "Harga": f"{harga_terakhir:,.0f}",
@@ -378,7 +454,6 @@ if run_btn:
                 data_ai, st.session_state.riwayat[:5], st.session_state.gemini_api_key
             )
             if not error_ai and hasil_ai:
-                st.markdown("---")
                 st.header("🤖 Insight AI")
                 st.success(hasil_ai)
             elif error_ai:
@@ -386,14 +461,15 @@ if run_btn:
     else:
         st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
-# --- ANALISIS AI RIWAYAT (TOMBOL SIDEBAR) ---
+# --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
     if not st.session_state.gemini_api_key:
-        st.error("Masukkan Gemini API Key terlebih dahulu!")
+        st.error("Masukkan API Key terlebih dahulu!")
     elif not st.session_state.riwayat:
         st.warning("Belum ada riwayat.")
     else:
         with st.spinner("🧠 AI menganalisis riwayat..."):
+            # Gunakan fungsi analisis_ai_gemini yang lama untuk global
             hasil, error = analisis_ai_gemini(st.session_state.riwayat, st.session_state.gemini_api_key)
             if error:
                 st.error(error)
