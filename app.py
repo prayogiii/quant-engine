@@ -12,7 +12,6 @@ import os
 from datetime import datetime
 import pytz
 import math
-import shutil
 import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
@@ -35,14 +34,6 @@ except ImportError: RSS_AVAILABLE = False
 TRANSLATOR_AVAILABLE = True
 try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
-
-# Tesseract OCR
-TESSERACT_AVAILABLE = True
-try:
-    import pytesseract
-except ImportError:
-    TESSERACT_AVAILABLE = False
-# =================================================================
 
 warnings.filterwarnings("ignore")
 
@@ -113,7 +104,7 @@ def coppock_curve(prices, rP1=14, rP2=11, wP=10):
     prev = wma(combined[:-1],wP) if len(combined)>wP else 0.0
     return curr,prev
 
-# ---------- Broker ----------
+# ---------- Broker (PASTE TEXT, NO OCR) ----------
 def parse_broker_input(text):
     entries = []
     for line in text.strip().split('\n'):
@@ -128,6 +119,35 @@ def parse_broker_input(text):
                 entries.append(e)
             except: continue
     return entries
+
+def parse_broker_text_auto(text):
+    """Deteksi format CSV atau whitespace, lalu konversi ke CSV standar."""
+    lines = text.strip().split('\n')
+    result = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # Deteksi delimiter: koma, jika tidak ada gunakan spasi/tab
+        if ',' in line:
+            parts = [p.strip() for p in line.split(',')]
+        else:
+            parts = line.split()  # whitespace (spasi/tab)
+        if len(parts) >= 5:
+            try:
+                code = parts[0].upper()
+                if not code.isalpha() or len(code) > 4:
+                    continue
+                buy_lot = int(parts[1].replace(',', ''))
+                buy_freq = int(parts[2].replace(',', ''))
+                sell_lot = int(parts[3].replace(',', ''))
+                sell_freq = int(parts[4].replace(',', ''))
+                avg_buy = float(parts[5].replace(',', '')) if len(parts) > 5 else 0.0
+                avg_sell = float(parts[6].replace(',', '')) if len(parts) > 6 else 0.0
+                result.append(f"{code},{buy_lot},{buy_freq},{sell_lot},{sell_freq},{avg_buy},{avg_sell}")
+            except ValueError:
+                continue
+    return "\n".join(result)
 
 def analyze_broker(entries, cur_price):
     if not entries: return None
@@ -477,109 +497,34 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    # ──────────────────────────────────────────────────────
-    # V12: BROKER INPUT (TESSERACT OCR - FINAL REVISED)
-    # ──────────────────────────────────────────────────────
+    # ── BROKER INPUT (Paste Text) ──
     st.subheader("🏦 Broker Summary (V12)")
+    st.caption("📋 Copy data broker dari Stockbit / RTI, lalu paste di bawah. Sistem akan otomatis membaca formatnya.")
 
-    def is_tesseract_available():
-        """Cek ketersediaan Tesseract dan set path."""
-        if not TESSERACT_AVAILABLE:
-            return False
-        try:
-            pytesseract.get_tesseract_version()
-            return True
-        except:
-            # coba PATH
-            tesseract_path = shutil.which('tesseract')
-            if tesseract_path:
-                pytesseract.pytesseract.tesseract_cmd = tesseract_path
-                try:
-                    pytesseract.get_tesseract_version()
-                    return True
-                except: pass
-            # coba path manual
-            manual_path = st.session_state.get('tesseract_manual_path', '')
-            if manual_path and os.path.isfile(manual_path):
-                pytesseract.pytesseract.tesseract_cmd = manual_path
-                try:
-                    pytesseract.get_tesseract_version()
-                    return True
-                except: pass
-            return False
-
-    if 'tesseract_manual_path' not in st.session_state:
-        st.session_state.tesseract_manual_path = ""
-
-    uploaded_file = st.file_uploader(
-        "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
-        type=["png","jpg","jpeg"],
-        key="broker_ocr",
-        help="Screenshot dari Stockbit / RTI. OCR menggunakan Tesseract."
+    # Input paste (auto-detect)
+    raw_paste = st.text_area(
+        "Paste data broker di sini (satu broker per baris)",
+        height=150,
+        key="raw_broker_paste",
+        help="Bisa format CSV (KODE, BUY_LOT, ...) atau teks dengan spasi/tab seperti dari Stockbit."
     )
 
-    if uploaded_file is not None:
-        if not is_tesseract_available():
-            # Tampilkan input path manual
-            st.warning("⚠️ Tesseract tidak terdeteksi. Masukkan path ke `tesseract.exe` dan tekan Enter.")
-            manual_path = st.text_input(
-                "📍 Path ke tesseract.exe",
-                value=st.session_state.tesseract_manual_path,
-                key="tesseract_path_input",
-                help="Contoh: D:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-            )
-            if manual_path:
-                if os.path.isfile(manual_path):
-                    # Simpan path dan set langsung
-                    st.session_state.tesseract_manual_path = manual_path
-                    pytesseract.pytesseract.tesseract_cmd = manual_path
-                    st.success("✅ Path valid! Memproses gambar...")
-                    st.rerun()  # Rerun agar deteksi sukses dan gambar diproses
-                else:
-                    st.error("❌ File tidak ditemukan. Periksa kembali path.")
+    if raw_paste:
+        formatted = parse_broker_text_auto(raw_paste)
+        if formatted:
+            st.session_state.broker_input = formatted
+            st.success(f"✅ {len(formatted.split(chr(10)))} broker berhasil dikenali!")
         else:
-            # Tesseract tersedia, proses gambar
-            try:
-                from PIL import Image
-                image = Image.open(uploaded_file)
-                image = image.convert('L')   # grayscale
-                custom_config = r'--oem 3 --psm 6'
-                text = pytesseract.image_to_string(image, lang='eng', config=custom_config)
-                st.caption("📝 Hasil OCR (mentah):")
-                st.code(text)
+            st.warning("❌ Tidak ada data broker valid terdeteksi. Periksa kembali teks yang ditempel.")
+    else:
+        st.info("Atau masukkan manual dengan format CSV:")
+        broker_text = st.text_area(
+            "Format: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,AVG_BUY,AVG_SELL",
+            value=st.session_state.get('broker_input', ''),
+            height=80,
+            key='broker_input'
+        )
 
-                # Parsing ke format broker (CSV)
-                lines = text.strip().split('\n')
-                broker_lines = []
-                for line in lines:
-                    line = line.strip()
-                    if not line or 'Broker' in line or 'Buy' in line:
-                        continue
-                    parts = [p.strip() for p in line.split(',')]
-                    if len(parts) >= 5:
-                        try:
-                            code = parts[0]
-                            if code.isalpha() and len(code) <= 4:
-                                buy_lot = int(parts[1].replace(',',''))
-                                buy_freq = int(parts[2].replace(',',''))
-                                sell_lot = int(parts[3].replace(',',''))
-                                sell_freq = int(parts[4].replace(',',''))
-                                broker_lines.append(f"{code},{buy_lot},{buy_freq},{sell_lot},{sell_freq}")
-                        except: continue
-
-                if broker_lines:
-                    st.session_state.broker_input = "\n".join(broker_lines)
-                    st.success(f"✅ {len(broker_lines)} broker terdeteksi dari gambar!")
-                    st.rerun()
-                else:
-                    st.warning("Tidak dapat menemukan data broker. Pastikan format CSV (KODE,BUY_LOT,...) atau isi manual.")
-            except Exception as e:
-                st.warning(f"⚠️ Gagal memproses gambar: {e}")
-
-    broker_text = st.text_area(
-        "Format: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,AVG_BUY,AVG_SELL per baris",
-        height=80, key='broker_input'
-    )
     if st.button("🧹 Reset V12 Memory", use_container_width=True):
         st.session_state.v12_memory = {}
         if os.path.isfile(V12_MEM_FILE): os.remove(V12_MEM_FILE)
@@ -1103,7 +1048,7 @@ if run_btn:
                 ringkasan["AI_Insight"] = hasil_ai
                 hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f'<div class="ai-insight-card"><h3>🤖 Insight AI</h3><p>{hasil_ai_bersih}</p></div>'
-                st.markdown(html_ai, unsafe_allow_html=True)
+                st.markdown(html_ai,unsafe_allow_html=True)
             elif error_ai: st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
     else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
