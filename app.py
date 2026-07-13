@@ -471,41 +471,57 @@ with st.sidebar:
     st.markdown("---")
     # ── V12: BROKER INPUT ──
     st.subheader("🏦 Broker Summary (V12)")
-    # Upload screenshot dengan OCR
-    uploaded_file = st.file_uploader("📷 Upload Screenshot Broker (PNG/JPG)", type=["png","jpg","jpeg"],
-                                     key="broker_ocr", help="Screenshot dari Stockbit / RTI")
-    if uploaded_file is not None:
+    
+    # ---------- Fungsi cek Tesseract ----------
+    def is_tesseract_available():
         try:
-            from PIL import Image
             import pytesseract
-            image = Image.open(uploaded_file)
-            image = image.convert('L')  # grayscale untuk akurasi lebih baik
-            text = pytesseract.image_to_string(image, lang='eng+ind')
-            st.caption("📝 Hasil OCR:")
-            st.code(text)
-            # Coba parse ke format broker
-            lines = text.strip().split('\n')
-            broker_lines = []
-            for line in lines:
-                parts = line.split()
-                if len(parts) >= 3:
-                    try:
-                        code = parts[0]
-                        nums = [int(p.replace(',','')) for p in parts[1:5] if p.replace(',','').isdigit()]
-                        if len(nums) >= 4:
-                            broker_lines.append(f"{code},{nums[0]},{nums[1]},{nums[2]},{nums[3]}")
-                    except: pass
-            if broker_lines:
-                st.session_state.broker_input = "\n".join(broker_lines)
-                st.success(f"✅ {len(broker_lines)} broker terdeteksi dari gambar!")
-                st.rerun()
-            else:
-                st.warning("Tidak dapat menemukan data broker dari gambar. Silakan isi manual.")
-        except ImportError:
-            st.warning("⚠️ OCR tidak tersedia (pytesseract/Pillow belum terinstall). Silakan isi manual.")
-        except Exception as e:
-            st.warning(f"⚠️ Gagal memproses gambar: {e}")
-
+            pytesseract.get_tesseract_version()
+            return True
+        except:
+            return False
+    
+    # ---------- Upload screenshot dengan OCR ----------
+    uploaded_file = st.file_uploader(
+        "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
+        type=["png","jpg","jpeg"],
+        key="broker_ocr",
+        help="Screenshot dari Stockbit / RTI. OCR otomatis mendeteksi broker data."
+    )
+    
+    if uploaded_file is not None:
+        if is_tesseract_available():
+            try:
+                from PIL import Image
+                import pytesseract
+                image = Image.open(uploaded_file)
+                image = image.convert('L')  # grayscale untuk akurasi lebih baik
+                text = pytesseract.image_to_string(image, lang='eng+ind')
+                st.caption("📝 Hasil OCR (mentah):")
+                st.code(text)
+                # Coba parse ke format broker
+                lines = text.strip().split('\n')
+                broker_lines = []
+                for line in lines:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        try:
+                            code = parts[0]
+                            nums = [int(p.replace(',','')) for p in parts[1:5] if p.replace(',','').isdigit()]
+                            if len(nums) >= 4:
+                                broker_lines.append(f"{code},{nums[0]},{nums[1]},{nums[2]},{nums[3]}")
+                        except: pass
+                if broker_lines:
+                    st.session_state.broker_input = "\n".join(broker_lines)
+                    st.success(f"✅ {len(broker_lines)} broker terdeteksi dari gambar!")
+                    st.rerun()
+                else:
+                    st.warning("Tidak dapat menemukan data broker dari gambar. Silakan isi manual di bawah.")
+            except Exception as e:
+                st.warning(f"⚠️ Gagal memproses gambar: {e}")
+        else:
+            st.warning("⚠️ Tesseract OCR tidak terinstall. Fitur OCR dinonaktifkan. Silakan isi manual atau install Tesseract (https://github.com/UB-Mannheim/tesseract/wiki).")
+    
     broker_text = st.text_area(
         "Format: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,AVG_BUY,AVG_SELL per baris",
         height=80, key='broker_input'
