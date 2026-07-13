@@ -476,21 +476,21 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    # ── V12: BROKER INPUT (EasyOCR) ──
+    # ── V12: BROKER INPUT (EasyOCR - FIXED) ──
     st.subheader("🏦 Broker Summary (V12)")
 
-    # ---------- Fungsi OCR dengan EasyOCR ----------
     @st.cache_resource
     def get_easyocr_reader():
-        # Inisialisasi reader untuk bahasa Inggris dan Indonesia, GPU=False untuk CPU
         return easyocr.Reader(['en', 'id'], gpu=False)
 
     def do_ocr_easyocr(image):
         reader = get_easyocr_reader()
-        results = reader.readtext(image, detail=0)  # detail=0 hanya teks
-        return ' '.join(results)  # gabungkan menjadi satu string
+        # KONVERSI PIL IMAGE KE NUMPY ARRAY (PERBAIKAN)
+        if isinstance(image, Image.Image):
+            image = np.array(image)
+        results = reader.readtext(image, detail=0)
+        return ' '.join(results)
 
-    # ---------- Upload screenshot dengan OCR ----------
     uploaded_file = st.file_uploader(
         "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
         type=["png","jpg","jpeg"],
@@ -505,14 +505,12 @@ with st.sidebar:
             try:
                 from PIL import Image
                 image = Image.open(uploaded_file)
-                # Konversi ke grayscale untuk hasil lebih baik
-                image = image.convert('L')
-                # Jalankan OCR
+                image = image.convert('L')   # grayscale opsional
                 with st.spinner("🔍 Membaca teks dari gambar..."):
                     text = do_ocr_easyocr(image)
                 st.caption("📝 Hasil OCR (mentah):")
                 st.code(text)
-                # Coba parse ke format broker
+                # Parsing
                 lines = text.strip().split('\n')
                 broker_lines = []
                 for line in lines:
