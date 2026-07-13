@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 import pytz
 import math
+import shutil  # untuk mencari tesseract di PATH
 import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
@@ -35,12 +36,12 @@ TRANSLATOR_AVAILABLE = True
 try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
 
-# EasyOCR (pengganti Tesseract)
-EASYOCR_AVAILABLE = True
+# Tesseract OCR
+TESSERACT_AVAILABLE = True
 try:
-    import easyocr
+    import pytesseract
 except ImportError:
-    EASYOCR_AVAILABLE = False
+    TESSERACT_AVAILABLE = False
 # =================================================================
 
 warnings.filterwarnings("ignore")
@@ -476,58 +477,97 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    # ── V12: BROKER INPUT (EasyOCR - FIXED) ──
+    # ── V12: BROKER INPUT (TESSERACT OCR) ──
     st.subheader("🏦 Broker Summary (V12)")
 
-    @st.cache_resource
-    def get_easyocr_reader():
-        return easyocr.Reader(['en', 'id'], gpu=False)
+    def is_tesseract_available():
+        """Cek ketersediaan Tesseract dan set path secara otomatis."""
+        if not TESSERACT_AVAILABLE:
+            return False
+        try:
+            pytesseract.get_tesseract_version()
+            return True
+        except:
+            # coba cari di PATH
+            tesseract_path = shutil.which('tesseract')
+            if tesseract_path:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_path
+                try:
+                    pytesseract.get_tesseract_version()
+                    return True
+                except:
+                    pass
+            # cek path manual dari session state
+            manual_path = st.session_state.get('tesseract_manual_path', '')
+            if manual_path and os.path.isfile(manual_path):
+                pytesseract.pytesseract.tesseract_cmd = manual_path
+                try:
+                    pytesseract.get_tesseract_version()
+                    return True
+                except:
+                    pass
+            return False
 
-    def do_ocr_easyocr(image):
-        reader = get_easyocr_reader()
-        # KONVERSI PIL IMAGE KE NUMPY ARRAY (PERBAIKAN)
-        if isinstance(image, Image.Image):
-            image = np.array(image)
-        results = reader.readtext(image, detail=0)
-        return ' '.join(results)
+    if 'tesseract_manual_path' not in st.session_state:
+        st.session_state.tesseract_manual_path = ""
 
     uploaded_file = st.file_uploader(
         "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
         type=["png","jpg","jpeg"],
         key="broker_ocr",
-        help="Screenshot dari Stockbit / RTI. OCR menggunakan EasyOCR (mendukung ID+EN)."
+        help="Screenshot dari Stockbit / RTI. OCR menggunakan Tesseract."
     )
 
     if uploaded_file is not None:
-        if not EASYOCR_AVAILABLE:
-            st.error("❌ EasyOCR tidak terinstal. Jalankan `pip install easyocr` dan restart aplikasi.")
+        if not is_tesseract_available():
+            st.warning("⚠️ Tesseract tidak terdeteksi. Silakan isi path manual di bawah, lalu upload ulang.")
+            manual_path = st.text_input(
+                "📍 Path ke tesseract.exe",
+                value=r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                key="tesseract_path_input",
+                help="Contoh: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+            )
+            if manual_path:
+                st.session_state.tesseract_manual_path = manual_path
+                st.info("Path disimpan. Silakan upload ulang gambar.")
         else:
             try:
                 from PIL import Image
                 image = Image.open(uploaded_file)
-                image = image.convert('L')   # grayscale opsional
-                with st.spinner("🔍 Membaca teks dari gambar..."):
-                    text = do_ocr_easyocr(image)
+                # Preprocessing: grayscale
+                image = image.convert('L')
+                # Tesseract OCR
+                custom_config = r'--oem 3 --psm 6'  # mode otomatis terbaik untuk tabel
+                text = pytesseract.image_to_string(image, lang='eng', config=custom_config)
                 st.caption("📝 Hasil OCR (mentah):")
                 st.code(text)
-                # Parsing
+                
+                # Parsing: asumsikan format CSV: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,...
                 lines = text.strip().split('\n')
                 broker_lines = []
                 for line in lines:
-                    parts = line.split()
-                    if len(parts) >= 3:
+                    line = line.strip()
+                    if not line or 'Broker' in line or 'Buy' in line:  # skip header
+                        continue
+                    parts = [p.strip() for p in line.split(',')]
+                    if len(parts) >= 5:
                         try:
                             code = parts[0]
-                            nums = [int(p.replace(',','')) for p in parts[1:5] if p.replace(',','').isdigit()]
-                            if len(nums) >= 4:
-                                broker_lines.append(f"{code},{nums[0]},{nums[1]},{nums[2]},{nums[3]}")
-                        except: pass
+                            if code.isalpha() and len(code) <= 4:  # kode broker biasanya 2-4 huruf
+                                buy_lot = int(parts[1].replace(',',''))
+                                buy_freq = int(parts[2].replace(',',''))
+                                sell_lot = int(parts[3].replace(',',''))
+                                sell_freq = int(parts[4].replace(',',''))
+                                broker_lines.append(f"{code},{buy_lot},{buy_freq},{sell_lot},{sell_freq}")
+                        except:
+                            continue
+                
                 if broker_lines:
                     st.session_state.broker_input = "\n".join(broker_lines)
                     st.success(f"✅ {len(broker_lines)} broker terdeteksi dari gambar!")
                     st.rerun()
                 else:
-                    st.warning("Tidak dapat menemukan data broker dari gambar. Silakan isi manual di bawah.")
+                    st.warning("Format broker tidak dikenali. Pastikan screenshot menampilkan tabel broker dengan kolom: Kode,Buy Lot,Buy Freq,Sell Lot,Sell Freq")
             except Exception as e:
                 st.warning(f"⚠️ Gagal memproses gambar: {e}")
 
