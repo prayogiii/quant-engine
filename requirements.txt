@@ -13,5 +13,4 @@ python-dotenv
 pytz
 pytesseract
 Pillow
-paddlepaddle==2.6.0
-paddleocr==2.7.3
+
