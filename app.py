@@ -551,7 +551,7 @@ with st.sidebar:
                        "Silakan isi path manual ke `tesseract.exe`, lalu upload ulang gambar.")
             manual_path = st.text_input(
                 "📍 Path ke tesseract.exe",
-                value=r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                value=r"D:\Program Files\tesseract.exe",
                 key="tesseract_path_input",
                 help="Contoh: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
             )
