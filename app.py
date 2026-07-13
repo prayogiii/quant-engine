@@ -523,7 +523,7 @@ with st.sidebar:
             st.warning("⚠️ Tesseract tidak terdeteksi. Silakan isi path manual di bawah, lalu upload ulang.")
             manual_path = st.text_input(
                 "📍 Path ke tesseract.exe",
-                value=r"D:\Program File\tesseract.exe",
+                value=r"D:\Program Files\Tesseract-OCR\tesseract.exe",
                 key="tesseract_path_input",
                 help="Contoh: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
             )
