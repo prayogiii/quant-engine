@@ -12,7 +12,6 @@ import os
 from datetime import datetime
 import pytz
 import math
-import shutil  # <-- tambahan
 import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
@@ -35,6 +34,13 @@ except ImportError: RSS_AVAILABLE = False
 TRANSLATOR_AVAILABLE = True
 try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
+
+# EasyOCR (pengganti Tesseract)
+EASYOCR_AVAILABLE = True
+try:
+    import easyocr
+except ImportError:
+    EASYOCR_AVAILABLE = False
 # =================================================================
 
 warnings.filterwarnings("ignore")
@@ -470,63 +476,43 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    # ── V12: BROKER INPUT ──
+    # ── V12: BROKER INPUT (EasyOCR) ──
     st.subheader("🏦 Broker Summary (V12)")
-    
-    # ---------- Fungsi cek Tesseract (REVISI) ----------
-    def is_tesseract_available():
-        try:
-            import pytesseract
-            # 1. Cek langsung
-            pytesseract.get_tesseract_version()
-            return True
-        except:
-            # 2. Cari di PATH sistem
-            tesseract_path = shutil.which('tesseract')
-            if tesseract_path:
-                pytesseract.pytesseract.tesseract_cmd = tesseract_path
-                try:
-                    pytesseract.get_tesseract_version()
-                    return True
-                except:
-                    pass
-            # 3. Cek path manual dari session state
-            manual_path = st.session_state.get('tesseract_manual_path', '')
-            if manual_path and os.path.isfile(manual_path):
-                pytesseract.pytesseract.tesseract_cmd = manual_path
-                try:
-                    pytesseract.get_tesseract_version()
-                    return True
-                except:
-                    pass
-            return False
 
-    # Inisialisasi session state untuk manual path
-    if 'tesseract_manual_path' not in st.session_state:
-        st.session_state.tesseract_manual_path = ""
+    # ---------- Fungsi OCR dengan EasyOCR ----------
+    @st.cache_resource
+    def get_easyocr_reader():
+        # Inisialisasi reader untuk bahasa Inggris dan Indonesia, GPU=False untuk CPU
+        return easyocr.Reader(['en', 'id'], gpu=False)
+
+    def do_ocr_easyocr(image):
+        reader = get_easyocr_reader()
+        results = reader.readtext(image, detail=0)  # detail=0 hanya teks
+        return ' '.join(results)  # gabungkan menjadi satu string
 
     # ---------- Upload screenshot dengan OCR ----------
     uploaded_file = st.file_uploader(
         "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
         type=["png","jpg","jpeg"],
         key="broker_ocr",
-        help="Screenshot dari Stockbit / RTI. OCR otomatis mendeteksi broker data."
+        help="Screenshot dari Stockbit / RTI. OCR menggunakan EasyOCR (mendukung ID+EN)."
     )
-    
+
     if uploaded_file is not None:
-        if is_tesseract_available():
+        if not EASYOCR_AVAILABLE:
+            st.error("❌ EasyOCR tidak terinstal. Jalankan `pip install easyocr` dan restart aplikasi.")
+        else:
             try:
                 from PIL import Image
-                import pytesseract
-                # Gunakan path manual jika ada
-                if st.session_state.tesseract_manual_path:
-                    pytesseract.pytesseract.tesseract_cmd = st.session_state.tesseract_manual_path
                 image = Image.open(uploaded_file)
-                image = image.convert('L')  # grayscale
-                text = pytesseract.image_to_string(image, lang='eng+ind')
+                # Konversi ke grayscale untuk hasil lebih baik
+                image = image.convert('L')
+                # Jalankan OCR
+                with st.spinner("🔍 Membaca teks dari gambar..."):
+                    text = do_ocr_easyocr(image)
                 st.caption("📝 Hasil OCR (mentah):")
                 st.code(text)
-                # Parse ke format broker
+                # Coba parse ke format broker
                 lines = text.strip().split('\n')
                 broker_lines = []
                 for line in lines:
@@ -546,19 +532,7 @@ with st.sidebar:
                     st.warning("Tidak dapat menemukan data broker dari gambar. Silakan isi manual di bawah.")
             except Exception as e:
                 st.warning(f"⚠️ Gagal memproses gambar: {e}")
-        else:
-            st.warning("⚠️ Tesseract OCR tidak terdeteksi secara otomatis. "
-                       "Silakan isi path manual ke `tesseract.exe`, lalu upload ulang gambar.")
-            manual_path = st.text_input(
-                "📍 Path ke tesseract.exe",
-                value=r"D:\Program Files\tesseract.exe",
-                key="tesseract_path_input",
-                help="Contoh: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
-            )
-            if manual_path:
-                st.session_state.tesseract_manual_path = manual_path
-                st.info("Path disimpan. Silakan upload ulang gambar untuk menjalankan OCR.")
-    
+
     broker_text = st.text_area(
         "Format: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,AVG_BUY,AVG_SELL per baris",
         height=80, key='broker_input'
@@ -911,7 +885,7 @@ if run_btn:
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
-    # --- DETAIL EXPANDER (sebelumnya) ---
+    # --- DETAIL EXPANDER ---
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
         st.subheader("📰 Sentimen Berita Terbobot"); c1,c2=st.columns([1,2])
         c1.metric("Sentimen Skor",f"{avg_sentiment:.2f}",sentimen_status)
