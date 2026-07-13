@@ -12,7 +12,7 @@ import os
 from datetime import datetime
 import pytz
 import math
-import shutil  # untuk mencari tesseract di PATH
+import shutil
 import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
@@ -477,35 +477,35 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    # ── V12: BROKER INPUT (TESSERACT OCR) ──
+    # ──────────────────────────────────────────────────────
+    # V12: BROKER INPUT (TESSERACT OCR - FINAL REVISED)
+    # ──────────────────────────────────────────────────────
     st.subheader("🏦 Broker Summary (V12)")
 
     def is_tesseract_available():
-        """Cek ketersediaan Tesseract dan set path secara otomatis."""
+        """Cek ketersediaan Tesseract dan set path."""
         if not TESSERACT_AVAILABLE:
             return False
         try:
             pytesseract.get_tesseract_version()
             return True
         except:
-            # coba cari di PATH
+            # coba PATH
             tesseract_path = shutil.which('tesseract')
             if tesseract_path:
                 pytesseract.pytesseract.tesseract_cmd = tesseract_path
                 try:
                     pytesseract.get_tesseract_version()
                     return True
-                except:
-                    pass
-            # cek path manual dari session state
+                except: pass
+            # coba path manual
             manual_path = st.session_state.get('tesseract_manual_path', '')
             if manual_path and os.path.isfile(manual_path):
                 pytesseract.pytesseract.tesseract_cmd = manual_path
                 try:
                     pytesseract.get_tesseract_version()
                     return True
-                except:
-                    pass
+                except: pass
             return False
 
     if 'tesseract_manual_path' not in st.session_state:
@@ -520,54 +520,59 @@ with st.sidebar:
 
     if uploaded_file is not None:
         if not is_tesseract_available():
-            st.warning("⚠️ Tesseract tidak terdeteksi. Silakan isi path manual di bawah, lalu upload ulang.")
+            # Tampilkan input path manual
+            st.warning("⚠️ Tesseract tidak terdeteksi. Masukkan path ke `tesseract.exe` dan tekan Enter.")
             manual_path = st.text_input(
                 "📍 Path ke tesseract.exe",
-                value=r"D:\Program Files\Tesseract-OCR\tesseract.exe",
+                value=st.session_state.tesseract_manual_path,
                 key="tesseract_path_input",
-                help="Contoh: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+                help="Contoh: D:\\Program Files\\Tesseract-OCR\\tesseract.exe"
             )
             if manual_path:
-                st.session_state.tesseract_manual_path = manual_path
-                st.info("Path disimpan. Silakan upload ulang gambar.")
+                if os.path.isfile(manual_path):
+                    # Simpan path dan set langsung
+                    st.session_state.tesseract_manual_path = manual_path
+                    pytesseract.pytesseract.tesseract_cmd = manual_path
+                    st.success("✅ Path valid! Memproses gambar...")
+                    st.rerun()  # Rerun agar deteksi sukses dan gambar diproses
+                else:
+                    st.error("❌ File tidak ditemukan. Periksa kembali path.")
         else:
+            # Tesseract tersedia, proses gambar
             try:
                 from PIL import Image
                 image = Image.open(uploaded_file)
-                # Preprocessing: grayscale
-                image = image.convert('L')
-                # Tesseract OCR
-                custom_config = r'--oem 3 --psm 6'  # mode otomatis terbaik untuk tabel
+                image = image.convert('L')   # grayscale
+                custom_config = r'--oem 3 --psm 6'
                 text = pytesseract.image_to_string(image, lang='eng', config=custom_config)
                 st.caption("📝 Hasil OCR (mentah):")
                 st.code(text)
-                
-                # Parsing: asumsikan format CSV: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,...
+
+                # Parsing ke format broker (CSV)
                 lines = text.strip().split('\n')
                 broker_lines = []
                 for line in lines:
                     line = line.strip()
-                    if not line or 'Broker' in line or 'Buy' in line:  # skip header
+                    if not line or 'Broker' in line or 'Buy' in line:
                         continue
                     parts = [p.strip() for p in line.split(',')]
                     if len(parts) >= 5:
                         try:
                             code = parts[0]
-                            if code.isalpha() and len(code) <= 4:  # kode broker biasanya 2-4 huruf
+                            if code.isalpha() and len(code) <= 4:
                                 buy_lot = int(parts[1].replace(',',''))
                                 buy_freq = int(parts[2].replace(',',''))
                                 sell_lot = int(parts[3].replace(',',''))
                                 sell_freq = int(parts[4].replace(',',''))
                                 broker_lines.append(f"{code},{buy_lot},{buy_freq},{sell_lot},{sell_freq}")
-                        except:
-                            continue
-                
+                        except: continue
+
                 if broker_lines:
                     st.session_state.broker_input = "\n".join(broker_lines)
                     st.success(f"✅ {len(broker_lines)} broker terdeteksi dari gambar!")
                     st.rerun()
                 else:
-                    st.warning("Format broker tidak dikenali. Pastikan screenshot menampilkan tabel broker dengan kolom: Kode,Buy Lot,Buy Freq,Sell Lot,Sell Freq")
+                    st.warning("Tidak dapat menemukan data broker. Pastikan format CSV (KODE,BUY_LOT,...) atau isi manual.")
             except Exception as e:
                 st.warning(f"⚠️ Gagal memproses gambar: {e}")
 
