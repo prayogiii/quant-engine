@@ -35,20 +35,12 @@ TRANSLATOR_AVAILABLE = True
 try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
 
-# PADDLEOCR (ganti Tesseract/EasyOCR)
-PADDLEOCR_AVAILABLE = True
-try:
-    from paddleocr import PaddleOCR
-except ImportError:
-    PADDLEOCR_AVAILABLE = False
-# =================================================================
-
 warnings.filterwarnings("ignore")
 
 # ═══════════════════════════════════════════════════════════════
-# V12 ADAPTIVE ENGINE – CONSTANTS & STATE
+# V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
-FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Broker","Beta_IHSG","Coppock"]
+FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock"]  # Broker dihapus
 WEIGHT_MIN    = 0.08
 WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
@@ -85,13 +77,13 @@ def save_v12_memory(mem):
 
 def default_weight(factor, regime):
     defaults = {
-        "STABLE BULLISH": {"Momentum":0.22,"AI_Senti":0.18,"MeanRev":0.10,"Broker":0.25,"Beta_IHSG":0.12,"Coppock":0.13},
-        "VOLATILE UPTREND": {"Momentum":0.25,"AI_Senti":0.14,"MeanRev":0.10,"Broker":0.27,"Beta_IHSG":0.14,"Coppock":0.10},
-        "HIGH-STRESS PANIC": {"Momentum":0.12,"AI_Senti":0.18,"MeanRev":0.20,"Broker":0.20,"Beta_IHSG":0.12,"Coppock":0.18},
-        "SIDEWAYS / CONSOLIDATION": {"Momentum":0.12,"AI_Senti":0.18,"MeanRev":0.25,"Broker":0.20,"Beta_IHSG":0.10,"Coppock":0.15},
-        "BEARISH ACCUMULATION": {"Momentum":0.17,"AI_Senti":0.18,"MeanRev":0.17,"Broker":0.21,"Beta_IHSG":0.12,"Coppock":0.15}
+        "STABLE BULLISH": {"Momentum":0.25,"AI_Senti":0.18,"MeanRev":0.12,"Beta_IHSG":0.15,"Coppock":0.30},
+        "VOLATILE UPTREND": {"Momentum":0.28,"AI_Senti":0.14,"MeanRev":0.12,"Beta_IHSG":0.16,"Coppock":0.30},
+        "HIGH-STRESS PANIC": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.22,"Beta_IHSG":0.15,"Coppock":0.30},
+        "SIDEWAYS / CONSOLIDATION": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.27,"Beta_IHSG":0.12,"Coppock":0.28},
+        "BEARISH ACCUMULATION": {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.20,"Beta_IHSG":0.15,"Coppock":0.27}
     }
-    return defaults.get(regime, {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.13,"Broker":0.22,"Beta_IHSG":0.12,"Coppock":0.15}).get(factor,0.15)
+    return defaults.get(regime, {"Momentum":0.23,"AI_Senti":0.17,"MeanRev":0.15,"Beta_IHSG":0.15,"Coppock":0.30}).get(factor,0.15)
 
 if 'v12_memory' not in st.session_state:
     st.session_state.v12_memory = load_v12_memory()
@@ -111,93 +103,6 @@ def coppock_curve(prices, rP1=14, rP2=11, wP=10):
     curr = wma(combined,wP)
     prev = wma(combined[:-1],wP) if len(combined)>wP else 0.0
     return curr,prev
-
-# ---------- Broker (Parsing Teks) ----------
-def parse_broker_input(text):
-    entries = []
-    for line in text.strip().split('\n'):
-        if not line.strip(): continue
-        parts = [p.strip() for p in line.split(',')]
-        if len(parts)>=5:
-            try:
-                e = {'code':parts[0], 'buy_lot':int(parts[1]), 'buy_freq':int(parts[2]),
-                     'sell_lot':int(parts[3]), 'sell_freq':int(parts[4]),
-                     'avg_buy':float(parts[5]) if len(parts)>5 and parts[5] else 0.0,
-                     'avg_sell':float(parts[6]) if len(parts)>6 and parts[6] else 0.0}
-                entries.append(e)
-            except: continue
-    return entries
-
-def parse_broker_text_auto(text):
-    """Parser cerdas: mendukung CSV, spasi/tab, dan membersihkan noise."""
-    # Hapus karakter aneh, perbaiki kesalahan umum
-    text = re.sub(r'[oO]', '0', text)
-    text = re.sub(r'[lI]', '1', text)
-    text = re.sub(r'[^\d\w\s,\.\-]', '', text)
-    lines = text.strip().split('\n')
-    result = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if ',' in line:
-            parts = [p.strip() for p in line.split(',')]
-        else:
-            parts = line.split()
-        if len(parts) >= 5 and re.match(r'^[A-Z]{2,4}$', parts[0], re.I):
-            try:
-                code = parts[0].upper()
-                def clean_int(x):
-                    return int(re.sub(r'[^\d]', '', x))
-                def clean_float(x):
-                    return float(re.sub(r'[^\d\.]', '', x))
-                buy_lot = clean_int(parts[1])
-                buy_freq = clean_int(parts[2])
-                sell_lot = clean_int(parts[3])
-                sell_freq = clean_int(parts[4])
-                avg_buy = clean_float(parts[5]) if len(parts) > 5 and parts[5] else 0.0
-                avg_sell = clean_float(parts[6]) if len(parts) > 6 and parts[6] else 0.0
-                result.append(f"{code},{buy_lot},{buy_freq},{sell_lot},{sell_freq},{avg_buy},{avg_sell}")
-            except: continue
-    return "\n".join(result)
-
-def analyze_broker(entries, cur_price):
-    if not entries: return None
-    tbuy_lot = sum(e['buy_lot'] for e in entries)
-    tsell_lot = sum(e['sell_lot'] for e in entries)
-    tbuy_freq = sum(e['buy_freq'] for e in entries)
-    tsell_freq = sum(e['sell_freq'] for e in entries)
-    net = tbuy_lot - tsell_lot
-    avg_buy_ord = tbuy_lot/max(1,tbuy_freq)
-    avg_sell_ord = tsell_lot/max(1,tsell_freq)
-    freq_imb = (tbuy_freq-tsell_freq)/max(1,tbuy_freq+tsell_freq)
-    # whale
-    lots = []
-    for e in entries:
-        if e['buy_freq']>0: lots.append(e['buy_lot']/e['buy_freq'])
-        if e['sell_freq']>0: lots.append(e['sell_lot']/e['sell_freq'])
-    med = np.median(lots) if lots else 1
-    whale = any((e['buy_lot']/max(1,e['buy_freq'])>4*med) or (e['sell_lot']/max(1,e['sell_freq'])>4*med) for e in entries)
-    # prices
-    buy_pr = [e for e in entries if e['avg_buy']>0 and e['buy_lot']>0]
-    sell_pr = [e for e in entries if e['avg_sell']>0 and e['sell_lot']>0]
-    w_buy = sum(e['avg_buy']*e['buy_lot'] for e in buy_pr)/max(1,sum(e['buy_lot'] for e in buy_pr))
-    w_sell = sum(e['avg_sell']*e['sell_lot'] for e in sell_pr)/max(1,sum(e['sell_lot'] for e in sell_pr))
-    bw = tbuy_lot/max(1,tbuy_lot+tsell_lot); sw=1-bw
-    bg = (cur_price-w_buy)/w_buy if w_buy>0 else 0
-    sg = (w_sell-cur_price)/w_sell if w_sell>0 else 0
-    press = bg*bw - sg*sw
-    flow_sc = net/max(1,tbuy_lot+tsell_lot)
-    size_sc = (avg_buy_ord-avg_sell_ord)/max(1,avg_buy_ord+avg_sell_ord)
-    inst = flow_sc*0.45 + size_sc*0.25 + freq_imb*0.15 + press*0.15
-    sig = "NEUTRAL"
-    if inst>0.25 and whale: sig="STRONG ACCUMULATION"
-    elif inst>0.10: sig="ACCUMULATION"
-    elif inst<-0.25 and whale: sig="STRONG DISTRIBUTION"
-    elif inst<-0.10: sig="DISTRIBUTION"
-    return {'net_flow':net,'inst_score':inst,'whale':whale,'signal':sig,
-            'w_buy':w_buy,'w_sell':w_sell,'pressure':press,
-            'avg_buy_order':avg_buy_ord,'avg_sell_order':avg_sell_ord}
 
 # ---------- Adaptive Weights ----------
 def get_adaptive_weights(ticker, regime):
@@ -509,88 +414,9 @@ with st.sidebar:
         st.success("Riwayat dihapus!")
 
     st.markdown("---")
-    # ── BROKER INPUT (PADDLEOCR + PASTE + MANUAL) ──
-    st.subheader("🏦 Broker Summary (V12)")
-
-    # ---------- PADDLEOCR SETUP ----------
-    @st.cache_resource
-    def get_paddleocr_reader():
-        return PaddleOCR(lang='en', use_gpu=False, show_log=False)
-
-    def do_ocr_paddle(image):
-        reader = get_paddleocr_reader()
-        if isinstance(image, Image.Image):
-            image = np.array(image)
-        result = reader.ocr(image)
-        texts = []
-        if result and result[0]:
-            for line in result[0]:
-                texts.append(line[1][0])
-        return ' '.join(texts)
-
-    # ---------- UPLOAD GAMBAR (opsional) ----------
-    uploaded_file = st.file_uploader(
-        "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
-        type=["png","jpg","jpeg"],
-        key="broker_ocr",
-        help="Screenshot dari Stockbit / RTI. OCR menggunakan PaddleOCR."
-    )
-
-    if uploaded_file is not None:
-        if not PADDLEOCR_AVAILABLE:
-            st.error("❌ PaddleOCR tidak terinstal. Jalankan `pip install paddlepaddle paddleocr` dan restart aplikasi.")
-        else:
-            try:
-                from PIL import Image
-                image = Image.open(uploaded_file)
-                with st.spinner("🔍 Membaca teks dari gambar..."):
-                    text = do_ocr_paddle(image)
-                st.caption("📝 Hasil OCR (mentah):")
-                st.code(text)
-                formatted = parse_broker_text_auto(text)
-                if formatted:
-                    st.session_state.broker_input = formatted
-                    st.success(f"✅ {len(formatted.split(chr(10)))} broker terdeteksi dari gambar!")
-                    st.rerun()
-                else:
-                    st.warning("Tidak dapat menemukan data broker. Pastikan gambar jelas, atau gunakan input manual.")
-            except Exception as e:
-                st.warning(f"⚠️ Gagal memproses gambar: {e}")
-
-    # ---------- PASTE TEKS MANUAL ----------
-    st.caption("Atau paste teks broker secara manual:")
-    raw_paste = st.text_area(
-        "Paste data broker di sini (satu broker per baris)",
-        height=100,
-        key="raw_broker_paste",
-        help="Bisa format CSV atau teks dengan spasi."
-    )
-    if raw_paste:
-        formatted = parse_broker_text_auto(raw_paste)
-        if formatted:
-            st.session_state.broker_input = formatted
-            st.success(f"✅ {len(formatted.split(chr(10)))} broker dikenali dari teks!")
-        else:
-            st.warning("❌ Tidak ada data broker valid. Periksa kembali teks yang ditempel.")
-
-    # ---------- FALLBACK MANUAL CSV ----------
-    broker_text = st.text_area(
-        "Atau masukkan manual format CSV: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,AVG_BUY,AVG_SELL",
-        value=st.session_state.get('broker_input', ''),
-        height=80,
-        key='broker_input'
-    )
-
-    if st.button("🧹 Reset V12 Memory", use_container_width=True):
-        st.session_state.v12_memory = {}
-        if os.path.isfile(V12_MEM_FILE): os.remove(V12_MEM_FILE)
-        if os.path.isfile(V12_PRED_FILE): os.remove(V12_PRED_FILE)
-        st.success("Memory adaptif V12 direset!")
-
-    st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
 
-# ==================== FUNGSI DATA & INDIKATOR (sama seperti sebelumnya) ====================
+# ==================== FUNGSI DATA & INDIKATOR ====================
 @st.cache_data(ttl=3600)
 def load_stock_data(ticker):
     df = yf.download(ticker, period="2y")
@@ -689,7 +515,7 @@ REGIME_INFO = {
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
 
-# ==================== PROSES ANALISIS (sama) ====================
+# ==================== PROSES ANALISIS ====================
 if run_btn:
     if not ticker_input:
         st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
@@ -702,6 +528,7 @@ if run_btn:
         returns = df['Close'].pct_change().dropna()
         if len(returns)<50: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
 
+        # ============ INDIKATOR ============
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['ADX'] = compute_adx_series(df)
@@ -709,6 +536,7 @@ if run_btn:
         df['ZScore'] = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
         df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
 
+        # ============ FUNDAMENTAL ============
         try: ticker_info = yf.Ticker(ticker_input).info
         except: ticker_info = {}
         mc = ticker_info.get('marketCap')
@@ -717,6 +545,7 @@ if run_btn:
         roe = ticker_info.get('returnOnEquity')
         de = ticker_info.get('debtToEquity')
 
+        # ============ BERITA & SENTIMEN ============
         news_pool = []
         translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
         translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
@@ -740,6 +569,7 @@ if run_btn:
             else: translated.append("")
         sentimen_status = "Positif 🟢" if avg_sentiment>=0.05 else ("Negatif 🔴" if avg_sentiment<=-0.05 else "Netral ⚪")
 
+        # ============ THRESHOLD HISTORIS ============
         split_idx = max(126, len(df)-126)
         df_thresh = df.iloc[:split_idx]
         returns_thresh = df_thresh['Close'].pct_change().dropna()
@@ -754,6 +584,7 @@ if run_btn:
                        bounds=[(2.1,100),(-0.1,0.1),(1e-6,None)], args=(returns_thresh,), method='L-BFGS-B')
         df_est, t_loc, t_scale = res.x if res.success else (5, returns_thresh.mean(), returns_thresh.std())
 
+        # ============ REGIME ============
         def get_regime_row(row):
             h,e20,e50,a,z,m = row['Close'],row['EMA20'],row['EMA50'],row['ADX'],row['ZScore'],row['Mom5D']
             if a>adx_threshold:
@@ -773,6 +604,7 @@ if run_btn:
         regime, ihsg_cond = get_regime_row(df.iloc[-1])
         adx = df['ADX'].iloc[-1]
 
+        # ============ BETA ============
         try:
             ihsg = load_ihsg_data()
             ihsg_ret = ihsg['Close'].pct_change().dropna()
@@ -780,6 +612,7 @@ if run_btn:
             beta_ihsg = (np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])) if len(common)>20 else 1.0
         except: beta_ihsg = 1.0
 
+        # ============ PIVOT ============
         hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
         pp = (hi+lo+harga_terakhir)/3
         r1,s1 = 2*pp-lo, 2*pp-hi
@@ -787,6 +620,7 @@ if run_btn:
         res20 = float(df['High'].iloc[-21:-1].max())
         breakout = "YES (🔥)" if harga_terakhir>res20 else "NO"
 
+        # ============ SINYAL ============
         def generate_signals_vectorized(dataframe, mom_th):
             score = pd.Series(0, index=dataframe.index)
             is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
@@ -801,6 +635,7 @@ if run_btn:
         df['Signal'] = generate_signals_vectorized(df, mom_median_th)
         signal = df['Signal'].iloc[-1]
 
+        # ============ BACKTEST ============
         df_back = df.iloc[-126:].copy()
         trades, daily_returns = [], []
         in_position, entry_price = False, 0.0
@@ -827,6 +662,7 @@ if run_btn:
             trades_bt = len(trades)
         else: win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
 
+        # ============ KELLY ============
         roll_max_th = df_thresh['Close'].cummax()
         drawdown_th = (df_thresh['Close']-roll_max_th)/roll_max_th
         max_dd = float(drawdown_th.min()*100)
@@ -842,6 +678,7 @@ if run_btn:
         kurt_penalty = 0.5 if ret_kurt>3 else 1.0
         kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
 
+        # ============ MONTE CARLO ============
         n_sim,n_days = 2000,30
         latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
         scale_corrected = latest_vol/np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
@@ -866,6 +703,7 @@ if run_btn:
         rrr = tp_pct/sl_pct if sl_pct else 0
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
 
+        # ============ RINGKASAN AWAL ============
         ringkasan = {
             "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
@@ -874,6 +712,7 @@ if run_btn:
             "TP%": f"{tp_pct:.1f}", "SL%": f"{sl_pct:.1f}", "AI_Insight": ""
         }
 
+    # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest + AI + Grafik Interaktif + Fundamental")
     st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",","."))
@@ -898,7 +737,7 @@ if run_btn:
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10))
         st.plotly_chart(fig, use_container_width=True)
 
-    # Ringkasan eksekutif (sama)
+    # --- RINGKASAN EKSEKUTIF ---
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
     if rrr<1.0 and ("BUY" in signal):
         ac,ai = "#ef4444","⚠️"; at = f"• <b>KONDISI:</b> Sinyal {signal} tapi <b>RRR BURUK ({rrr:.2f})</b><br>• <b>REKOMENDASI:</b> WAIT & SEE<br>• <b>LANGKAH:</b> Tunda entry, tunggu koreksi ke Support 1."
@@ -916,6 +755,7 @@ if run_btn:
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
+    # --- DETAIL EXPANDER ---
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
         st.subheader("📰 Sentimen Berita Terbobot"); c1,c2=st.columns([1,2])
         c1.metric("Sentimen Skor",f"{avg_sentiment:.2f}",sentimen_status)
@@ -992,25 +832,26 @@ if run_btn:
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric("Prob. Naik Besok",f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
-    # V12 Adaptive Engine (sama)
-    with st.expander("🧬 V12 Adaptive Engine (Coppock, Broker, Self‑Learning)", expanded=True):
+    # ══════════════════════════════════════════════════════════
+    # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (TANPA BROKER)
+    # ══════════════════════════════════════════════════════════
+    with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
+        # Coppock
         coppock_val, coppock_prev = coppock_curve(df['Close'].values)
         coppock_rising = coppock_val > coppock_prev
         coppock_turning_up = coppock_rising and coppock_prev <= 0
         col_cop1, col_cop2 = st.columns(2)
         col_cop1.metric("Coppock Curve", f"{coppock_val:.3f}",
                         "Turning Up ✅" if coppock_turning_up else ("Rising" if coppock_rising else "Falling"))
-        broker_entries = parse_broker_input(st.session_state.get('broker_input',''))
-        broker_result = analyze_broker(broker_entries, harga_terakhir) if broker_entries else None
-        if broker_result:
-            col_cop2.metric("Broker Signal", broker_result['signal'],
-                            f"Inst Score: {broker_result['inst_score']:.3f}")
-        else:
-            col_cop2.caption("Tidak ada data broker")
+        col_cop2.metric("Beta IHSG", f"{beta_ihsg:.2f}x")
+        
+        # Adaptive weights (tanpa broker)
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
         st.subheader("Adaptive Weights (per faktor)")
         w_df = pd.DataFrame.from_dict(adaptive_w, orient='index', columns=['Weight'])
         st.bar_chart(w_df)
+        
+        # Memory status
         mem = st.session_state.v12_memory.get(ticker_raw, {})
         if mem:
             st.subheader("Factor Accuracy & Error EMA")
@@ -1024,6 +865,7 @@ if run_btn:
                 st.caption("Error EMA (lower=better)")
                 st.bar_chart(pd.Series(err_data))
 
+        # Self‑learning update
         if os.path.isfile(V12_PRED_FILE):
             pred_df = pd.read_csv(V12_PRED_FILE)
             prev = pred_df[pred_df['ticker']==ticker_raw]
@@ -1038,12 +880,12 @@ if run_btn:
                 pred_df = pred_df[pred_df['ticker']!=ticker_raw]
                 pred_df.to_csv(V12_PRED_FILE, index=False)
 
+        # Simpan prediksi baru
         new_pred = {'ticker': ticker_raw, 'close_price': harga_terakhir}
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
             "AI_Senti": avg_sentiment,
             "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
-            "Broker": broker_result['inst_score'] if broker_result else 0.0,
             "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
             "Coppock": coppock_val / 10.0
         }
@@ -1054,6 +896,7 @@ if run_btn:
         else:
             pred_df.to_csv(V12_PRED_FILE, index=False)
 
+    # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
     if st.session_state.get("gemini_api_key"):
         with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
@@ -1087,6 +930,7 @@ if run_btn:
     st.session_state.riwayat.insert(0, ringkasan)
     if len(st.session_state.riwayat)>50: st.session_state.riwayat.pop()
 
+# --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
     if not st.session_state.gemini_api_key: st.error("Masukkan API Key terlebih dahulu!")
     elif not st.session_state.riwayat: st.warning("Belum ada riwayat.")
