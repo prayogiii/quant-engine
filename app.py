@@ -13,6 +13,8 @@ from datetime import datetime
 import pytz
 import google.generativeai as genai
 
+from evaluasi_bobot import evaluasi_riwayat, muat_bobot_adaptif
+
 # ====================== FALLBACK HANDLERS ======================
 PLOTLY_AVAILABLE = True
 try:
@@ -52,9 +54,35 @@ warnings.filterwarnings("ignore")
 RIWAYAT_FILE = "riwayat_analisis.csv"
 
 def simpan_riwayat(ringkasan):
+    """
+    Simpan satu baris riwayat ke CSV. Jika file lama punya kolom yang lebih
+    sedikit (mis. sebelum penambahan Is_Uptrend/Momentum_Above_Threshold/
+    Volume_Above_MA), header di-migrasi otomatis: kolom baru ditambahkan,
+    baris lama tetap dipertahankan (kolom baru kosong utk baris lama).
+    """
+    fieldnames_baru = list(ringkasan.keys())
     file_exists = os.path.isfile(RIWAYAT_FILE)
+
+    if file_exists:
+        with open(RIWAYAT_FILE, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            existing_fieldnames = reader.fieldnames or []
+            existing_rows = list(reader)
+
+        if existing_fieldnames and set(existing_fieldnames) != set(fieldnames_baru):
+            merged_fieldnames = existing_fieldnames + [
+                k for k in fieldnames_baru if k not in existing_fieldnames
+            ]
+            with open(RIWAYAT_FILE, mode='w', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=merged_fieldnames)
+                writer.writeheader()
+                for row in existing_rows:
+                    writer.writerow(row)
+                writer.writerow(ringkasan)
+            return
+
     with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
+        writer = csv.DictWriter(f, fieldnames=fieldnames_baru)
         if not file_exists:
             writer.writeheader()
         writer.writerow(ringkasan)
@@ -214,7 +242,7 @@ st.markdown("""
     .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
-    
+
     .ai-insight-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
         border-radius: 16px;
@@ -253,6 +281,21 @@ with st.sidebar:
         if st.button("🗑️ Reset Cache", use_container_width=True):
             st.cache_data.clear()
             st.success("Cache dibersihkan!")
+
+    # ---- TOMBOL EVALUASI & UPDATE BOBOT ADAPTIF ----
+    if st.button("🔄 Evaluasi & Update Bobot", use_container_width=True):
+        with st.spinner("Mengevaluasi riwayat prediksi vs harga aktual..."):
+            hasil_eval = evaluasi_riwayat()
+        if hasil_eval["dievaluasi"] > 0:
+            st.success(
+                f"✅ {hasil_eval['dievaluasi']} entri dievaluasi | "
+                f"Win rate: {hasil_eval['win_rate']:.1%}"
+            )
+            with st.expander("Lihat bobot adaptif terbaru"):
+                for k, v in hasil_eval["bobot_baru"].items():
+                    st.write(f"**{k}**: {v:.3f}")
+        else:
+            st.info("Belum ada entri riwayat yang cukup umur (≥1 hari bursa) untuk dievaluasi.")
     st.markdown("---")
 
     st.subheader("📜 Riwayat Analisis")
@@ -552,25 +595,35 @@ if run_btn:
         res20 = float(df['High'].iloc[-21:-1].max())
         breakout = "YES (🔥)" if harga_terakhir > res20 else "NO"
 
-        # ============ SINYAL ============
-        def generate_signals_vectorized(dataframe, mom_th):
-            score = pd.Series(0, index=dataframe.index)
+        # ============ SINYAL (bobot adaptif) ============
+        bobot_adaptif = muat_bobot_adaptif()  # {"trend":.., "momentum":.., "volume":..}
+
+        def generate_signals_vectorized(dataframe, mom_th, bobot):
+            score = pd.Series(0.0, index=dataframe.index)
             is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
-            score += is_uptrend.astype(int) * 2
-            score += (dataframe['Mom5D'] > mom_th).astype(int)
+            score += is_uptrend.astype(int) * bobot["trend"]
+            score += (dataframe['Mom5D'] > mom_th).astype(int) * bobot["momentum"]
             if 'Volume' in dataframe.columns:
-                score += (dataframe['Volume'] > dataframe['Vol_MA20']).astype(int)
+                score += (dataframe['Volume'] > dataframe['Vol_MA20']).astype(int) * bobot["volume"]
+
+            # Threshold skor diskalakan proporsional terhadap total bobot,
+            # supaya tetap konsisten walau bobot berubah dari default (2,1,1 -> total 4)
+            skor_maks = bobot["trend"] + bobot["momentum"] + bobot["volume"]
+            th_hold = skor_maks * 0.25
+            th_buy = skor_maks * 0.50
+            th_strong = skor_maks * 0.75
+
             sig = pd.Series("🚨 AVOID", index=dataframe.index)
-            sig[score == 1] = "⏸️ HOLD / WAIT"
-            sig[score >= 2] = "⚡ BUY (TACTICAL)"
-            sig[score >= 3] = "🔥 STRONG BUY"
+            sig[score >= th_hold] = "⏸️ HOLD / WAIT"
+            sig[score >= th_buy] = "⚡ BUY (TACTICAL)"
+            sig[score >= th_strong] = "🔥 STRONG BUY"
             is_choppy = (dataframe['ADX'] < 20)
             sig[is_choppy & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
             is_oversold = (dataframe['ZScore'] < -1.5) & (dataframe['Close'] < dataframe['EMA20'])
             sig[is_oversold] = "⚡ BUY (TACTICAL)"
             return sig
 
-        df['Signal'] = generate_signals_vectorized(df, mom_median_th)
+        df['Signal'] = generate_signals_vectorized(df, mom_median_th, bobot_adaptif)
         signal = df['Signal'].iloc[-1]
 
         # ============ BACKTEST ============
@@ -651,6 +704,17 @@ if run_btn:
         rrr_status = "Ideal (≥ 1.5) 🟢" if rrr >= 1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr >= 1 else "Buruk (< 1.0) 🔴")
 
         # ============ RINGKASAN AWAL ============
+        # Kolom Is_Uptrend / Momentum_Above_Threshold / Volume_Above_MA disimpan
+        # secara eksplisit di sini supaya evaluasi_bobot.py bisa menghitung akurasi
+        # per komponen sinyal secara presisi (bukan proxy) saat riwayat dievaluasi.
+        is_uptrend_now = bool(
+            harga_terakhir > df['EMA20'].iloc[-1] and df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]
+        )
+        momentum_above_now = bool(df['Mom5D'].iloc[-1] > mom_median_th)
+        volume_above_now = bool(
+            'Volume' in df.columns and df['Volume'].iloc[-1] > df['Vol_MA20'].iloc[-1]
+        )
+
         ringkasan = {
             "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_input,
@@ -663,6 +727,9 @@ if run_btn:
             "Rezim": regime,
             "TP%": f"{tp_pct:.1f}",
             "SL%": f"{sl_pct:.1f}",
+            "Is_Uptrend": "1" if is_uptrend_now else "0",
+            "Momentum_Above_Threshold": "1" if momentum_above_now else "0",
+            "Volume_Above_MA": "1" if volume_above_now else "0",
             "AI_Insight": ""  # placeholder
         }
 
@@ -850,6 +917,14 @@ if run_btn:
         pr1.metric("Prob. Naik Besok", f"{prob_bull:.1f}%")
         pr2.metric("Prob. Sentuh R1 (30H)", f"{hit_tp:.1f}%")
         pr3.metric("Prob. Sentuh S2 (30H)", f"{hit_sl:.1f}%")
+
+        st.divider()
+        st.subheader("🧠 Bobot Sinyal Adaptif (dari Self-Learning)")
+        bw1, bw2, bw3 = st.columns(3)
+        bw1.metric("Trend", f"{bobot_adaptif['trend']:.2f}")
+        bw2.metric("Momentum", f"{bobot_adaptif['momentum']:.2f}")
+        bw3.metric("Volume", f"{bobot_adaptif['volume']:.2f}")
+        st.caption("Bobot ini diperbarui setiap kali tombol '🔄 Evaluasi & Update Bobot' ditekan di sidebar.")
 
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
