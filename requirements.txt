@@ -13,3 +13,5 @@ python-dotenv
 pytz
 pytesseract
 Pillow
+paddlepaddle
+paddleocr
