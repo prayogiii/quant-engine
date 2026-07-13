@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 import pytz
 import math
+import shutil  # <-- tambahan
 import google.generativeai as genai
 
 # ====================== FALLBACK HANDLERS ======================
@@ -472,15 +473,38 @@ with st.sidebar:
     # ── V12: BROKER INPUT ──
     st.subheader("🏦 Broker Summary (V12)")
     
-    # ---------- Fungsi cek Tesseract ----------
+    # ---------- Fungsi cek Tesseract (REVISI) ----------
     def is_tesseract_available():
         try:
             import pytesseract
+            # 1. Cek langsung
             pytesseract.get_tesseract_version()
             return True
         except:
+            # 2. Cari di PATH sistem
+            tesseract_path = shutil.which('tesseract')
+            if tesseract_path:
+                pytesseract.pytesseract.tesseract_cmd = tesseract_path
+                try:
+                    pytesseract.get_tesseract_version()
+                    return True
+                except:
+                    pass
+            # 3. Cek path manual dari session state
+            manual_path = st.session_state.get('tesseract_manual_path', '')
+            if manual_path and os.path.isfile(manual_path):
+                pytesseract.pytesseract.tesseract_cmd = manual_path
+                try:
+                    pytesseract.get_tesseract_version()
+                    return True
+                except:
+                    pass
             return False
-    
+
+    # Inisialisasi session state untuk manual path
+    if 'tesseract_manual_path' not in st.session_state:
+        st.session_state.tesseract_manual_path = ""
+
     # ---------- Upload screenshot dengan OCR ----------
     uploaded_file = st.file_uploader(
         "📷 Upload Screenshot Broker (PNG/JPG) — opsional",
@@ -494,12 +518,15 @@ with st.sidebar:
             try:
                 from PIL import Image
                 import pytesseract
+                # Gunakan path manual jika ada
+                if st.session_state.tesseract_manual_path:
+                    pytesseract.pytesseract.tesseract_cmd = st.session_state.tesseract_manual_path
                 image = Image.open(uploaded_file)
-                image = image.convert('L')  # grayscale untuk akurasi lebih baik
+                image = image.convert('L')  # grayscale
                 text = pytesseract.image_to_string(image, lang='eng+ind')
                 st.caption("📝 Hasil OCR (mentah):")
                 st.code(text)
-                # Coba parse ke format broker
+                # Parse ke format broker
                 lines = text.strip().split('\n')
                 broker_lines = []
                 for line in lines:
@@ -520,7 +547,17 @@ with st.sidebar:
             except Exception as e:
                 st.warning(f"⚠️ Gagal memproses gambar: {e}")
         else:
-            st.warning("⚠️ Tesseract OCR tidak terinstall. Fitur OCR dinonaktifkan. Silakan isi manual atau install Tesseract (https://github.com/UB-Mannheim/tesseract/wiki).")
+            st.warning("⚠️ Tesseract OCR tidak terdeteksi secara otomatis. "
+                       "Silakan isi path manual ke `tesseract.exe`, lalu upload ulang gambar.")
+            manual_path = st.text_input(
+                "📍 Path ke tesseract.exe",
+                value=r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                key="tesseract_path_input",
+                help="Contoh: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+            )
+            if manual_path:
+                st.session_state.tesseract_manual_path = manual_path
+                st.info("Path disimpan. Silakan upload ulang gambar untuk menjalankan OCR.")
     
     broker_text = st.text_area(
         "Format: KODE,BUY_LOT,BUY_FREQ,SELL_LOT,SELL_FREQ,AVG_BUY,AVG_SELL per baris",
