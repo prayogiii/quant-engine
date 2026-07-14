@@ -423,8 +423,8 @@ with st.sidebar:
                 c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','?')}")
                 
                 # Likuiditas
-                st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-                
+                st.metric("Likuiditas/hari", r.get('Likuiditas','?'))                
+
                 # Indikator Grid
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
@@ -907,7 +907,16 @@ if run_btn:
         avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
         if np.isnan(avg_value):
             avg_value = 0.0
-        
+        # Format singkat (M, Jt, rb)
+        if avg_value >= 1e9:
+            likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
+        elif avg_value >= 1e6:
+            likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
+        elif avg_value >= 1e3:
+            likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
+        else:
+            likuiditas_str = f"Rp {avg_value:,.0f}"
+            
         # Status RSI
         if rsi14 > 70:
             rsi_status = "Overbought"
@@ -966,7 +975,7 @@ if run_btn:
             "Est_Return": f"{est_besok:,.0f}",
             "TP_Harga": f"{tp_harga:,.0f}",
             "SL_Harga": f"{sl_harga:,.0f}",
-            "Likuiditas": f"Rp {avg_value:,.0f}",
+            "Likuiditas": likuiditas_str,
             "RSI": f"{rsi14:.1f}",
             "RSI_Status": rsi_status,
             "Vol_Surge": f"{vol_surge_pct:+.0f}%",
