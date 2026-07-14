@@ -368,21 +368,21 @@ with st.sidebar:
     if st.session_state.riwayat:
         for r in st.session_state.riwayat[:10]:
             # Tentukan warna dan ikon sinyal
-            if "STRONG BUY" in r['Sinyal']:
-                sig_color = "#10b981"
+            if "STRONG BUY" in r.get('Sinyal',''):
                 sig_icon = "🔥"
-            elif "BUY" in r['Sinyal']:
-                sig_color = "#f59e0b"
+            elif "BUY" in r.get('Sinyal',''):
                 sig_icon = "⚡"
-            elif "HOLD" in r['Sinyal']:
-                sig_color = "#3b82f6"
+            elif "HOLD" in r.get('Sinyal',''):
                 sig_icon = "⏸️"
             else:
-                sig_color = "#ef4444"
                 sig_icon = "🚨"
             
             # Rating Confidence
-            conf_val = float(r.get('Confidence', '0%').replace('%',''))
+            conf_str = r.get('Confidence', '0%')
+            try:
+                conf_val = float(conf_str.replace('%',''))
+            except:
+                conf_val = 0
             if conf_val >= 70:
                 conf_text = "Tinggi ▲"
             elif conf_val >= 50:
@@ -391,7 +391,11 @@ with st.sidebar:
                 conf_text = "Rendah ▼"
             
             # Est Return color
-            est_ret = float(r.get('Est_Return', '0').replace(',',''))
+            est_ret_str = r.get('Est_Return', '0')
+            try:
+                est_ret = float(est_ret_str.replace(',',''))
+            except:
+                est_ret = 0
             if est_ret > 1:
                 ret_color = "🟢"
             elif est_ret > 0:
@@ -400,41 +404,41 @@ with st.sidebar:
                 ret_color = "🔴"
             
             # Format judul expander
-            expander_title = f"{r['Saham']}        {r['Harga']}        {sig_icon} {r['Sinyal']}        Score: {r.get('Score','N/A')}"
+            expander_title = f"{r.get('Saham','?')}        {r.get('Harga','?')}        {sig_icon} {r.get('Sinyal','?')}        Score: {r.get('Score','?')}"
             with st.expander(expander_title):
                 # Baris sinyal & confidence
-                st.markdown(f"**{sig_icon} {r['Sinyal']}**")
-                st.caption(f"Score: {r.get('Score','N/A')} | Confidence: {r.get('Confidence','N/A')} ({conf_text}) | Risk-Adj: {r.get('RRR','N/A')}")
+                st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
+                st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
                 
                 st.divider()
                 
                 # Coppock & Est Return
                 c1, c2 = st.columns(2)
-                c1.metric("Coppock", r.get('Coppock','N/A'))
-                c2.metric("Est. Return", f"{r.get('Est_Return','N/A')} {ret_color}")
+                c1.metric("Coppock", r.get('Coppock','?'))
+                c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
                 
                 # TP & SL
                 c1, c2 = st.columns(2)
-                c1.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','N/A')}")
-                c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','N/A')}")
+                c1.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','?')}")
+                c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','?')}")
                 
                 # Likuiditas
-                st.metric("Likuiditas", r.get('Likuiditas','N/A'), delta="/hari")
+                st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
                 
                 # Indikator Grid
                 ind1, ind2, ind3, ind4 = st.columns(4)
-                ind1.metric("RSI-14", r.get('RSI','N/A'), delta=r.get('RSI_Status',''))
-                ind2.metric("Vol Surge", r.get('Vol_Surge','N/A'), delta=r.get('VS_Status',''))
-                ind3.metric("Z-Score", r.get('ZScore','N/A'), delta=r.get('ZS_Status',''))
-                ind4.metric("Trend Cons.", r.get('Trend_Consistency','N/A'))
+                ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
+                ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
+                ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
+                ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
                 
                 # Beta & Momentum
                 b1, b2 = st.columns(2)
-                b1.metric("Beta", r.get('Beta','N/A'))
-                b2.metric("Momentum (5D)", r.get('Momentum','N/A'))
+                b1.metric("Beta", r.get('Beta','?'))
+                b2.metric("Momentum (5D)", r.get('Momentum','?'))
                 
                 # Regime
-                st.caption(f"Regime: **{r.get('Rezim','N/A')}**")
+                st.caption(f"Regime: **{r.get('Rezim','?')}**")
                 
                 # Insight AI (jika ada)
                 ai = r.get("AI_Insight", "").strip()
@@ -751,7 +755,10 @@ if run_btn:
         loss = -delta.where(delta < 0, 0.0)
         avg_gain = gain.rolling(14).mean().iloc[-1]
         avg_loss = loss.rolling(14).mean().iloc[-1]
-        rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss))) if avg_loss != 0 else 100.0
+        if avg_loss is None or avg_loss == 0:
+            rsi14 = 100.0
+        else:
+            rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
 
         # === MULTIPLIER TP/SL BERDASARKAN ADX & RSI ===
         tp_mult = 2.0
@@ -880,17 +887,26 @@ if run_btn:
             signal_score = max(0, (prob_bull - 30) / 100)
         signal_score = min(1.0, max(0.0, signal_score))
         confidence = min(0.99, 0.5 + (signal_score * 0.5) + (win_bt - 0.5) * 0.1)
+        if confidence is None or np.isnan(confidence):
+            confidence = 0.5
         
         # Trend Consistency
         trend_consistency = np.mean([1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0 for i in range(1, 11)]) * 100
+        if np.isnan(trend_consistency):
+            trend_consistency = 50.0
         
         # Volume Surge
         avg_vol_5 = df['Volume'].iloc[-5:].mean()
         avg_vol_20 = df['Volume'].iloc[-20:].mean()
-        vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
+        if avg_vol_20 > 0:
+            vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
+        else:
+            vol_surge_pct = 0.0
         
         # Likuiditas
         avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
+        if np.isnan(avg_value):
+            avg_value = 0.0
         
         # Status RSI
         if rsi14 > 70:
@@ -902,6 +918,8 @@ if run_btn:
         
         # Status Z-Score
         zscore_val = df['ZScore'].iloc[-1]
+        if pd.isna(zscore_val):
+            zscore_val = 0.0
         if zscore_val > 2:
             zs_status = "Overbought"
         elif zscore_val < -2:
