@@ -420,7 +420,10 @@ with st.sidebar:
                 # TP & SL
                 c1, c2 = st.columns(2)
                 c1.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','?')}")
-                c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','?')}")
+                c2.markdown(
+                f"Est. SL Besok: <span style='color:#ef4444; font-weight:bold'>Rp {r.get('SL_Harga','?')}</span>",
+                    unsafe_allow_html=True
+                )
                 
                 # Likuiditas
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
