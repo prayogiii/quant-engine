@@ -40,7 +40,7 @@ warnings.filterwarnings("ignore")
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
-FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock"]  # Broker dihapus
+FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock"]
 WEIGHT_MIN    = 0.08
 WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
@@ -117,7 +117,6 @@ def get_adaptive_weights(ticker, regime):
         elif acc>=0.35: w *= 0.5
         else: w = max(w*0.2, WEIGHT_MIN/2)
         w_pri[k] = max(WEIGHT_MIN, min(WEIGHT_MAX, w))
-    # softmax inverse error
     err = {k: mem.get('error_ema',{}).get(k,1.0) for k in FACTOR_KEYS}
     scores = {k: 1.0/(err[k]+1e-6) for k in FACTOR_KEYS}
     exp_s = {k: math.exp(v/SOFTMAX_TEMP) for k,v in scores.items()}
@@ -233,8 +232,8 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Sentimen Berita: {data_saham['Sentimen']}
 - Risk/Reward Ratio (RRR): {data_saham['RRR']}
 - Probabilitas Naik Besok: {data_saham['Prob Naik']}
-- Take Profit (R1): +{data_saham['TP%']}%
-- Stop Loss (S2): -{data_saham['SL%']}%
+- Take Profit: +{data_saham['TP%']}%
+- Stop Loss: -{data_saham['SL%']}%
 - Estimasi Harga Besok: Rp {data_saham['Estimasi']}
 - Beta terhadap IHSG: {data_saham.get('Beta', 'N/A')}
 - Win Rate Backtest: {data_saham.get('WinRate', 'N/A')}
@@ -612,7 +611,52 @@ if run_btn:
             beta_ihsg = (np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])) if len(common)>20 else 1.0
         except: beta_ihsg = 1.0
 
-        # ============ PIVOT ============
+        # ============ ATR & RSI UNTUK RRR KONTEKSTUAL ============
+        df['TR'] = pd.concat([
+            df['High'] - df['Low'],
+            (df['High'] - df['Close'].shift()).abs(),
+            (df['Low'] - df['Close'].shift()).abs()
+        ], axis=1).max(axis=1)
+        atr14 = df['TR'].rolling(14).mean().iloc[-1]
+        atr_pct = (atr14 / harga_terakhir) * 100
+
+        delta = df['Close'].diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+        avg_gain = gain.rolling(14).mean().iloc[-1]
+        avg_loss = loss.rolling(14).mean().iloc[-1]
+        rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss))) if avg_loss != 0 else 100.0
+
+        # === MULTIPLIER TP/SL BERDASARKAN ADX & RSI ===
+        tp_mult = 2.0
+        sl_mult = 1.0
+        if adx > 30 and 30 < rsi14 < 70:
+            tp_mult = 2.5
+            sl_mult = 1.0
+        elif adx < 20:
+            tp_mult = 1.5
+            sl_mult = 0.75
+        if rsi14 > 70 or rsi14 < 30:
+            tp_mult = min(tp_mult, 1.5)
+
+        # Hitung TP/SL kontekstual
+        sl_pct = sl_mult * atr_pct
+        tp_pct = tp_mult * atr_pct
+        sl_harga = harga_terakhir * (1 - sl_pct/100)
+        tp_harga = harga_terakhir * (1 + tp_pct/100)
+
+        # RRR Kontekstual
+        rrr = tp_pct / sl_pct if sl_pct > 0 else 0
+        if rrr >= 2.0:
+            rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+        elif rrr >= 1.5:
+            rrr_status = "Baik (1.5 - 2.0) 🟢"
+        elif rrr >= 1.0:
+            rrr_status = "Cukup (1.0 - 1.5) 🟡"
+        else:
+            rrr_status = "Buruk (< 1.0) 🔴"
+
+        # ============ PIVOT (untuk referensi) ============
         hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
         pp = (hi+lo+harga_terakhir)/3
         r1,s1 = 2*pp-lo, 2*pp-hi
@@ -698,11 +742,6 @@ if run_btn:
         hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
         prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
 
-        tp_pct = ((r1-harga_terakhir)/harga_terakhir)*100 if harga_terakhir else 0
-        sl_pct = ((harga_terakhir-s2)/harga_terakhir)*100 if harga_terakhir else 0
-        rrr = tp_pct/sl_pct if sl_pct else 0
-        rrr_status = "Ideal (≥ 1.5) 🟢" if rrr>=1.5 else ("Cukup (1.0 - 1.5) 🟡" if rrr>=1 else "Buruk (< 1.0) 🔴")
-
         # ============ RINGKASAN AWAL ============
         ringkasan = {
             "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
@@ -739,19 +778,34 @@ if run_btn:
 
     # --- RINGKASAN EKSEKUTIF ---
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
-    if rrr<1.0 and ("BUY" in signal):
-        ac,ai = "#ef4444","⚠️"; at = f"• <b>KONDISI:</b> Sinyal {signal} tapi <b>RRR BURUK ({rrr:.2f})</b><br>• <b>REKOMENDASI:</b> WAIT & SEE<br>• <b>LANGKAH:</b> Tunda entry, tunggu koreksi ke Support 1."
+    if rrr < 1.0 and ("BUY" in signal):
+        ac,ai = "#ef4444","⚠️"
+        at = f"• <b>KONDISI:</b> Sinyal {signal} tapi <b>RRR Buruk ({rrr:.2f})</b><br>• <b>REKOMENDASI:</b> WAIT & SEE<br>• <b>LANGKAH:</b> Tunda entry, tunggu setup lebih baik."
     elif "STRONG BUY" in signal:
-        ac,ai = "#10b981","🟢"; at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Beli bertahap, SL di S2 ({s2:,.0f})."
+        ac,ai = "#10b981","🟢"
+        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry bertahap, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP {tp_harga:,.0f} (+{tp_pct:.1f}%)."
     elif "BUY" in signal:
-        ac,ai = "#f59e0b","🟡"; at = f"• <b>KONDISI:</b> Tren Valid, RRR Memadai ({rrr:.2f})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry ideal {s1:,.0f}-{pp:,.0f}, SL {s2:,.0f}."
+        ac,ai = "#f59e0b","🟡"
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di area support, SL {sl_harga:,.0f}, TP {tp_harga:,.0f}."
     elif "HOLD" in signal:
-        ac,ai = "#3b82f6","🔵"; at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
+        ac,ai = "#3b82f6","🔵"
+        at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
     else:
-        ac,ai = "#ef4444","🔴"; at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
+        ac,ai = "#ef4444","🔴"
+        at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
     col1,col2 = st.columns([1,1])
     with col1:
-        st.markdown(f'<div class="summary-card"><div class="section-title">📌 Profil Risiko Saham Terkalibrasi</div><div class="summary-item">🛡️ <b>Jarak Stop Loss:</b> -{sl_pct:.1f}% (Rp {s2:,.0f})</div><div class="summary-item">🎯 <b>Potensi Keuntungan:</b> +{tp_pct:.1f}% (Rp {r1:,.0f})</div><div class="summary-item">⚖️ <b>Risk:Reward Ratio:</b> 1 : {rrr:.2f} ({rrr_status})</div><div class="summary-item">🏷️ <b>Kategori Rezim & Makro:</b> {regime} | {ihsg_cond}</div><div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div></div>', unsafe_allow_html=True)
+        st.markdown(f'''
+            <div class="summary-card">
+                <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
+                <div class="summary-item">🛡️ <b>Stop Loss:</b> -{sl_pct:.1f}% (Rp {sl_harga:,.0f})</div>
+                <div class="summary-item">🎯 <b>Take Profit:</b> +{tp_pct:.1f}% (Rp {tp_harga:,.0f})</div>
+                <div class="summary-item">⚖️ <b>Risk:Reward:</b> 1 : {rrr:.2f} ({rrr_status})</div>
+                <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
+                <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
+                <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
+            </div>
+        ''', unsafe_allow_html=True)
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
@@ -833,39 +887,67 @@ if run_btn:
         pr1.metric("Prob. Naik Besok",f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
     # ══════════════════════════════════════════════════════════
-    # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (TANPA BROKER)
+    # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC
     # ══════════════════════════════════════════════════════════
     with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
-        # Coppock
+        st.info(
+            "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
+            "Engine secara otomatis mempelajari akurasi setiap faktor teknikal berdasarkan riwayat analisis kamu. "
+            "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
+        )
+
+        st.markdown("### 📈 Coppock Curve & Beta IHSG")
+        st.caption(
+            "Coppock Curve adalah indikator momentum jangka panjang yang sering digunakan untuk mendeteksi "
+            "perubahan tren utama. Sinyal **Turning Up** (nilai berubah dari negatif ke positif) dianggap sebagai "
+            "awal fase akumulasi. **Beta** mengukur seberapa sensitif saham terhadap pergerakan IHSG."
+        )
         coppock_val, coppock_prev = coppock_curve(df['Close'].values)
         coppock_rising = coppock_val > coppock_prev
         coppock_turning_up = coppock_rising and coppock_prev <= 0
         col_cop1, col_cop2 = st.columns(2)
         col_cop1.metric("Coppock Curve", f"{coppock_val:.3f}",
-                        "Turning Up ✅" if coppock_turning_up else ("Rising" if coppock_rising else "Falling"))
-        col_cop2.metric("Beta IHSG", f"{beta_ihsg:.2f}x")
-        
-        # Adaptive weights (tanpa broker)
+                        "Turning Up ✅" if coppock_turning_up else ("Rising 📈" if coppock_rising else "Falling 📉"))
+        col_cop2.metric("Beta IHSG", f"{beta_ihsg:.2f}x",
+                        help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
+
+        st.markdown("### ⚖️ Bobot Adaptif per Faktor")
+        st.caption(
+            "Bobot di bawah ini dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. "
+            "Faktor yang sering memberikan sinyal benar akan mendapat bobot lebih tinggi. "
+            "Bobot ini digunakan untuk menentukan sinyal akhir pada analisis berikutnya."
+        )
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
-        st.subheader("Adaptive Weights (per faktor)")
         w_df = pd.DataFrame.from_dict(adaptive_w, orient='index', columns=['Weight'])
         st.bar_chart(w_df)
-        
-        # Memory status
+
+        st.markdown("### 🧠 Status Memori Adaptif")
+        st.caption(
+            "Di sini kamu bisa melihat performa historis setiap faktor. "
+            "**Accuracy** menunjukkan seberapa sering sinyal faktor sesuai dengan arah harga sebenarnya. "
+            "**Error EMA** adalah rata‑rata kesalahan prediksi (makin kecil makin baik). "
+            "Data ini terus diperbarui setiap kali kamu menganalisis ticker yang sama."
+        )
         mem = st.session_state.v12_memory.get(ticker_raw, {})
         if mem:
-            st.subheader("Factor Accuracy & Error EMA")
             acc_data = {k: mem.get('accuracy',{}).get(k,0.5) for k in FACTOR_KEYS}
             err_data = {k: mem.get('error_ema',{}).get(k,1.0) for k in FACTOR_KEYS}
             col_a,col_e = st.columns(2)
             with col_a:
-                st.caption("Accuracy (higher=better)")
+                st.caption("✅ Accuracy (higher = better)")
                 st.bar_chart(pd.Series(acc_data))
             with col_e:
-                st.caption("Error EMA (lower=better)")
+                st.caption("⚠️ Error EMA (lower = better)")
                 st.bar_chart(pd.Series(err_data))
+        else:
+            st.info("Belum ada data memori untuk ticker ini. Lakukan analisis beberapa kali agar engine mulai belajar.")
 
-        # Self‑learning update
+        st.markdown("### 🔁 Proses Self‑Learning")
+        st.caption(
+            "Setiap kali kamu menjalankan analisis, engine akan **membandingkan prediksi sebelumnya** "
+            "dengan harga aktual saat ini. Jika prediksi benar → akurasi naik. Jika salah → error bertambah. "
+            "Proses ini membuat bobot semakin optimal seiring waktu."
+        )
         if os.path.isfile(V12_PRED_FILE):
             pred_df = pd.read_csv(V12_PRED_FILE)
             prev = pred_df[pred_df['ticker']==ticker_raw]
@@ -876,11 +958,14 @@ if run_btn:
                 actual_return = (harga_terakhir - last_close) / last_close if last_close>0 else 0.0
                 volatility = returns.std()
                 update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
-                st.success(f"✅ Memory updated: actual return {actual_return*100:.2f}%")
+                st.success(f"✅ **Memory updated!** Actual return sejak prediksi terakhir: {actual_return*100:.2f}%")
                 pred_df = pred_df[pred_df['ticker']!=ticker_raw]
                 pred_df.to_csv(V12_PRED_FILE, index=False)
+            else:
+                st.info("ℹ️ Tidak ada prediksi sebelumnya untuk ticker ini. Engine akan mulai belajar pada analisis berikutnya.")
+        else:
+            st.info("ℹ️ File prediksi belum ada. Engine akan membuatnya setelah analisis pertama.")
 
-        # Simpan prediksi baru
         new_pred = {'ticker': ticker_raw, 'close_price': harga_terakhir}
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
@@ -895,6 +980,7 @@ if run_btn:
             pred_df.to_csv(V12_PRED_FILE, mode='a', header=False, index=False)
         else:
             pred_df.to_csv(V12_PRED_FILE, index=False)
+        st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
 
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
@@ -903,7 +989,7 @@ if run_btn:
             data_ai = {
                 "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
                 "Rezim": regime, "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
-                "RRR": f"{rrr:.2f}", "Prob Naik": f"{prob_bull:.1f}%",
+                "RRR": f"{rrr:.2f} (Kontekstual)", "Prob Naik": f"{prob_bull:.1f}%",
                 "TP%": f"{tp_pct:.1f}", "SL%": f"{sl_pct:.1f}",
                 "Estimasi": f"{est_besok:,.0f}", "Beta": f"{beta_ihsg:.2f}x",
                 "WinRate": f"{win_bt:.1%}" if trades_bt else "N/A",
