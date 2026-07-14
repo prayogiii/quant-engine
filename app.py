@@ -447,40 +447,43 @@ with st.sidebar:
                 # Indikator Grid
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 # RSI
+                rsi_val = r.get('RSI','?')
                 rsi_status = r.get('RSI_Status','Normal')
                 if rsi_status == "Overbought":
-                    rsi_status_color = "#ef4444"   # merah
+                    rsi_color = "#ef4444"
                 elif rsi_status == "Oversold":
-                    rsi_status_color = "#10b981"   # hijau
+                    rsi_color = "#10b981"
                 else:
-                    rsi_status_color = "#9ca3af"   # abu-abu
+                    rsi_color = "#9ca3af"
                 
-                ind1.markdown(
-                    f"""<div style="margin-top: 0px;">
-                        <p style="color:#8892b0; font-size:14px; margin:0;">RSI-14</p>
-                        <p style="color:#ffffff; font-size:24px; font-weight:bold; margin:0;">{r.get('RSI','?')}</p>
-                        <p style="color:{rsi_status_color}; font-size:14px; margin:0;">{rsi_status}</p>
-                    </div>""",
-                    unsafe_allow_html=True
-                )
+                ind1.metric("RSI-14", rsi_val)
+                ind1.markdown(f"<span style='color:{rsi_color}; font-size:14px; margin-top:-0.5rem;'>{rsi_status}</span>", unsafe_allow_html=True)
                 
                 # Vol Surge
+                vs_val = r.get('Vol_Surge','?')
                 vs_status = r.get('VS_Status','Normal')
                 if vs_status == "Tinggi":
-                    vs_status_color = "#ef4444"
+                    vs_color = "#ef4444"
                 elif vs_status == "Rendah":
-                    vs_status_color = "#10b981"
+                    vs_color = "#10b981"
                 else:
-                    vs_status_color = "#9ca3af"
+                    vs_color = "#9ca3af"
                 
-                ind2.markdown(
-                    f"""<div style="margin-top: 0px;">
-                        <p style="color:#8892b0; font-size:14px; margin:0;">Vol Surge</p>
-                        <p style="color:#ffffff; font-size:24px; font-weight:bold; margin:0;">{r.get('Vol_Surge','?')}</p>
-                        <p style="color:{vs_status_color}; font-size:14px; margin:0;">{vs_status}</p>
-                    </div>""",
-                    unsafe_allow_html=True
-                )
+                ind2.metric("Vol Surge", vs_val)
+                ind2.markdown(f"<span style='color:{vs_color}; font-size:14px; margin-top:-0.5rem;'>{vs_status}</span>", unsafe_allow_html=True)
+                
+                # Z-Score
+                zs_val = r.get('ZScore','?')
+                zs_status = r.get('ZS_Status','Normal')
+                if zs_status == "Overbought":
+                    zs_color = "#ef4444"
+                elif zs_status == "Oversold":
+                    zs_color = "#10b981"
+                else:
+                    zs_color = "#9ca3af"
+                
+                ind3.metric("Z-Score", zs_val)
+                ind3.markdown(f"<span style='color:{zs_color}; font-size:14px; margin-top:-0.5rem;'>{zs_status}</span>", unsafe_allow_html=True)
                 
                 # Z-Score
                 zs_status = r.get('ZS_Status','Normal')
