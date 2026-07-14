@@ -416,7 +416,7 @@ with st.sidebar:
                 # Coppock & Est Return
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
-                c2.metric("Est. Return", f"{r.get('Est_Return','?')}") 
+                c2.metric("Est. Return", f"{ret_color} {r.get('Est_Return','?')}") 
                 
                 # TP & SL
                 c1, c2 = st.columns(2)
