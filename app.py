@@ -363,11 +363,11 @@ with st.sidebar:
             st.success("Cache dibersihkan!")
     st.markdown("---")
 
-    # ---------- RIWAYAT ANALISIS (FORMAT BARU) ----------
+        # ---------- RIWAYAT ANALISIS (WARNA & FORMAT SINGKAT) ----------
     st.subheader("📜 Riwayat Analisis")
     if st.session_state.riwayat:
         for r in st.session_state.riwayat[:10]:
-            # Tentukan warna dan ikon sinyal
+            # Ikon sinyal
             if "STRONG BUY" in r.get('Sinyal',''):
                 sig_icon = "🔥"
             elif "BUY" in r.get('Sinyal',''):
@@ -376,71 +376,80 @@ with st.sidebar:
                 sig_icon = "⏸️"
             else:
                 sig_icon = "🚨"
-            
-            # Rating Confidence
+
+            # Confidence
             conf_str = r.get('Confidence', '0%')
-            try:
-                conf_val = float(conf_str.replace('%',''))
-            except:
-                conf_val = 0
-            if conf_val >= 70:
-                conf_text = "Tinggi ▲"
-            elif conf_val >= 50:
-                conf_text = "Sedang ►"
-            else:
-                conf_text = "Rendah ▼"
-            
-            # Est Return color
+            try: conf_val = float(conf_str.replace('%',''))
+            except: conf_val = 0
+            if conf_val >= 70: conf_text = "Tinggi ▲"
+            elif conf_val >= 50: conf_text = "Sedang ►"
+            else: conf_text = "Rendah ▼"
+
+            # Est Return (persen + warna)
             est_ret_str = r.get('Est_Return', '0')
-            try:
-                est_ret = float(est_ret_str.replace(',',''))
-            except:
-                est_ret = 0
-            if est_ret > 1:
-                ret_color = "🟢"
-            elif est_ret > 0:
-                ret_color = "🟡"
+            try: est_ret = float(est_ret_str.replace(',',''))
+            except: est_ret = 0
+            if est_ret > 0:
+                ret_display = f"🟢 +{est_ret:,.0f}%"
+            elif est_ret < 0:
+                ret_display = f"🔴 {est_ret:,.0f}%"
             else:
-                ret_color = "🔴"
-            
-            # Format judul expander
-            expander_title = f"{r.get('Saham','?')}        {r.get('Harga','?')}        {sig_icon} {r.get('Sinyal','?')}        Score: {r.get('Score','?')}"
+                ret_display = "⚪ 0%"
+
+            # RSI warna
+            rsi_str = r.get('RSI','50')
+            try: rsi_val = float(rsi_str)
+            except: rsi_val = 50
+            if rsi_val > 70:        rsi_display = f"🔴 {rsi_val:.1f}"
+            elif rsi_val < 30:      rsi_display = f"🟢 {rsi_val:.1f}"
+            else:                   rsi_display = f"⚪ {rsi_val:.1f}"
+
+            # Vol Surge warna
+            vs_status = r.get('VS_Status','Normal')
+            vs_val = r.get('Vol_Surge','?')
+            if vs_status == "Tinggi":       vs_display = f"🔴 {vs_val}"
+            elif vs_status == "Rendah":     vs_display = f"🟢 {vs_val}"
+            else:                           vs_display = f"⚪ {vs_val}"
+
+            # Z-Score warna
+            zs_status = r.get('ZS_Status','Normal')
+            zs_val = r.get('ZScore','?')
+            if zs_status == "Overbought":   zs_display = f"🔴 {zs_val}"
+            elif zs_status == "Oversold":   zs_display = f"🟢 {zs_val}"
+            else:                           zs_display = f"⚪ {zs_val}"
+
+            # Likuiditas singkat
+            lik_str = r.get('Likuiditas','?')
+            # sudah dalam format singkat dari perhitungan (Rp xx M / Jt)
+
+            # Judul expander
+            expander_title = f"{r.get('Saham','?')}   {r.get('Harga','?')}   {sig_icon} {r.get('Sinyal','?')}   Score: {r.get('Score','?')}"
             with st.expander(expander_title):
-                # Baris sinyal & confidence
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
                 st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
-                
                 st.divider()
-                
-                # Coppock & Est Return
+
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
-                c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
-                
-                # TP & SL
+                c2.metric("Est. Return", ret_display)
+
                 c1, c2 = st.columns(2)
                 c1.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','?')}")
-                c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','?')}")
-                
-                # Likuiditas
-                st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
+                c2.markdown(f"🔴 **Est. SL Besok:** Rp {r.get('SL_Harga','?')}")
 
-                # Indikator Grid
+                st.caption(f"Likuiditas: {lik_str}/hari")
+
                 ind1, ind2, ind3, ind4 = st.columns(4)
-                ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
-                ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
-                ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
+                ind1.metric("RSI-14", rsi_display, delta=r.get('RSI_Status',''))
+                ind2.metric("Vol Surge", vs_display, delta=r.get('VS_Status',''))
+                ind3.metric("Z-Score", zs_display, delta=r.get('ZS_Status',''))
                 ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
-                
-                # Beta & Momentum
+
                 b1, b2 = st.columns(2)
                 b1.metric("Beta", r.get('Beta','?'))
                 b2.metric("Momentum (5D)", r.get('Momentum','?'))
-                
-                # Regime
+
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
-                
-                # Insight AI (jika ada)
                 ai = r.get("AI_Insight", "").strip()
                 if ai:
                     st.caption(f"💡 {ai[:150]}")
@@ -448,7 +457,6 @@ with st.sidebar:
             st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
         st.caption("Belum ada riwayat.")
-
     st.markdown("---")
     st.subheader("🧠 AI (Gemini)")
 
