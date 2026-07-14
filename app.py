@@ -363,21 +363,83 @@ with st.sidebar:
             st.success("Cache dibersihkan!")
     st.markdown("---")
 
+    # ---------- RIWAYAT ANALISIS (FORMAT BARU) ----------
     st.subheader("📜 Riwayat Analisis")
     if st.session_state.riwayat:
         for r in st.session_state.riwayat[:10]:
-            with st.expander(f"{r['Saham']} - {r['Sinyal']} ({r['Waktu']})"):
-                st.markdown(f"**Harga:** Rp {r['Harga']}")
-                st.markdown(f"**Estimasi Besok:** Rp {r['Estimasi']}")
-                st.markdown(f"**Prob Naik:** {r['Prob Naik']}")
-                st.markdown(f"**RRR:** {r['RRR']}")
-                st.markdown(f"**Sentimen:** {r['Sentimen']}")
-                st.markdown(f"**Rezim:** {r['Rezim']}")
-                st.markdown(f"**TP%:** {r['TP%']}% | **SL%:** {r['SL%']}%")
+            # Tentukan warna dan ikon sinyal
+            if "STRONG BUY" in r['Sinyal']:
+                sig_color = "#10b981"
+                sig_icon = "🔥"
+            elif "BUY" in r['Sinyal']:
+                sig_color = "#f59e0b"
+                sig_icon = "⚡"
+            elif "HOLD" in r['Sinyal']:
+                sig_color = "#3b82f6"
+                sig_icon = "⏸️"
+            else:
+                sig_color = "#ef4444"
+                sig_icon = "🚨"
+            
+            # Rating Confidence
+            conf_val = float(r.get('Confidence', '0%').replace('%',''))
+            if conf_val >= 70:
+                conf_text = "Tinggi ▲"
+            elif conf_val >= 50:
+                conf_text = "Sedang ►"
+            else:
+                conf_text = "Rendah ▼"
+            
+            # Est Return color
+            est_ret = float(r.get('Est_Return', '0').replace(',',''))
+            if est_ret > 1:
+                ret_color = "🟢"
+            elif est_ret > 0:
+                ret_color = "🟡"
+            else:
+                ret_color = "🔴"
+            
+            # Format judul expander
+            expander_title = f"{r['Saham']}        {r['Harga']}        {sig_icon} {r['Sinyal']}        Score: {r.get('Score','N/A')}"
+            with st.expander(expander_title):
+                # Baris sinyal & confidence
+                st.markdown(f"**{sig_icon} {r['Sinyal']}**")
+                st.caption(f"Score: {r.get('Score','N/A')} | Confidence: {r.get('Confidence','N/A')} ({conf_text}) | Risk-Adj: {r.get('RRR','N/A')}")
+                
+                st.divider()
+                
+                # Coppock & Est Return
+                c1, c2 = st.columns(2)
+                c1.metric("Coppock", r.get('Coppock','N/A'))
+                c2.metric("Est. Return", f"{r.get('Est_Return','N/A')} {ret_color}")
+                
+                # TP & SL
+                c1, c2 = st.columns(2)
+                c1.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','N/A')}")
+                c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','N/A')}")
+                
+                # Likuiditas
+                st.metric("Likuiditas", r.get('Likuiditas','N/A'), delta="/hari")
+                
+                # Indikator Grid
+                ind1, ind2, ind3, ind4 = st.columns(4)
+                ind1.metric("RSI-14", r.get('RSI','N/A'), delta=r.get('RSI_Status',''))
+                ind2.metric("Vol Surge", r.get('Vol_Surge','N/A'), delta=r.get('VS_Status',''))
+                ind3.metric("Z-Score", r.get('ZScore','N/A'), delta=r.get('ZS_Status',''))
+                ind4.metric("Trend Cons.", r.get('Trend_Consistency','N/A'))
+                
+                # Beta & Momentum
+                b1, b2 = st.columns(2)
+                b1.metric("Beta", r.get('Beta','N/A'))
+                b2.metric("Momentum (5D)", r.get('Momentum','N/A'))
+                
+                # Regime
+                st.caption(f"Regime: **{r.get('Rezim','N/A')}**")
+                
+                # Insight AI (jika ada)
                 ai = r.get("AI_Insight", "").strip()
                 if ai:
-                    st.markdown("💬 **AI Insight:**")
-                    st.caption(ai[:200] + ("..." if len(ai) > 200 else ""))
+                    st.caption(f"💡 {ai[:150]}")
         if len(st.session_state.riwayat) > 10:
             st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
@@ -414,7 +476,6 @@ with st.sidebar:
 
     # ---------- KALENDER BURSA (TIMEZONE WIB + JAM OPERASIONAL) ----------
     st.markdown("---")
-    # Ambil waktu sekarang dalam zona waktu Asia/Jakarta (WIB)
     now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
     today_str = now_jkt.strftime("%Y-%m-%d")
     today_day = now_jkt.strftime("%A")
@@ -423,10 +484,7 @@ with st.sidebar:
     current_year = now_jkt.strftime("%Y")
 
     st.subheader(f"📅 Kalender Bursa {current_year}")
-    # Data libur bursa 2025-2026 (hardcode, update setahun sekali)
-    # Sumber resmi: https://www.idx.co.id/id/tentang-bei/jam-bursa
     libur_bursa = {
-        # 2025
         "2025-01-01": "Tahun Baru Masehi",
         "2025-01-29": "Tahun Baru Imlek 2576 Kongzili",
         "2025-03-14": "Hari Suci Nyepi (Tahun Baru Saka 1947)",
@@ -439,7 +497,6 @@ with st.sidebar:
         "2025-08-17": "Hari Kemerdekaan Republik Indonesia",
         "2025-09-05": "Maulid Nabi Muhammad SAW 1447 H",
         "2025-12-25": "Hari Raya Natal",
-        # 2026 (contoh, sesuaikan dengan kalender resmi IDX nanti)
         "2026-01-01": "Tahun Baru Masehi",
         "2026-02-17": "Tahun Baru Imlek 2577 Kongzili",
         "2026-03-03": "Hari Suci Nyepi (Tahun Baru Saka 1948)",
@@ -454,16 +511,11 @@ with st.sidebar:
         "2026-12-25": "Hari Raya Natal",
     }
 
-    # Fungsi bantu untuk mengecek apakah sekarang dalam jam perdagangan
     def dalam_jam_perdagangan(hour, minute):
-        """Cek apakah waktu termasuk sesi 1 atau sesi 2 bursa."""
-        # Sesi 1: 09:00 - 12:00 WIB
         sesi1 = (hour == 9 and minute >= 0) or (10 <= hour < 12) or (hour == 12 and minute == 0)
-        # Sesi 2: 13:30 - 15:00 WIB
         sesi2 = (hour == 13 and minute >= 30) or (hour == 14) or (hour == 15 and minute == 0)
         return sesi1 or sesi2
 
-    # Tentukan status bursa
     if today_str in libur_bursa:
         st.warning(f"Hari ini bursa **TUTUP**: {libur_bursa[today_str]}")
     elif today_day in ["Saturday", "Sunday"]:
@@ -473,12 +525,10 @@ with st.sidebar:
     else:
         st.info("Bursa **TUTUP** (di luar jam perdagangan).")
 
-    # Tampilkan libur dalam 2 minggu ke depan
     st.caption("Libur dalam 2 minggu ke depan:")
     future_libur = []
     for date_str, desc in libur_bursa.items():
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        # Hitung selisih hari dengan timezone-aware
         delta = (dt.date() - now_jkt.date()).days
         if 0 < delta <= 14:
             future_libur.append(f"- {dt.strftime('%d %b')}: {desc}")
@@ -818,13 +868,96 @@ if run_btn:
         hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
         prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
 
+        # ============ METRIK TAMBAHAN UNTUK RIWAYAT ============
+        # Skor & Confidence
+        if "STRONG BUY" in signal:
+            signal_score = 0.7 + (prob_bull / 200)
+        elif "BUY" in signal:
+            signal_score = 0.4 + (prob_bull / 200)
+        elif "HOLD" in signal:
+            signal_score = 0.2 + (prob_bull / 300)
+        else:
+            signal_score = max(0, (prob_bull - 30) / 100)
+        signal_score = min(1.0, max(0.0, signal_score))
+        confidence = min(0.99, 0.5 + (signal_score * 0.5) + (win_bt - 0.5) * 0.1)
+        
+        # Trend Consistency
+        trend_consistency = np.mean([1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0 for i in range(1, 11)]) * 100
+        
+        # Volume Surge
+        avg_vol_5 = df['Volume'].iloc[-5:].mean()
+        avg_vol_20 = df['Volume'].iloc[-20:].mean()
+        vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
+        
+        # Likuiditas
+        avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
+        
+        # Status RSI
+        if rsi14 > 70:
+            rsi_status = "Overbought"
+        elif rsi14 < 30:
+            rsi_status = "Oversold"
+        else:
+            rsi_status = "Normal"
+        
+        # Status Z-Score
+        zscore_val = df['ZScore'].iloc[-1]
+        if zscore_val > 2:
+            zs_status = "Overbought"
+        elif zscore_val < -2:
+            zs_status = "Oversold"
+        else:
+            zs_status = "Normal"
+        
+        # Volume Surge Status
+        if vol_surge_pct > 50:
+            vs_status = "Tinggi"
+        elif vol_surge_pct < -30:
+            vs_status = "Rendah"
+        else:
+            vs_status = "Normal"
+        
+        # Coppock Status
+        coppock_val, coppock_prev = coppock_curve(df['Close'].values)
+        coppock_rising = coppock_val > coppock_prev
+        coppock_turning_up = coppock_rising and coppock_prev <= 0
+        if coppock_turning_up:
+            coppock_status = "Turning Up"
+        elif coppock_rising:
+            coppock_status = "Rising"
+        else:
+            coppock_status = "Falling"
+
         # ============ RINGKASAN AWAL ============
         ringkasan = {
             "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
-            "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
-            "Estimasi": f"{est_besok:,.0f}", "Prob Naik": f"{prob_bull:.1f}%", "RRR": f"{rrr:.2f}",
-            "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})", "Rezim": regime,
-            "TP%": f"{tp_pct:.1f}", "SL%": f"{sl_pct:.1f}", "AI_Insight": ""
+            "Saham": ticker_raw,
+            "Harga": f"{harga_terakhir:,.0f}",
+            "Sinyal": signal,
+            "Estimasi": f"{est_besok:,.0f}",
+            "Prob Naik": f"{prob_bull:.1f}%",
+            "RRR": f"{rrr:.2f}",
+            "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
+            "Rezim": regime,
+            "TP%": f"{tp_pct:.1f}",
+            "SL%": f"{sl_pct:.1f}",
+            "AI_Insight": "",
+            "Score": f"{signal_score:.3f}",
+            "Confidence": f"{confidence:.0%}",
+            "Coppock": coppock_status,
+            "Est_Return": f"{est_besok:,.0f}",
+            "TP_Harga": f"{tp_harga:,.0f}",
+            "SL_Harga": f"{sl_harga:,.0f}",
+            "Likuiditas": f"Rp {avg_value:,.0f}",
+            "RSI": f"{rsi14:.1f}",
+            "RSI_Status": rsi_status,
+            "Vol_Surge": f"{vol_surge_pct:+.0f}%",
+            "VS_Status": vs_status,
+            "ZScore": f"{zscore_val:.2f}",
+            "ZS_Status": zs_status,
+            "Trend_Consistency": f"{trend_consistency:.0f}%",
+            "Beta": f"{beta_ihsg:.2f}",
+            "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%"
         }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -972,12 +1105,7 @@ if run_btn:
             "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
         )
 
-        # ---------- Coppock Curve & Beta IHSG (dengan insight) ----------
         st.markdown("### 📈 Coppock Curve & Beta IHSG")
-        coppock_val, coppock_prev = coppock_curve(df['Close'].values)
-        coppock_rising = coppock_val > coppock_prev
-        coppock_turning_up = coppock_rising and coppock_prev <= 0
-
         # Insight Coppock
         if coppock_turning_up:
             coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
@@ -1004,7 +1132,6 @@ if run_btn:
                       help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
             st.caption(beta_insight)
 
-        # ---------- Adaptive Weights (dengan insight) ----------
         st.markdown("### ⚖️ Bobot Adaptif per Faktor")
         st.caption(
             "Bobot di bawah dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. "
@@ -1014,7 +1141,6 @@ if run_btn:
         w_df = pd.DataFrame.from_dict(adaptive_w, orient='index', columns=['Weight'])
         st.bar_chart(w_df)
 
-        # Insight bobot adaptif
         if adaptive_w:
             max_factor = max(adaptive_w, key=adaptive_w.get)
             min_factor = min(adaptive_w, key=adaptive_w.get)
@@ -1034,7 +1160,6 @@ if run_btn:
             weight_insight += interpretations.get(max_factor, "")
             st.info(weight_insight)
 
-        # ---------- Memory Status (dengan insight) ----------
         st.markdown("### 🧠 Status Memori Adaptif")
         st.caption(
             "**Accuracy** = seberapa sering sinyal faktor sesuai arah harga. **Error EMA** = rata‑rata kesalahan prediksi (makin kecil makin baik)."
@@ -1051,7 +1176,6 @@ if run_btn:
                 st.caption("⚠️ Error EMA (lower = better)")
                 st.bar_chart(pd.Series(err_data))
 
-            # Insight memori
             best_factor = max(acc_data, key=acc_data.get)
             worst_factor = min(acc_data, key=acc_data.get)
             mem_insight = f"🏆 **Faktor paling akurat:** **{best_factor}** (akurasi {acc_data[best_factor]:.1%}). "
@@ -1060,7 +1184,6 @@ if run_btn:
         else:
             st.info("Belum ada data memori untuk ticker ini. Lakukan analisis beberapa kali agar engine mulai belajar.")
 
-        # ---------- Self‑Learning Update ----------
         st.markdown("### 🔁 Proses Self‑Learning")
         st.caption(
             "Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. "
@@ -1084,7 +1207,6 @@ if run_btn:
         else:
             st.info("ℹ️ File prediksi belum ada. Engine akan membuatnya setelah analisis pertama.")
 
-        # Simpan prediksi baru
         new_pred = {'ticker': ticker_raw, 'close_price': harga_terakhir}
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
@@ -1100,6 +1222,7 @@ if run_btn:
         else:
             pred_df.to_csv(V12_PRED_FILE, index=False)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
+
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
     if st.session_state.get("gemini_api_key"):
