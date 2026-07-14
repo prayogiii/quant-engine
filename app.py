@@ -423,7 +423,7 @@ with st.sidebar:
                 c2.metric("Est. SL Besok", f"Rp {r.get('SL_Harga','?')}")
                 
                 # Likuiditas
-                st.metric("Likuiditas/hari", r.get('Likuiditas','?'))                
+                st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
 
                 # Indikator Grid
                 ind1, ind2, ind3, ind4 = st.columns(4)
