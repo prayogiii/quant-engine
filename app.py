@@ -391,9 +391,10 @@ with st.sidebar:
                 conf_text = "Rendah ▼"
             
             # Est Return color
-            est_ret_str = r.get('Est_Return', '0')
+            est_ret_str = r.get('Est_Return', '0%')
             try:
-                est_ret = float(est_ret_str.replace(',',''))
+                # Bersihkan % dan koma
+                est_ret = float(est_ret_str.replace('%','').replace(',',''))
             except:
                 est_ret = 0
             if est_ret > 1:
@@ -415,7 +416,7 @@ with st.sidebar:
                 # Coppock & Est Return
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
-                c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
+                c2.metric("Est. Return", f"{r.get('Est_Return','?')}") 
                 
                 # TP & SL
                 c1, c2 = st.columns(2)
@@ -990,7 +991,7 @@ if run_btn:
             "Score": f"{signal_score:.3f}",
             "Confidence": f"{confidence:.0%}",
             "Coppock": coppock_status,
-            "Est_Return": f"{est_besok:,.0f}",
+            "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
             "TP_Harga": f"{tp_harga:,.0f}",
             "SL_Harga": f"{sl_harga:,.0f}",
             "Likuiditas": likuiditas_str,
