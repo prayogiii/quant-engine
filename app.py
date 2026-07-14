@@ -963,7 +963,7 @@ if run_btn:
         pr1.metric("Prob. Naik Besok",f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
     # ══════════════════════════════════════════════════════════
-    # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC
+    # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
     # ══════════════════════════════════════════════════════════
     with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
         st.info(
@@ -972,37 +972,72 @@ if run_btn:
             "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
         )
 
+        # ---------- Coppock Curve & Beta IHSG (dengan insight) ----------
         st.markdown("### 📈 Coppock Curve & Beta IHSG")
-        st.caption(
-            "Coppock Curve adalah indikator momentum jangka panjang yang sering digunakan untuk mendeteksi "
-            "perubahan tren utama. Sinyal **Turning Up** (nilai berubah dari negatif ke positif) dianggap sebagai "
-            "awal fase akumulasi. **Beta** mengukur seberapa sensitif saham terhadap pergerakan IHSG."
-        )
         coppock_val, coppock_prev = coppock_curve(df['Close'].values)
         coppock_rising = coppock_val > coppock_prev
         coppock_turning_up = coppock_rising and coppock_prev <= 0
-        col_cop1, col_cop2 = st.columns(2)
-        col_cop1.metric("Coppock Curve", f"{coppock_val:.3f}",
-                        "Turning Up ✅" if coppock_turning_up else ("Rising 📈" if coppock_rising else "Falling 📉"))
-        col_cop2.metric("Beta IHSG", f"{beta_ihsg:.2f}x",
-                        help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
 
+        # Insight Coppock
+        if coppock_turning_up:
+            coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
+        elif coppock_rising:
+            coppock_insight = "🟢 **Rising** – Tren bullish jangka panjang masih sehat. Akumulasi masih berlangsung."
+        else:
+            coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
+
+        # Insight Beta
+        if beta_ihsg > 1.2:
+            beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
+        elif beta_ihsg > 0.8:
+            beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
+        else:
+            beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
+
+        col_cop1, col_cop2 = st.columns(2)
+        with col_cop1:
+            st.metric("Coppock Curve", f"{coppock_val:.3f}",
+                      "Turning Up ✅" if coppock_turning_up else ("Rising 📈" if coppock_rising else "Falling 📉"))
+            st.caption(coppock_insight)
+        with col_cop2:
+            st.metric("Beta IHSG", f"{beta_ihsg:.2f}x",
+                      help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
+            st.caption(beta_insight)
+
+        # ---------- Adaptive Weights (dengan insight) ----------
         st.markdown("### ⚖️ Bobot Adaptif per Faktor")
         st.caption(
-            "Bobot di bawah ini dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. "
-            "Faktor yang sering memberikan sinyal benar akan mendapat bobot lebih tinggi. "
-            "Bobot ini digunakan untuk menentukan sinyal akhir pada analisis berikutnya."
+            "Bobot di bawah dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. "
+            "Faktor yang sering benar mendapat bobot lebih tinggi. Bobot ini digunakan untuk sinyal akhir."
         )
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
         w_df = pd.DataFrame.from_dict(adaptive_w, orient='index', columns=['Weight'])
         st.bar_chart(w_df)
 
+        # Insight bobot adaptif
+        if adaptive_w:
+            max_factor = max(adaptive_w, key=adaptive_w.get)
+            min_factor = min(adaptive_w, key=adaptive_w.get)
+            max_weight = adaptive_w[max_factor]
+            min_weight = adaptive_w[min_factor]
+
+            weight_insight = f"🔍 **Faktor paling dominan:** **{max_factor}** (bobot {max_weight:.1%}). "
+            weight_insight += f"**{min_factor}** memiliki bobot terendah ({min_weight:.1%}).\n\n"
+
+            interpretations = {
+                "Momentum": "Sinyal momentum (harga 5 hari) paling berpengaruh – pasar sedang *trend-following*. Ikuti tren yang sedang berlangsung.",
+                "AI_Senti": "Sentimen berita paling berpengaruh – pergerakan saham banyak dipicu oleh berita/isu terkini. Pantau terus sentimen.",
+                "MeanRev": "*Reversal* ke rata-rata (Z-Score) paling berpengaruh – saham cenderung kembali ke level wajar setelah jenuh beli/jual.",
+                "Beta_IHSG": "Beta IHSG paling berpengaruh – saham sangat terpengaruh oleh pergerakan pasar secara keseluruhan. Perhatikan arah IHSG.",
+                "Coppock": "Coppock Curve paling berpengaruh – sinyal jangka panjang mendominasi, tren utama sedang kuat. Ikuti sinyal makro."
+            }
+            weight_insight += interpretations.get(max_factor, "")
+            st.info(weight_insight)
+
+        # ---------- Memory Status (dengan insight) ----------
         st.markdown("### 🧠 Status Memori Adaptif")
         st.caption(
-            "Di sini kamu bisa melihat performa historis setiap faktor. "
-            "**Accuracy** menunjukkan seberapa sering sinyal faktor sesuai dengan arah harga sebenarnya. "
-            "**Error EMA** adalah rata‑rata kesalahan prediksi (makin kecil makin baik). "
-            "Data ini terus diperbarui setiap kali kamu menganalisis ticker yang sama."
+            "**Accuracy** = seberapa sering sinyal faktor sesuai arah harga. **Error EMA** = rata‑rata kesalahan prediksi (makin kecil makin baik)."
         )
         mem = st.session_state.v12_memory.get(ticker_raw, {})
         if mem:
@@ -1015,14 +1050,21 @@ if run_btn:
             with col_e:
                 st.caption("⚠️ Error EMA (lower = better)")
                 st.bar_chart(pd.Series(err_data))
+
+            # Insight memori
+            best_factor = max(acc_data, key=acc_data.get)
+            worst_factor = min(acc_data, key=acc_data.get)
+            mem_insight = f"🏆 **Faktor paling akurat:** **{best_factor}** (akurasi {acc_data[best_factor]:.1%}). "
+            mem_insight += f"Faktor **{worst_factor}** perlu dievaluasi (akurasi {acc_data[worst_factor]:.1%})."
+            st.caption(mem_insight)
         else:
             st.info("Belum ada data memori untuk ticker ini. Lakukan analisis beberapa kali agar engine mulai belajar.")
 
+        # ---------- Self‑Learning Update ----------
         st.markdown("### 🔁 Proses Self‑Learning")
         st.caption(
-            "Setiap kali kamu menjalankan analisis, engine akan **membandingkan prediksi sebelumnya** "
-            "dengan harga aktual saat ini. Jika prediksi benar → akurasi naik. Jika salah → error bertambah. "
-            "Proses ini membuat bobot semakin optimal seiring waktu."
+            "Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. "
+            "Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan."
         )
         if os.path.isfile(V12_PRED_FILE):
             pred_df = pd.read_csv(V12_PRED_FILE)
@@ -1038,10 +1080,11 @@ if run_btn:
                 pred_df = pred_df[pred_df['ticker']!=ticker_raw]
                 pred_df.to_csv(V12_PRED_FILE, index=False)
             else:
-                st.info("ℹ️ Tidak ada prediksi sebelumnya untuk ticker ini. Engine akan mulai belajar pada analisis berikutnya.")
+                st.info("ℹ️ Tidak ada prediksi sebelumnya. Engine akan mulai belajar pada analisis berikutnya.")
         else:
             st.info("ℹ️ File prediksi belum ada. Engine akan membuatnya setelah analisis pertama.")
 
+        # Simpan prediksi baru
         new_pred = {'ticker': ticker_raw, 'close_price': harga_terakhir}
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
@@ -1057,7 +1100,6 @@ if run_btn:
         else:
             pred_df.to_csv(V12_PRED_FILE, index=False)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
-
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
     if st.session_state.get("gemini_api_key"):
