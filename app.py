@@ -412,6 +412,48 @@ with st.sidebar:
         st.session_state.riwayat = []
         st.success("Riwayat dihapus!")
 
+    # ---------- KALENDER BURSA DASAR ----------
+    st.markdown("---")
+    st.subheader("📅 Kalender Bursa")
+    # Data libur bursa 2025 (hardcode, update setahun sekali)
+    # Sumber resmi: https://www.idx.co.id/id/tentang-bei/jam-bursa
+    libur_bursa = {
+        "2025-01-01": "Tahun Baru Masehi",
+        "2025-01-29": "Tahun Baru Imlek 2576 Kongzili",
+        "2025-03-14": "Hari Suci Nyepi (Tahun Baru Saka 1947)",
+        "2025-04-18": "Wafat Yesus Kristus",
+        "2025-05-01": "Hari Buruh Internasional",
+        "2025-05-29": "Kenaikan Yesus Kristus",
+        "2025-05-30": "Hari Raya Waisak 2569",
+        "2025-06-06": "Idul Adha 1446 H",
+        "2025-06-27": "Tahun Baru Islam 1447 H",
+        "2025-08-17": "Hari Kemerdekaan Republik Indonesia",
+        "2025-09-05": "Maulid Nabi Muhammad SAW 1447 H",
+        "2025-12-25": "Hari Raya Natal",
+    }
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_day = datetime.now().strftime("%A")
+    if today_str in libur_bursa:
+        st.warning(f"Hari ini bursa **TUTUP**: {libur_bursa[today_str]}")
+    elif today_day in ["Saturday", "Sunday"]:
+        st.warning("Hari ini **AKHIR PEKAN**, bursa tutup.")
+    else:
+        st.success("Bursa **TERBUKA** (Sesi 1: 09:00-12:00, Sesi 2: 13:30-15:00 WIB)")
+
+    # Tampilkan libur dalam 2 minggu ke depan
+    st.caption("Libur dalam 2 minggu ke depan:")
+    future_libur = []
+    for date_str, desc in libur_bursa.items():
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        delta = (dt - datetime.now()).days
+        if 0 < delta <= 14:
+            future_libur.append(f"- {dt.strftime('%d %b')}: {desc}")
+    if future_libur:
+        for item in future_libur:
+            st.caption(item)
+    else:
+        st.caption("Tidak ada libur dalam 2 minggu.")
+
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
 
