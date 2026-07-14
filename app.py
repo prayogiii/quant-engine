@@ -412,12 +412,21 @@ with st.sidebar:
         st.session_state.riwayat = []
         st.success("Riwayat dihapus!")
 
-    # ---------- KALENDER BURSA DASAR ----------
+    # ---------- KALENDER BURSA (TIMEZONE WIB + JAM OPERASIONAL) ----------
     st.markdown("---")
-    st.subheader("📅 Kalender Bursa")
-    # Data libur bursa 2025 (hardcode, update setahun sekali)
+    # Ambil waktu sekarang dalam zona waktu Asia/Jakarta (WIB)
+    now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
+    today_str = now_jkt.strftime("%Y-%m-%d")
+    today_day = now_jkt.strftime("%A")
+    current_hour = now_jkt.hour
+    current_minute = now_jkt.minute
+    current_year = now_jkt.strftime("%Y")
+
+    st.subheader(f"📅 Kalender Bursa {current_year}")
+    # Data libur bursa 2025-2026 (hardcode, update setahun sekali)
     # Sumber resmi: https://www.idx.co.id/id/tentang-bei/jam-bursa
     libur_bursa = {
+        # 2025
         "2025-01-01": "Tahun Baru Masehi",
         "2025-01-29": "Tahun Baru Imlek 2576 Kongzili",
         "2025-03-14": "Hari Suci Nyepi (Tahun Baru Saka 1947)",
@@ -430,22 +439,47 @@ with st.sidebar:
         "2025-08-17": "Hari Kemerdekaan Republik Indonesia",
         "2025-09-05": "Maulid Nabi Muhammad SAW 1447 H",
         "2025-12-25": "Hari Raya Natal",
+        # 2026 (contoh, sesuaikan dengan kalender resmi IDX nanti)
+        "2026-01-01": "Tahun Baru Masehi",
+        "2026-02-17": "Tahun Baru Imlek 2577 Kongzili",
+        "2026-03-03": "Hari Suci Nyepi (Tahun Baru Saka 1948)",
+        "2026-04-03": "Wafat Yesus Kristus",
+        "2026-05-01": "Hari Buruh Internasional",
+        "2026-05-14": "Kenaikan Yesus Kristus",
+        "2026-05-15": "Hari Raya Waisak 2570",
+        "2026-05-25": "Idul Adha 1447 H",
+        "2026-06-15": "Tahun Baru Islam 1448 H",
+        "2026-08-17": "Hari Kemerdekaan Republik Indonesia",
+        "2026-08-24": "Maulid Nabi Muhammad SAW 1448 H",
+        "2026-12-25": "Hari Raya Natal",
     }
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    today_day = datetime.now().strftime("%A")
+
+    # Fungsi bantu untuk mengecek apakah sekarang dalam jam perdagangan
+    def dalam_jam_perdagangan(hour, minute):
+        """Cek apakah waktu termasuk sesi 1 atau sesi 2 bursa."""
+        # Sesi 1: 09:00 - 12:00 WIB
+        sesi1 = (hour == 9 and minute >= 0) or (10 <= hour < 12) or (hour == 12 and minute == 0)
+        # Sesi 2: 13:30 - 15:00 WIB
+        sesi2 = (hour == 13 and minute >= 30) or (hour == 14) or (hour == 15 and minute == 0)
+        return sesi1 or sesi2
+
+    # Tentukan status bursa
     if today_str in libur_bursa:
         st.warning(f"Hari ini bursa **TUTUP**: {libur_bursa[today_str]}")
     elif today_day in ["Saturday", "Sunday"]:
         st.warning("Hari ini **AKHIR PEKAN**, bursa tutup.")
-    else:
+    elif dalam_jam_perdagangan(current_hour, current_minute):
         st.success("Bursa **TERBUKA** (Sesi 1: 09:00-12:00, Sesi 2: 13:30-15:00 WIB)")
+    else:
+        st.info("Bursa **TUTUP** (di luar jam perdagangan).")
 
     # Tampilkan libur dalam 2 minggu ke depan
     st.caption("Libur dalam 2 minggu ke depan:")
     future_libur = []
     for date_str, desc in libur_bursa.items():
         dt = datetime.strptime(date_str, "%Y-%m-%d")
-        delta = (dt - datetime.now()).days
+        # Hitung selisih hari dengan timezone-aware
+        delta = (dt.date() - now_jkt.date()).days
         if 0 < delta <= 14:
             future_libur.append(f"- {dt.strftime('%d %b')}: {desc}")
     if future_libur:
