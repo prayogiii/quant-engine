@@ -422,9 +422,9 @@ with st.sidebar:
                 with c1:
                     st.markdown(
                         f"""
-                        <div style="margin-top: 0px;">
-                            <p style="color:#ffffff; font-size:14px; margin:0 0 2px 0;">Est. TP Besok</p>
-                            <p style="color:#00ffcc; font-size:24px; font-weight:bold; margin:0;">Rp {r.get('TP_Harga','?')}</p>
+                        <div style="margin-bottom: 1rem;">
+                            <p style="color: rgb(136, 146, 176); font-size: 14px; margin: 0 0 4px 0;">Est. TP Besok</p>
+                            <p style="color: rgb(0, 255, 204); font-size: 24px; font-weight: 700; margin: 0; line-height: 1.2;">Rp {r.get('TP_Harga','?')}</p>
                         </div>
                         """,
                         unsafe_allow_html=True
@@ -432,9 +432,9 @@ with st.sidebar:
                 with c2:
                     st.markdown(
                         f"""
-                        <div style="margin-top: 0px;">
-                            <p style="color:#ffffff; font-size:14px; margin:0 0 2px 0;">Est. SL Besok</p>
-                            <p style="color:#ef4444; font-size:24px; font-weight:bold; margin:0;">Rp {r.get('SL_Harga','?')}</p>
+                        <div style="margin-bottom: 1rem;">
+                            <p style="color: rgb(136, 146, 176); font-size: 14px; margin: 0 0 4px 0;">Est. SL Besok</p>
+                            <p style="color: rgb(239, 68, 68); font-size: 24px; font-weight: 700; margin: 0; line-height: 1.2;">Rp {r.get('SL_Harga','?')}</p>
                         </div>
                         """,
                         unsafe_allow_html=True
