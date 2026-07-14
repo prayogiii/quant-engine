@@ -420,10 +420,14 @@ with st.sidebar:
                 # TP & SL
                 c1, c2 = st.columns(2)
                 c1.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','?')}")
-                c2.markdown(
-                f"Est. SL Besok: <span style='color:#ef4444; font-weight:bold'>Rp {r.get('SL_Harga','?')}</span>",
-                    unsafe_allow_html=True
-                )
+                with c2:
+                    st.markdown(
+                        f"<div style='text-align:center;'>"
+                        f"<p style='color:#8892b0; font-size:14px; margin:0;'>Est. SL Besok</p>"
+                        f"<p style='color:#ef4444; font-size:24px; font-weight:bold; margin:0;'>Rp {r.get('SL_Harga','?')}</p>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
                 
                 # Likuiditas
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
