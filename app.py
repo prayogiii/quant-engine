@@ -419,8 +419,17 @@ with st.sidebar:
                 
                 # TP & SL
                 c1, c2 = st.columns(2)
+                # TP dengan HTML kustom agar bisa diseragamkan dengan SL
                 with c1:
-                    st.metric("Est. TP Besok", f"Rp {r.get('TP_Harga','?')}")
+                    st.markdown(
+                        f"""
+                        <div style="margin-top: 0px;">
+                            <p style="color:#8892b0; font-size:14px; margin:0 0 4px 0;">Est. TP Besok</p>
+                            <p style="color:#00ffcc; font-size:24px; font-weight:bold; margin:0;">Rp {r.get('TP_Harga','?')}</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                 with c2:
                     st.markdown(
                         f"""
