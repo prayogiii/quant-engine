@@ -423,8 +423,8 @@ with st.sidebar:
                     st.markdown(
                         f"""
                         <div style="margin-bottom: 1rem;">
-                            <p style="color: rgb(136, 146, 176); font-size: 14px; margin: 0 0 4px 0;">Est. TP Besok</p>
-                            <p style="color: rgb(0, 255, 204); font-size: 24px; font-weight: 700; margin: 0; line-height: 1.2;">Rp {r.get('TP_Harga','?')}</p>
+                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. TP Besok</label>
+                            <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div>
                         </div>
                         """,
                         unsafe_allow_html=True
@@ -433,8 +433,8 @@ with st.sidebar:
                     st.markdown(
                         f"""
                         <div style="margin-bottom: 1rem;">
-                            <p style="color: rgb(136, 146, 176); font-size: 14px; margin: 0 0 4px 0;">Est. SL Besok</p>
-                            <p style="color: rgb(239, 68, 68); font-size: 24px; font-weight: 700; margin: 0; line-height: 1.2;">Rp {r.get('SL_Harga','?')}</p>
+                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. SL Besok</label>
+                            <div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div>
                         </div>
                         """,
                         unsafe_allow_html=True
