@@ -9,7 +9,7 @@ import urllib.parse
 import re
 import csv
 import os
-import json                     # <-- tambahan
+import json
 from datetime import datetime, timedelta
 import pytz
 import math
@@ -156,7 +156,7 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
     save_v12_memory(st.session_state.v12_memory)
 
 # ==========================================
-# KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON)
+# KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON) – REVISI
 # ==========================================
 RIWAYAT_FILE = "riwayat_analisis.json"
 
@@ -214,7 +214,7 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI (tidak berubah)
+# FUNGSI AI GEMINI
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -329,7 +329,7 @@ def bersihkan_teks_ai(teks):
     return teks
 
 # ==========================================
-# KONFIGURASI HALAMAN & STYLING (tidak berubah)
+# KONFIGURASI HALAMAN & STYLING
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
@@ -1339,9 +1339,8 @@ if run_btn:
             elif error_ai: st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
     else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
+    # PANGGIL simpan_riwayat SEKALI SAJA (fungsi ini sudah mengupdate session state)
     simpan_riwayat(ringkasan)
-    st.session_state.riwayat.insert(0, ringkasan)
-    if len(st.session_state.riwayat)>50: st.session_state.riwayat.pop()
 
 # --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
