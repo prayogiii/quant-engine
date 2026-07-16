@@ -158,25 +158,57 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
 # ==========================================
 # KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON)
 # ==========================================
-RIWAYAT_FILE = "riwayat_analisis.json"   # ganti ke JSON
+RIWAYAT_FILE = "riwayat_analisis.json"
+
+def bersihkan_untuk_json(obj):
+    """Konversi nilai numpy/Series ke tipe Python murni."""
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    elif isinstance(obj, (np.floating,)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, pd.Timestamp):
+        return obj.isoformat()
+    elif isinstance(obj, (np.bool_,)):
+        return bool(obj)
+    return obj
 
 def simpan_riwayat(ringkasan):
-    if os.path.isfile(RIWAYAT_FILE):
-        with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
-            try: data = json.load(f)
-            except: data = []
-    else:
-        data = []
-    data.insert(0, ringkasan)
-    with open(RIWAYAT_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data[:50], f, indent=2, ensure_ascii=False, default=str)
+    try:
+        # Bersihkan semua nilai di ringkasan
+        ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in ringkasan.items()}
+        
+        if os.path.isfile(RIWAYAT_FILE):
+            with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
+                try:
+                    data = json.load(f)
+                except json.JSONDecodeError:
+                    data = []
+        else:
+            data = []
+        
+        data.insert(0, ringkasan_bersih)
+        # Batasi maks 50 entri
+        data = data[:50]
+        
+        with open(RIWAYAT_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        
+        # Update session state langsung (hindari race condition)
+        st.session_state.riwayat = data
+    except Exception as e:
+        st.error(f"❌ Gagal menyimpan riwayat: {e}")
 
-def muat_riwayat_dari_csv():   # nama fungsi tetap
+def muat_riwayat_dari_csv():
     if not os.path.isfile(RIWAYAT_FILE):
         return []
-    with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
-        try: return json.load(f)
-        except: return []
+    try:
+        with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
 
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
