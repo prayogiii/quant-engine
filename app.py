@@ -9,6 +9,7 @@ import urllib.parse
 import re
 import csv
 import os
+import json                     # <-- tambahan
 from datetime import datetime, timedelta
 import pytz
 import math
@@ -155,35 +156,33 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
     save_v12_memory(st.session_state.v12_memory)
 
 # ==========================================
-# KONFIGURASI FILE RIWAYAT & SESSION STATE
+# KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON)
 # ==========================================
-RIWAYAT_FILE = "riwayat_analisis.csv"
+RIWAYAT_FILE = "riwayat_analisis.json"   # ganti ke JSON
 
 def simpan_riwayat(ringkasan):
-    try:
-        file_exists = os.path.isfile(RIWAYAT_FILE)
-        with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(ringkasan)
-    except Exception as e:
-        st.error(f"❌ Gagal menyimpan riwayat: {e}")
+    if os.path.isfile(RIWAYAT_FILE):
+        with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
+            try: data = json.load(f)
+            except: data = []
+    else:
+        data = []
+    data.insert(0, ringkasan)
+    with open(RIWAYAT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data[:50], f, indent=2, ensure_ascii=False, default=str)
 
-def muat_riwayat_dari_csv():
+def muat_riwayat_dari_csv():   # nama fungsi tetap
     if not os.path.isfile(RIWAYAT_FILE):
         return []
-    with open(RIWAYAT_FILE, mode='r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        riwayat = list(reader)
-    riwayat.sort(key=lambda x: x.get('Waktu', ''), reverse=True)
-    return riwayat
+    with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
+        try: return json.load(f)
+        except: return []
 
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
 
 # ==========================================
-# FUNGSI AI GEMINI
+# FUNGSI AI GEMINI (tidak berubah)
 # ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key:
@@ -298,7 +297,7 @@ def bersihkan_teks_ai(teks):
     return teks
 
 # ==========================================
-# KONFIGURASI HALAMAN & STYLING
+# KONFIGURASI HALAMAN & STYLING (tidak berubah)
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
@@ -351,7 +350,6 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## 📊 QuantRisk Pro")
     
-    # ---------- PILIH TIMEFRAME ----------
     trading_style = st.radio(
         "⏱️ Gaya Trading:",
         ["Swing Trade (Mingguan)", "Day Trade (Harian)"],
@@ -407,7 +405,6 @@ with st.sidebar:
             
             est_ret_str = r.get('Est_Return', '0%')
             try:
-                # Bersihkan '%' dan koma, lalu konversi ke float
                 est_ret = float(est_ret_str.replace('%','').replace(',',''))
             except:
                 est_ret = 0
@@ -677,7 +674,6 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        # Gunakan st.session_state.trading_style agar konsisten
         if "Day Trade" in st.session_state.trading_style:
             df = load_stock_data(ticker_input, period="5d", interval="5m")
             if df.empty or len(df) < 20:
