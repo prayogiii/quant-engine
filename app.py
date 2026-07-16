@@ -352,10 +352,11 @@ with st.sidebar:
     trading_style = st.radio(
         "⏱️ Gaya Trading:",
         ["Swing Trade (Mingguan)", "Day Trade (Harian)"],
-        index=0
+        index=0,
+        key="trading_style"
     )
     if "Day Trade" in trading_style:
-        timeframe_label = "5m"  # data 5 menit
+        timeframe_label = "5m"
         period = "5d"
         st.caption("Menggunakan data 5-menit (5 hari terakhir)")
     else:
@@ -383,7 +384,6 @@ with st.sidebar:
     st.subheader("📜 Riwayat Analisis")
     if st.session_state.riwayat:
         for r in st.session_state.riwayat[:10]:
-            # Tentukan warna dan ikon sinyal
             if "STRONG BUY" in r.get('Sinyal',''):
                 sig_icon = "🔥"
             elif "BUY" in r.get('Sinyal',''):
@@ -393,47 +393,34 @@ with st.sidebar:
             else:
                 sig_icon = "🚨"
             
-            # Rating Confidence
             conf_str = r.get('Confidence', '0%')
             try:
                 conf_val = float(conf_str.replace('%',''))
             except:
                 conf_val = 0
-            if conf_val >= 70:
-                conf_text = "Tinggi ▲"
-            elif conf_val >= 50:
-                conf_text = "Sedang ►"
-            else:
-                conf_text = "Rendah ▼"
+            if conf_val >= 70: conf_text = "Tinggi ▲"
+            elif conf_val >= 50: conf_text = "Sedang ►"
+            else: conf_text = "Rendah ▼"
             
-            # Est Return color
             est_ret_str = r.get('Est_Return', '0')
             try:
                 est_ret = float(est_ret_str.replace(',',''))
             except:
                 est_ret = 0
-            if est_ret > 1:
-                ret_color = "🟢"
-            elif est_ret > 0:
-                ret_color = "🟡"
-            else:
-                ret_color = "🔴"
+            if est_ret > 1: ret_color = "🟢"
+            elif est_ret > 0: ret_color = "🟡"
+            else: ret_color = "🔴"
             
-            # Format judul expander
             expander_title = f"{r.get('Saham','?')}        {r.get('Harga','?')}        {sig_icon} {r.get('Sinyal','?')}        Score: {r.get('Score','?')}"
             with st.expander(expander_title):
-                # Baris sinyal & confidence
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
                 st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
-                
                 st.divider()
                 
-                # Coppock & Est Return
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
                 c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
                 
-                # TP & SL
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown(
@@ -456,25 +443,20 @@ with st.sidebar:
                         unsafe_allow_html=True
                     )
                 
-                # Likuiditas
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
 
-                # Indikator Grid
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
                 ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
                 ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
                 ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
                 
-                # Beta & Momentum
                 b1, b2 = st.columns(2)
                 b1.metric("Beta", r.get('Beta','?'))
                 b2.metric("Momentum (5D)", r.get('Momentum','?'))
                 
-                # Regime
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
                 
-                # Insight AI (jika ada)
                 ai = r.get("AI_Insight", "").strip()
                 if ai:
                     st.caption(f"💡 {ai[:150]}")
@@ -588,8 +570,8 @@ def load_stock_data(ticker, period="2y", interval="1d"):
     return df
 
 @st.cache_data(ttl=3600)
-def load_ihsg_data():
-    df = yf.download("^JKSE", period="2y")
+def load_ihsg_data(period="2y", interval="1d"):
+    df = yf.download("^JKSE", period=period, interval=interval)
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     return df
 
@@ -684,14 +666,22 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        # Gunakan periode dan interval sesuai pilihan timeframe
         if "Day Trade" in trading_style:
             df = load_stock_data(ticker_input, period="5d", interval="5m")
-            # Untuk Day Trade, kita juga butuh data harian untuk IHSG beta
-            df_ihsg = load_stock_data("^JKSE", period="5d", interval="5m")
+            # Untuk day trade, fallback interval jika data 5m tidak tersedia
+            if df.empty or len(df) < 20:
+                st.warning("Data 5 menit tidak lengkap, mencoba interval 15 menit...")
+                df = load_stock_data(ticker_input, period="5d", interval="15m")
+            if df.empty or len(df) < 20:
+                st.warning("Data 15 menit tidak lengkap, mencoba interval 30 menit...")
+                df = load_stock_data(ticker_input, period="5d", interval="30m")
+            if df.empty or len(df) < 20:
+                st.warning("Data 30 menit tidak lengkap, menggunakan interval 60 menit...")
+                df = load_stock_data(ticker_input, period="5d", interval="60m")
+            df_ihsg = load_ihsg_data(period="5d", interval="5m")
         else:
             df = load_stock_data(ticker_input, period="2y", interval="1d")
-            df_ihsg = load_stock_data("^JKSE", period="2y", interval="1d")
+            df_ihsg = load_ihsg_data(period="2y", interval="1d")
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
@@ -777,7 +767,6 @@ if run_btn:
 
         # ============ BETA ============
         try:
-            # Untuk day trade, beta dihitung dari data 5m yang sudah diunduh
             if not df_ihsg.empty:
                 ihsg_ret = df_ihsg['Close'].pct_change().dropna()
                 common = returns.index.intersection(ihsg_ret.index)
@@ -789,7 +778,7 @@ if run_btn:
                 beta_ihsg = 1.0
         except: beta_ihsg = 1.0
 
-        # ============ ATR & RSI UNTUK RRR KONTEKSTUAL ============
+        # ============ ATR & RSI ============
         df['TR'] = pd.concat([
             df['High'] - df['Low'],
             (df['High'] - df['Close'].shift()).abs(),
@@ -808,42 +797,50 @@ if run_btn:
         else:
             rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
 
-        # === MULTIPLIER TP/SL BERDASARKAN ADX & RSI ===
+        # === MULTIPLIER TP/SL ===
         tp_mult = 2.0
         sl_mult = 1.0
         if adx > 30 and 30 < rsi14 < 70:
-            tp_mult = 2.5
-            sl_mult = 1.0
+            tp_mult = 2.5; sl_mult = 1.0
         elif adx < 20:
-            tp_mult = 1.5
-            sl_mult = 0.75
+            tp_mult = 1.5; sl_mult = 0.75
         if rsi14 > 70 or rsi14 < 30:
             tp_mult = min(tp_mult, 1.5)
 
-        # Hitung TP/SL kontekstual
         sl_pct = sl_mult * atr_pct
         tp_pct = tp_mult * atr_pct
         sl_harga = harga_terakhir * (1 - sl_pct/100)
         tp_harga = harga_terakhir * (1 + tp_pct/100)
 
-        # RRR Kontekstual
         rrr = tp_pct / sl_pct if sl_pct > 0 else 0
-        if rrr >= 2.0:
-            rrr_status = "Sangat Baik (≥ 2.0) 🟢"
-        elif rrr >= 1.5:
-            rrr_status = "Baik (1.5 - 2.0) 🟢"
-        elif rrr >= 1.0:
-            rrr_status = "Cukup (1.0 - 1.5) 🟡"
-        else:
-            rrr_status = "Buruk (< 1.0) 🔴"
+        if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+        elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
+        elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
+        else: rrr_status = "Buruk (< 1.0) 🔴"
 
-        # ============ PIVOT (untuk referensi) ============
-        hi, lo = float(df['High'].iloc[-1]), float(df['Low'].iloc[-1])
-        pp = (hi+lo+harga_terakhir)/3
-        r1,s1 = 2*pp-lo, 2*pp-hi
-        r2,s2 = pp+(hi-lo), pp-(hi-lo)
-        res20 = float(df['High'].iloc[-21:-1].max())
-        breakout = "YES (🔥)" if harga_terakhir>res20 else "NO"
+        # ============ PIVOT (DENGAN VALIDASI) ============
+        hi = lo = cl = None
+        for i in range(1, min(6, len(df))):
+            row = df.iloc[-i]
+            h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
+            if h_val != l_val and h_val > 0 and l_val > 0:
+                hi, lo, cl = h_val, l_val, c_val
+                break
+        if hi is None or lo is None:
+            hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
+        if hi == lo:
+            pp = r1 = s1 = r2 = s2 = cl
+        else:
+            pp = (hi + lo + cl) / 3
+            r1 = 2 * pp - lo
+            s1 = 2 * pp - hi
+            r2 = pp + (hi - lo)
+            s2 = pp - (hi - lo)
+        if len(df) >= 21:
+            res20 = float(df['High'].iloc[-21:-1].max())
+        else:
+            res20 = float(df['High'].max())
+        breakout = "YES (🔥)" if cl > res20 else "NO"
 
         # ============ SINYAL ============
         def generate_signals_vectorized(dataframe, mom_th):
@@ -935,86 +932,50 @@ if run_btn:
         prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
 
         # ============ METRIK TAMBAHAN UNTUK RIWAYAT ============
-        # Skor & Confidence
-        if "STRONG BUY" in signal:
-            signal_score = 0.7 + (prob_bull / 200)
-        elif "BUY" in signal:
-            signal_score = 0.4 + (prob_bull / 200)
-        elif "HOLD" in signal:
-            signal_score = 0.2 + (prob_bull / 300)
-        else:
-            signal_score = max(0, (prob_bull - 30) / 100)
+        if "STRONG BUY" in signal: signal_score = 0.7 + (prob_bull / 200)
+        elif "BUY" in signal: signal_score = 0.4 + (prob_bull / 200)
+        elif "HOLD" in signal: signal_score = 0.2 + (prob_bull / 300)
+        else: signal_score = max(0, (prob_bull - 30) / 100)
         signal_score = min(1.0, max(0.0, signal_score))
         confidence = min(0.99, 0.5 + (signal_score * 0.5) + (win_bt - 0.5) * 0.1)
-        if confidence is None or np.isnan(confidence):
-            confidence = 0.5
+        if confidence is None or np.isnan(confidence): confidence = 0.5
         
-        # Trend Consistency
         trend_consistency = np.mean([1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0 for i in range(1, 11)]) * 100
-        if np.isnan(trend_consistency):
-            trend_consistency = 50.0
+        if np.isnan(trend_consistency): trend_consistency = 50.0
         
-        # Volume Surge
         avg_vol_5 = df['Volume'].iloc[-5:].mean()
         avg_vol_20 = df['Volume'].iloc[-20:].mean()
-        if avg_vol_20 > 0:
-            vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
-        else:
-            vol_surge_pct = 0.0
+        if avg_vol_20 > 0: vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
+        else: vol_surge_pct = 0.0
         
-        # Likuiditas
         avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
-        if np.isnan(avg_value):
-            avg_value = 0.0
-        # Format singkat (M, Jt, rb)
-        if avg_value >= 1e9:
-            likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
-        elif avg_value >= 1e6:
-            likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
-        elif avg_value >= 1e3:
-            likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
-        else:
-            likuiditas_str = f"Rp {avg_value:,.0f}"
+        if np.isnan(avg_value): avg_value = 0.0
+        if avg_value >= 1e9: likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
+        elif avg_value >= 1e6: likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
+        elif avg_value >= 1e3: likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
+        else: likuiditas_str = f"Rp {avg_value:,.0f}"
             
-        # Status RSI
-        if rsi14 > 70:
-            rsi_status = "Overbought"
-        elif rsi14 < 30:
-            rsi_status = "Oversold"
-        else:
-            rsi_status = "Normal"
+        if rsi14 > 70: rsi_status = "Overbought"
+        elif rsi14 < 30: rsi_status = "Oversold"
+        else: rsi_status = "Normal"
         
-        # Status Z-Score
         zscore_val = df['ZScore'].iloc[-1]
-        if pd.isna(zscore_val):
-            zscore_val = 0.0
-        if zscore_val > 2:
-            zs_status = "Overbought"
-        elif zscore_val < -2:
-            zs_status = "Oversold"
-        else:
-            zs_status = "Normal"
+        if pd.isna(zscore_val): zscore_val = 0.0
+        if zscore_val > 2: zs_status = "Overbought"
+        elif zscore_val < -2: zs_status = "Oversold"
+        else: zs_status = "Normal"
         
-        # Volume Surge Status
-        if vol_surge_pct > 50:
-            vs_status = "Tinggi"
-        elif vol_surge_pct < -30:
-            vs_status = "Rendah"
-        else:
-            vs_status = "Normal"
+        if vol_surge_pct > 50: vs_status = "Tinggi"
+        elif vol_surge_pct < -30: vs_status = "Rendah"
+        else: vs_status = "Normal"
         
-        # Coppock Status
         coppock_val, coppock_prev = coppock_curve(df['Close'].values)
         coppock_rising = coppock_val > coppock_prev
         coppock_turning_up = coppock_rising and coppock_prev <= 0
-        if coppock_turning_up:
-            coppock_status = "Turning Up"
-        elif coppock_rising:
-            coppock_status = "Rising"
-        else:
-            coppock_status = "Falling"
+        if coppock_turning_up: coppock_status = "Turning Up"
+        elif coppock_rising: coppock_status = "Rising"
+        else: coppock_status = "Falling"
 
-        # ============ RINGKASAN AWAL ============
         ringkasan = {
             "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
             "Saham": ticker_raw,
@@ -1193,7 +1154,6 @@ if run_btn:
         )
 
         st.markdown("### 📈 Coppock Curve & Beta IHSG")
-        # Insight Coppock
         if coppock_turning_up:
             coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
         elif coppock_rising:
@@ -1201,7 +1161,6 @@ if run_btn:
         else:
             coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
 
-        # Insight Beta
         if beta_ihsg > 1.2:
             beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
         elif beta_ihsg > 0.8:
