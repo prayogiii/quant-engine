@@ -13,4 +13,3 @@ python-dotenv
 pytz
 pytesseract
 Pillow
-json
