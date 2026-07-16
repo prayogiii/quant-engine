@@ -1136,7 +1136,7 @@ if run_btn:
         st.write(f"Kondisi Breakout 20 Hari: **{breakout}**"); st.divider()
         st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest (6 Bulan)"); t1,t2,t3,t4,t5=st.columns(5)
         t1.metric("Sinyal",signal); t2.metric("Estimasi Besok",f"Rp {est_besok:,.0f}".replace(",","."))
-        t3.metric("Entry Zone", entry_zone); t4.metric("Take Profit",f"Rp {tp_harga:,.0f} (+{tp_pct:.1f}%)".replace(",","."), "Target Resist R1")
+        t3.metric("Entry Zone", entry_zone); t4.metric("Take Profit",f"Rp {tp_harga:,.0f} (+{tp_pct:.1f}%)".replace(",","."), "Target Profit")
         t5.metric("Stop Loss",f"Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)".replace(",","."), "Proteksi Batas S2")
         st.markdown("**Hasil Backtest Stateful Tracking 126 Hari:**"); b1,b2,b3,b4,b5,b6=st.columns(6)
         b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
