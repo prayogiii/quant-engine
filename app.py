@@ -9,7 +9,7 @@ import urllib.parse
 import re
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import math
 import google.generativeai as genai
@@ -347,6 +347,22 @@ st.markdown("""
 # ==================== SIDEBAR ====================
 with st.sidebar:
     st.markdown("## 📊 QuantRisk Pro")
+    
+    # ---------- PILIH TIMEFRAME ----------
+    trading_style = st.radio(
+        "⏱️ Gaya Trading:",
+        ["Swing Trade (Mingguan)", "Day Trade (Harian)"],
+        index=0
+    )
+    if "Day Trade" in trading_style:
+        timeframe_label = "5m"  # data 5 menit
+        period = "5d"
+        st.caption("Menggunakan data 5-menit (5 hari terakhir)")
+    else:
+        timeframe_label = "1d"
+        period = "2y"
+        st.caption("Menggunakan data harian (2 tahun terakhir)")
+    
     st.markdown("Masukkan kode saham IHSG untuk analisis lengkap.")
     ticker_raw = st.text_input("🔍 Kode Saham", value="BBRI", placeholder="Contoh: BBRI, TLKM, BMRI").upper().strip()
     if ticker_raw and not ticker_raw.endswith(".JK"):
@@ -391,10 +407,9 @@ with st.sidebar:
                 conf_text = "Rendah ▼"
             
             # Est Return color
-            est_ret_str = r.get('Est_Return', '0%')
+            est_ret_str = r.get('Est_Return', '0')
             try:
-                # Bersihkan % dan koma
-                est_ret = float(est_ret_str.replace('%','').replace(',',''))
+                est_ret = float(est_ret_str.replace(',',''))
             except:
                 est_ret = 0
             if est_ret > 1:
@@ -416,14 +431,14 @@ with st.sidebar:
                 # Coppock & Est Return
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
-                c2.metric("Est. Return", f"{ret_color} {r.get('Est_Return','?')}") 
+                c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
                 
                 # TP & SL
                 c1, c2 = st.columns(2)
                 with c1:
                     st.markdown(
                         f"""
-                        <div style="margin-bottom: 1rem;">
+                        <div style="margin-top: 0px;">
                             <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. TP Besok</label>
                             <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div>
                         </div>
@@ -433,7 +448,7 @@ with st.sidebar:
                 with c2:
                     st.markdown(
                         f"""
-                        <div style="margin-bottom: 1rem;">
+                        <div style="margin-top: 0px;">
                             <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. SL Besok</label>
                             <div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div>
                         </div>
@@ -566,8 +581,8 @@ with st.sidebar:
 
 # ==================== FUNGSI DATA & INDIKATOR ====================
 @st.cache_data(ttl=3600)
-def load_stock_data(ticker):
-    df = yf.download(ticker, period="2y")
+def load_stock_data(ticker, period="2y", interval="1d"):
+    df = yf.download(ticker, period=period, interval=interval)
     if df.empty: return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     return df
@@ -669,12 +684,20 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        df = load_stock_data(ticker_input)
+        # Gunakan periode dan interval sesuai pilihan timeframe
+        if "Day Trade" in trading_style:
+            df = load_stock_data(ticker_input, period="5d", interval="5m")
+            # Untuk Day Trade, kita juga butuh data harian untuk IHSG beta
+            df_ihsg = load_stock_data("^JKSE", period="5d", interval="5m")
+        else:
+            df = load_stock_data(ticker_input, period="2y", interval="1d")
+            df_ihsg = load_stock_data("^JKSE", period="2y", interval="1d")
+        
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
         harga_terakhir = float(df['Close'].iloc[-1])
         returns = df['Close'].pct_change().dropna()
-        if len(returns)<50: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
+        if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
 
         # ============ INDIKATOR ============
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
@@ -754,10 +777,16 @@ if run_btn:
 
         # ============ BETA ============
         try:
-            ihsg = load_ihsg_data()
-            ihsg_ret = ihsg['Close'].pct_change().dropna()
-            common = returns.index.intersection(ihsg_ret.index)
-            beta_ihsg = (np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])) if len(common)>20 else 1.0
+            # Untuk day trade, beta dihitung dari data 5m yang sudah diunduh
+            if not df_ihsg.empty:
+                ihsg_ret = df_ihsg['Close'].pct_change().dropna()
+                common = returns.index.intersection(ihsg_ret.index)
+                if len(common) > 20:
+                    beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])
+                else:
+                    beta_ihsg = 1.0
+            else:
+                beta_ihsg = 1.0
         except: beta_ihsg = 1.0
 
         # ============ ATR & RSI UNTUK RRR KONTEKSTUAL ============
@@ -830,6 +859,17 @@ if run_btn:
             return sig
         df['Signal'] = generate_signals_vectorized(df, mom_median_th)
         signal = df['Signal'].iloc[-1]
+
+        # ============ ENTRY ZONE ADAPTIF ============
+        if s1 >= harga_terakhir * 0.95:
+            entry_low = s1
+        else:
+            entry_low = harga_terakhir * (1 - atr_pct/100)
+        if "STRONG BUY" in signal:
+            entry_high = harga_terakhir
+        else:
+            entry_high = harga_terakhir * (1 - 0.5 * atr_pct/100)
+        entry_zone = f"Rp {entry_low:,.0f} - {entry_high:,.0f}"
 
         # ============ BACKTEST ============
         df_back = df.iloc[-126:].copy()
@@ -991,7 +1031,7 @@ if run_btn:
             "Score": f"{signal_score:.3f}",
             "Confidence": f"{confidence:.0%}",
             "Coppock": coppock_status,
-            "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
+            "Est_Return": f"{est_besok:,.0f}",
             "TP_Harga": f"{tp_harga:,.0f}",
             "SL_Harga": f"{sl_harga:,.0f}",
             "Likuiditas": likuiditas_str,
@@ -1003,7 +1043,8 @@ if run_btn:
             "ZS_Status": zs_status,
             "Trend_Consistency": f"{trend_consistency:.0f}%",
             "Beta": f"{beta_ihsg:.2f}",
-            "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%"
+            "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
+            "Entry_Zone": entry_zone
         }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -1038,10 +1079,10 @@ if run_btn:
         at = f"• <b>KONDISI:</b> Sinyal {signal} tapi <b>RRR Buruk ({rrr:.2f})</b><br>• <b>REKOMENDASI:</b> WAIT & SEE<br>• <b>LANGKAH:</b> Tunda entry, tunggu setup lebih baik."
     elif "STRONG BUY" in signal:
         ac,ai = "#10b981","🟢"
-        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry bertahap, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP {tp_harga:,.0f} (+{tp_pct:.1f}%)."
+        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry zone {entry_zone}, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP {tp_harga:,.0f} (+{tp_pct:.1f}%)."
     elif "BUY" in signal:
         ac,ai = "#f59e0b","🟡"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di area support, SL {sl_harga:,.0f}, TP {tp_harga:,.0f}."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP {tp_harga:,.0f}."
     elif "HOLD" in signal:
         ac,ai = "#3b82f6","🔵"
         at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
@@ -1126,8 +1167,8 @@ if run_btn:
         st.write(f"Kondisi Breakout 20 Hari: **{breakout}**"); st.divider()
         st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest (6 Bulan)"); t1,t2,t3,t4,t5=st.columns(5)
         t1.metric("Sinyal",signal); t2.metric("Estimasi Besok",f"Rp {est_besok:,.0f}".replace(",","."))
-        t3.metric("Entry Ideal",f"Rp {s1:,.0f} - {pp:,.0f}".replace(",",".")); t4.metric("Take Profit",f"Rp {r1:,.0f} (+{tp_pct:.1f}%)".replace(",","."), "Target Resist R1")
-        t5.metric("Stop Loss",f"Rp {s2:,.0f} (-{sl_pct:.1f}%)".replace(",","."), "Proteksi Batas S2")
+        t3.metric("Entry Zone", entry_zone); t4.metric("Take Profit",f"Rp {tp_harga:,.0f} (+{tp_pct:.1f}%)".replace(",","."), "Target Resist R1")
+        t5.metric("Stop Loss",f"Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)".replace(",","."), "Proteksi Batas S2")
         st.markdown("**Hasil Backtest Stateful Tracking 126 Hari:**"); b1,b2,b3,b4,b5,b6=st.columns(6)
         b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
         b3.metric("Avg Return/Trade",f"{avg_bt:.2%}" if trades_bt else "N/A"); b4.metric("Max DD Strat",f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
