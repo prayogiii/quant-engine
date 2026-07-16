@@ -1012,7 +1012,8 @@ if run_btn:
             "Trend_Consistency": f"{trend_consistency:.0f}%",
             "Beta": f"{beta_ihsg:.2f}",
             "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
-            "Entry_Zone": entry_zone
+            "Entry_Zone": entry_zone,
+            "Gaya": trading_style
         }
 
     # ==================== TAMPILAN UTAMA ====================
