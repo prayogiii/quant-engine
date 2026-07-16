@@ -160,12 +160,15 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
 RIWAYAT_FILE = "riwayat_analisis.csv"
 
 def simpan_riwayat(ringkasan):
-    file_exists = os.path.isfile(RIWAYAT_FILE)
-    with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(ringkasan)
+    try:
+        file_exists = os.path.isfile(RIWAYAT_FILE)
+        with open(RIWAYAT_FILE, mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=ringkasan.keys())
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(ringkasan)
+    except Exception as e:
+        st.error(f"❌ Gagal menyimpan riwayat: {e}")
 
 def muat_riwayat_dari_csv():
     if not os.path.isfile(RIWAYAT_FILE):
@@ -413,9 +416,9 @@ with st.sidebar:
             else: ret_color = "🔴"
             
             gaya = r.get('Gaya','?')
-            if "Day Trade" in gaya:
+            if gaya == "DT":
                 gaya_label = "⏱️DT"
-            elif "Swing Trade" in gaya:
+            elif gaya == "SW":
                 gaya_label = "📆SW"
             else:
                 gaya_label = ""
@@ -674,9 +677,9 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        if "Day Trade" in trading_style:
+        # Gunakan st.session_state.trading_style agar konsisten
+        if "Day Trade" in st.session_state.trading_style:
             df = load_stock_data(ticker_input, period="5d", interval="5m")
-            # Untuk day trade, fallback interval jika data 5m tidak tersedia
             if df.empty or len(df) < 20:
                 st.warning("Data 5 menit tidak lengkap, mencoba interval 15 menit...")
                 df = load_stock_data(ticker_input, period="5d", interval="15m")
@@ -1000,7 +1003,7 @@ if run_btn:
             "Score": f"{signal_score:.3f}",
             "Confidence": f"{confidence:.0%}",
             "Coppock": coppock_status,
-            "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",            
+            "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
             "TP_Harga": f"{tp_harga:,.0f}",
             "SL_Harga": f"{sl_harga:,.0f}",
             "Likuiditas": likuiditas_str,
@@ -1014,7 +1017,7 @@ if run_btn:
             "Beta": f"{beta_ihsg:.2f}",
             "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
             "Entry_Zone": entry_zone,
-            "Gaya": trading_style
+            "Gaya": "SW" if "Swing" in st.session_state.trading_style else "DT"
         }
 
     # ==================== TAMPILAN UTAMA ====================
