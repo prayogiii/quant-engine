@@ -411,7 +411,14 @@ with st.sidebar:
             elif est_ret > 0: ret_color = "🟡"
             else: ret_color = "🔴"
             
-            expander_title = f"{r.get('Saham','?')}        {r.get('Harga','?')}        {sig_icon} {r.get('Sinyal','?')}        Score: {r.get('Score','?')}"
+            gaya = r.get('Gaya','?')
+            if "Day Trade" in gaya:
+                gaya_label = "⏱️DT"
+            elif "Swing Trade" in gaya:
+                gaya_label = "📆SW"
+            else:
+                gaya_label = ""
+            expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
             with st.expander(expander_title):
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
                 st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
