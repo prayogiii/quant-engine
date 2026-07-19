@@ -51,35 +51,27 @@ WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
 AI_SIGNAL_CAP = 0.30
 MC_PESSIMISM  = 0.82
-V12_PRED_FILE = "v12_predictions.csv"  # prediksi tetap pakai file lokal
+V12_PRED_FILE = "v12_predictions.csv"
 
 # ====================== GOOGLE SHEETS FUNCTIONS ======================
 def get_gsheet():
     """Mengembalikan objek spreadsheet berdasarkan secrets."""
-    try:
-        creds = Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"],
-            scopes=["https://www.googleapis.com/auth/spreadsheets"]
-        )
-        client = gspread.authorize(creds)
-        return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
-    except Exception as e:
-        st.error(f"❌ Gagal koneksi ke Google Sheets: {e}")
-        return None
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    client = gspread.authorize(creds)
+    return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
 
 def init_sheets():
     """Membuat sheet 'riwayat' dan 'v12_memory' jika belum ada."""
     try:
         sheet = get_gsheet()
-        if sheet is None:
-            return
         existing = [ws.title for ws in sheet.worksheets()]
         if "riwayat" not in existing:
             sheet.add_worksheet("riwayat", rows=100, cols=25)
-            st.sidebar.success("✅ Sheet 'riwayat' dibuat.")
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
-            st.sidebar.success("✅ Sheet 'v12_memory' dibuat.")
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -87,11 +79,8 @@ def init_sheets():
 def load_v12_memory():
     mem = {}
     try:
-        sheet = get_gsheet()
-        if sheet is None:
-            return mem
-        ws = sheet.worksheet("v12_memory")
-        records = ws.get_all_records()
+        sheet = get_gsheet().worksheet("v12_memory")
+        records = sheet.get_all_records()
         for row in records:
             t = row.get('ticker')
             if t and 'data' in row and row['data']:
@@ -100,22 +89,19 @@ def load_v12_memory():
                 except:
                     pass
     except Exception as e:
-        st.error(f"❌ Gagal memuat V12 memory: {e}")
+        st.error(f"Gagal memuat V12 memory: {e}")
     return mem
 
 def save_v12_memory(mem):
     try:
-        sheet = get_gsheet()
-        if sheet is None:
-            return
-        ws = sheet.worksheet("v12_memory")
+        sheet = get_gsheet().worksheet("v12_memory")
         rows = [{'ticker': t, 'data': json.dumps(d)} for t, d in mem.items()]
-        ws.clear()
+        sheet.clear()
         if rows:
-            ws.insert_row(['ticker', 'data'], 1)
-            ws.append_rows([[r['ticker'], r['data']] for r in rows])
+            sheet.insert_row(['ticker', 'data'], 1)
+            sheet.append_rows([[r['ticker'], r['data']] for r in rows])
     except Exception as e:
-        st.error(f"❌ Gagal menyimpan V12 memory: {e}")
+        st.error(f"Gagal menyimpan V12 memory: {e}")
 
 def default_weight(factor, regime):
     defaults = {
@@ -194,7 +180,7 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
     save_v12_memory(st.session_state.v12_memory)
 
 # ==========================================
-# KONFIGURASI FILE RIWAYAT & SESSION STATE (GOOGLE SHEETS)
+# KONFIGURASI FILE RIWAYAT & SESSION STATE
 # ==========================================
 def bersihkan_untuk_json(obj):
     if isinstance(obj, (np.integer,)): return int(obj)
@@ -206,33 +192,26 @@ def bersihkan_untuk_json(obj):
 
 def simpan_riwayat(ringkasan):
     try:
-        sheet = get_gsheet()
-        if sheet is None:
-            st.error("❌ Tidak dapat menyimpan riwayat: koneksi Google Sheets gagal.")
-            return
-        ws = sheet.worksheet("riwayat")
+        sheet = get_gsheet().worksheet("riwayat")
         ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in ringkasan.items()}
-        records = ws.get_all_records()
+        records = sheet.get_all_records()
         data = list(records)
         data.insert(0, ringkasan_bersih)
         data = data[:50]
         if data:
             headers = list(data[0].keys())
-            ws.clear()
-            ws.insert_row(headers, 1)
+            sheet.clear()
+            sheet.insert_row(headers, 1)
             rows = [[row.get(h, "") for h in headers] for row in data]
-            ws.append_rows(rows, value_input_option='USER_ENTERED')
+            sheet.append_rows(rows, value_input_option='USER_ENTERED')
         st.session_state.riwayat = data
     except Exception as e:
-        st.error(f"❌ Gagal menyimpan riwayat ke Google Sheets: {e}")
+        st.error(f"❌ Gagal menyimpan riwayat: {e}")
 
 def muat_riwayat_dari_sheets():
     try:
-        sheet = get_gsheet()
-        if sheet is None:
-            return []
-        ws = sheet.worksheet("riwayat")
-        records = ws.get_all_records()
+        sheet = get_gsheet().worksheet("riwayat")
+        records = sheet.get_all_records()
         return list(records)[:50]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
@@ -334,8 +313,14 @@ def bersihkan_teks_ai(teks):
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
-# ✅ Panggil init_sheets() di awal aplikasi agar sheet selalu siap
+# ✅ Inisialisasi Google Sheets & Session State (HARUS di awal, sebelum sidebar)
 init_sheets()
+
+if 'v12_memory' not in st.session_state:
+    st.session_state.v12_memory = load_v12_memory()
+
+if "riwayat" not in st.session_state:
+    st.session_state.riwayat = muat_riwayat_dari_sheets()
 
 st.markdown("""
     <style>
@@ -463,14 +448,10 @@ with st.sidebar:
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
-            sheet = get_gsheet()
-            if sheet:
-                ws = sheet.worksheet("riwayat")
-                ws.clear()
-                st.session_state.riwayat = []
-                st.success("Riwayat dihapus!")
-            else:
-                st.error("Gagal menghapus: koneksi tidak tersedia.")
+            sheet = get_gsheet().worksheet("riwayat")
+            sheet.clear()
+            st.session_state.riwayat = []
+            st.success("Riwayat dihapus!")
         except Exception as e:
             st.error(f"Gagal menghapus riwayat: {e}")
 
@@ -606,13 +587,6 @@ REGIME_INFO = {
     "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
-
-# ==================== SESSION STATE ====================
-if 'v12_memory' not in st.session_state:
-    st.session_state.v12_memory = load_v12_memory()
-
-if "riwayat" not in st.session_state:
-    st.session_state.riwayat = muat_riwayat_dari_sheets()
 
 # ==================== PROSES ANALISIS ====================
 if run_btn:
