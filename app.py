@@ -15,6 +15,10 @@ import pytz
 import math
 import google.generativeai as genai
 
+# Google Sheets integration
+import gspread
+from google.oauth2.service_account import Credentials
+
 # ====================== FALLBACK HANDLERS ======================
 PLOTLY_AVAILABLE = True
 try: import plotly.graph_objects as go
@@ -47,34 +51,54 @@ WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
 AI_SIGNAL_CAP = 0.30
 MC_PESSIMISM  = 0.82
-V12_MEM_FILE  = "adaptive_memory.csv"
-V12_PRED_FILE = "v12_predictions.csv"
+V12_PRED_FILE = "v12_predictions.csv"  # prediksi tetap pakai file lokal
 
+# ====================== GOOGLE SHEETS FUNCTIONS ======================
+def get_gsheet():
+    """Mengembalikan objek spreadsheet berdasarkan secrets."""
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"]
+    )
+    client = gspread.authorize(creds)
+    return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
+
+def init_sheets():
+    """Membuat sheet 'riwayat' dan 'v12_memory' jika belum ada."""
+    sheet = get_gsheet()
+    existing = [ws.title for ws in sheet.worksheets()]
+    if "riwayat" not in existing:
+        sheet.add_worksheet("riwayat", rows=100, cols=25)
+    if "v12_memory" not in existing:
+        sheet.add_worksheet("v12_memory", rows=100, cols=3)
+
+# V12 Memory (Google Sheets)
 def load_v12_memory():
     mem = {}
-    if not os.path.isfile(V12_MEM_FILE): return mem
-    with open(V12_MEM_FILE,'r',encoding='utf-8') as f:
-        for row in csv.DictReader(f):
-            t = row['ticker']
-            if t not in mem: mem[t] = {'weights':{},'accuracy':{},'error_ema':{}}
-            for k in FACTOR_KEYS:
-                if row.get(f'W_{k}'): mem[t]['weights'][k] = float(row[f'W_{k}'])
-                if row.get(f'ACC_{k}'): mem[t]['accuracy'][k] = float(row[f'ACC_{k}'])
-                if row.get(f'ERR_{k}'): mem[t]['error_ema'][k] = float(row[f'ERR_{k}'])
+    try:
+        sheet = get_gsheet().worksheet("v12_memory")
+        records = sheet.get_all_records()
+        for row in records:
+            t = row.get('ticker')
+            if t and 'data' in row and row['data']:
+                try:
+                    mem[t] = json.loads(row['data'])
+                except:
+                    pass
+    except Exception as e:
+        st.error(f"Gagal memuat V12 memory dari Google Sheets: {e}")
     return mem
 
 def save_v12_memory(mem):
-    rows = []
-    for t,d in mem.items():
-        row = {'ticker':t}
-        for k in FACTOR_KEYS:
-            row[f'W_{k}']   = d['weights'].get(k, default_weight(k,'SIDEWAYS'))
-            row[f'ACC_{k}'] = d['accuracy'].get(k,0.5)
-            row[f'ERR_{k}'] = d['error_ema'].get(k,1.0)
-        rows.append(row)
-    with open(V12_MEM_FILE,'w',newline='',encoding='utf-8') as f:
-        w = csv.DictWriter(f, fieldnames=['ticker']+[f'W_{k}' for k in FACTOR_KEYS]+[f'ACC_{k}' for k in FACTOR_KEYS]+[f'ERR_{k}' for k in FACTOR_KEYS])
-        w.writeheader(); w.writerows(rows)
+    try:
+        sheet = get_gsheet().worksheet("v12_memory")
+        rows = [{'ticker': t, 'data': json.dumps(d)} for t, d in mem.items()]
+        sheet.clear()
+        if rows:
+            sheet.insert_row(['ticker', 'data'], 1)
+            sheet.append_rows([[r['ticker'], r['data']] for r in rows])
+    except Exception as e:
+        st.error(f"Gagal menyimpan V12 memory ke Google Sheets: {e}")
 
 def default_weight(factor, regime):
     defaults = {
@@ -87,6 +111,8 @@ def default_weight(factor, regime):
     return defaults.get(regime, {"Momentum":0.23,"AI_Senti":0.17,"MeanRev":0.15,"Beta_IHSG":0.15,"Coppock":0.30}).get(factor,0.15)
 
 if 'v12_memory' not in st.session_state:
+    # Inisialisasi Google Sheets sebelum load memory
+    init_sheets()
     st.session_state.v12_memory = load_v12_memory()
 
 # ---------- Coppock Curve ----------
@@ -156,10 +182,8 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
     save_v12_memory(st.session_state.v12_memory)
 
 # ==========================================
-# KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON)
+# KONFIGURASI FILE RIWAYAT & SESSION STATE (GOOGLE SHEETS)
 # ==========================================
-RIWAYAT_FILE = "riwayat_analisis.json"
-
 def bersihkan_untuk_json(obj):
     if isinstance(obj, (np.integer,)): return int(obj)
     elif isinstance(obj, (np.floating,)): return float(obj)
@@ -170,29 +194,35 @@ def bersihkan_untuk_json(obj):
 
 def simpan_riwayat(ringkasan):
     try:
+        sheet = get_gsheet().worksheet("riwayat")
         ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in ringkasan.items()}
-        if os.path.isfile(RIWAYAT_FILE):
-            with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
-                try: data = json.load(f)
-                except: data = []
-        else: data = []
+        # Ambil data yang sudah ada
+        records = sheet.get_all_records()
+        data = list(records)
         data.insert(0, ringkasan_bersih)
-        data = data[:50]
-        with open(RIWAYAT_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        data = data[:50]  # batasi 50 entri
+        # Tulis ulang sheet
+        if data:
+            headers = list(data[0].keys())
+            sheet.clear()
+            sheet.insert_row(headers, 1)
+            rows = [[row.get(h, "") for h in headers] for row in data]
+            sheet.append_rows(rows, value_input_option='USER_ENTERED')
         st.session_state.riwayat = data
     except Exception as e:
-        st.error(f"❌ Gagal menyimpan riwayat: {e}")
+        st.error(f"❌ Gagal menyimpan riwayat ke Google Sheets: {e}")
 
-def muat_riwayat_dari_csv():
-    if not os.path.isfile(RIWAYAT_FILE): return []
+def muat_riwayat_dari_sheets():
     try:
-        with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except: return []
+        sheet = get_gsheet().worksheet("riwayat")
+        records = sheet.get_all_records()
+        return list(records)[:50]
+    except Exception as e:
+        st.error(f"❌ Gagal memuat riwayat: {e}")
+        return []
 
 if "riwayat" not in st.session_state:
-    st.session_state.riwayat = muat_riwayat_dari_csv()
+    st.session_state.riwayat = muat_riwayat_dari_sheets()
 
 # ==========================================
 # FUNGSI AI GEMINI
@@ -415,9 +445,13 @@ with st.sidebar:
     if api_key: st.session_state.gemini_api_key = api_key
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
-        if os.path.isfile(RIWAYAT_FILE): os.remove(RIWAYAT_FILE)
-        st.session_state.riwayat = []
-        st.success("Riwayat dihapus!")
+        try:
+            sheet = get_gsheet().worksheet("riwayat")
+            sheet.clear()
+            st.session_state.riwayat = []
+            st.success("Riwayat dihapus!")
+        except Exception as e:
+            st.error(f"Gagal menghapus riwayat: {e}")
 
     # ---------- KALENDER BURSA ----------
     st.markdown("---")
