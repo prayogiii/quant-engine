@@ -1403,12 +1403,14 @@ else:
 
             # Chart dengan guard Plotly
             if PLOTLY_AVAILABLE:
-                fig = go.Figure()
+                                fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
                     mode='lines',
                     line=dict(color='#f59e0b', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
                 fig.update_layout(
@@ -1417,7 +1419,8 @@ else:
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="Tanggal",
-                    yaxis_title="Harga"
+                    yaxis_title="Harga",
+                    hovermode='x unified'
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -1429,12 +1432,14 @@ else:
             st.metric("IHSG", f"{ihsg_close:,.0f}")
             st.warning("Data IHSG hanya tersedia 1 hari, tidak cukup untuk menghitung perubahan harian.")
             if PLOTLY_AVAILABLE:
-                fig = go.Figure()
+                                fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
                     mode='lines',
                     line=dict(color='#f59e0b', width=2),
+                    fill='tozeroy',
+                    fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
                 fig.update_layout(
@@ -1443,7 +1448,8 @@ else:
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="Tanggal",
-                    yaxis_title="Harga"
+                    yaxis_title="Harga",
+                    hovermode='x unified'
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
