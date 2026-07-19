@@ -378,10 +378,12 @@ with st.sidebar:
                 c1.metric("Coppock", r.get('Coppock','?'))
                 c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
                 c1, c2 = st.columns(2)
+                tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
+                sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
                 with c1:
-                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. TP Besok</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div></div>""", unsafe_allow_html=True)
                 with c2:
-                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. SL Besok</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div></div>""", unsafe_allow_html=True)
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
@@ -557,20 +559,24 @@ if run_btn:
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
         is_daytrade = "Day Trade" in st.session_state.trading_style
+        bars_per_day_map = {"5m": 54, "15m": 18, "30m": 9, "60m": 5}  # IDX session 4.5h
         
         if is_daytrade:
-            df = load_stock_data(ticker_input, period="5d", interval="5m")
+            actual_interval = "5m"
+            df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
             if df.empty or len(df) < 20:
                 st.warning("Data 5 menit tidak lengkap, mencoba interval 15 menit...")
-                df = load_stock_data(ticker_input, period="5d", interval="15m")
+                actual_interval = "15m"
+                df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
             if df.empty or len(df) < 20:
                 st.warning("Data 15 menit tidak lengkap, mencoba interval 30 menit...")
-                df = load_stock_data(ticker_input, period="5d", interval="30m")
+                actual_interval = "30m"
+                df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
             if df.empty or len(df) < 20:
                 st.warning("Data 30 menit tidak lengkap, menggunakan interval 60 menit...")
-                df = load_stock_data(ticker_input, period="5d", interval="60m")
+                actual_interval = "60m"
+                df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
             df_ihsg = load_ihsg_data(period="5d", interval="5m")
-            # Untuk pivot harian, ambil data 1 bulan terakhir dengan interval 1d
             df_daily = load_stock_data(ticker_input, period="1mo", interval="1d")
         else:
             df = load_stock_data(ticker_input, period="2y", interval="1d")
@@ -706,30 +712,46 @@ if run_btn:
 
         # ============ PIVOT (ADAPTIF) ============
         if is_daytrade:
-            # Day Trade: hitung pivot dari data harian (kemarin)
-            if not df_daily.empty and len(df_daily) >= 2:
-                prev_day = df_daily.iloc[-2]
-                hi_daily = float(prev_day['High'])
-                lo_daily = float(prev_day['Low'])
-                cl_daily = float(prev_day['Close'])
-                if hi_daily != lo_daily:
-                    pp = (hi_daily + lo_daily + cl_daily) / 3
-                    r1 = 2 * pp - lo_daily
-                    s1 = 2 * pp - hi_daily
-                    r2 = pp + (hi_daily - lo_daily)
-                    s2 = pp - (hi_daily - lo_daily)
+            today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
+            if not df_daily.empty:
+                df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
+                if not df_daily_filtered.empty:
+                    prev_day = df_daily_filtered.iloc[-1]
+                    hi_daily = float(prev_day['High'])
+                    lo_daily = float(prev_day['Low'])
+                    cl_daily = float(prev_day['Close'])
                 else:
-                    pp = r1 = s1 = r2 = s2 = cl_daily
+                    # Fallback: cari baris valid terakhir (High != Low)
+                    prev_day = None
+                    for i in range(1, min(len(df_daily), 6)):
+                        row = df_daily.iloc[-i]
+                        h_val = float(row['High'])
+                        l_val = float(row['Low'])
+                        c_val = float(row['Close'])
+                        if h_val != l_val and h_val > 0 and l_val > 0:
+                            prev_day = row
+                            hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
+                            break
+                    if prev_day is None:
+                        last = df_daily.iloc[-1]
+                        hi_daily = float(last['High'])
+                        lo_daily = float(last['Low'])
+                        cl_daily = float(last['Close'])
             else:
-                # fallback: gunakan bar terakhir (mungkin sama)
-                hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
-                if hi != lo:
-                    pp = (hi + lo + cl) / 3
-                    r1 = 2 * pp - lo; s1 = 2 * pp - hi
-                    r2 = pp + (hi - lo); s2 = pp - (hi - lo)
-                else: pp = r1 = s1 = r2 = s2 = cl
+                hi_daily = float(df['High'].iloc[-1])
+                lo_daily = float(df['Low'].iloc[-1])
+                cl_daily = float(df['Close'].iloc[-1])
+
+            if hi_daily != lo_daily:
+                pp = (hi_daily + lo_daily + cl_daily) / 3
+                r1 = 2 * pp - lo_daily
+                s1 = 2 * pp - hi_daily
+                r2 = pp + (hi_daily - lo_daily)
+                s2 = pp - (hi_daily - lo_daily)
+            else:
+                pp = r1 = s1 = r2 = s2 = cl_daily
         else:
-            # Swing Trade: seperti sebelumnya (validasi candle terakhir)
+            # Swing Trade
             hi = lo = cl = None
             for i in range(1, min(6, len(df))):
                 row = df.iloc[-i]
@@ -747,10 +769,10 @@ if run_btn:
 
         # Breakout (adaptif)
         if is_daytrade:
-            # Bandingkan dengan high dari sesi sebelumnya (78 bar untuk 5m, atau 1 hari)
-            if len(df) >= 78:
-                res20 = float(df['High'].iloc[-78:-1].max())
-                breakout_label = "Breakout Sesi Sebelumnya"
+            bars_per_day = bars_per_day_map.get(actual_interval, 54)
+            if len(df) >= bars_per_day:
+                res20 = float(df['High'].iloc[-bars_per_day:-1].max())
+                breakout_label = f"Breakout Sesi Sebelumnya ({bars_per_day} bar)"
             else:
                 res20 = float(df['High'].max())
                 breakout_label = "Breakout N-Bar"
@@ -786,7 +808,7 @@ if run_btn:
 
         # ============ BACKTEST (ADAPTIF) ============
         if is_daytrade:
-            backtest_window = min(500, len(df))  # ~1 minggu data 5m
+            backtest_window = min(500, len(df))
         else:
             backtest_window = 126
         df_back = df.iloc[-backtest_window:].copy()
@@ -811,15 +833,23 @@ if run_btn:
             equity = np.cumprod([1+r for r in trades])
             max_dd_bt = float(np.min(equity/np.maximum.accumulate(equity)-1)*100) if len(equity) else 0
             daily_ret = np.array(daily_returns)
-            # Sharpe: annualisasi sesuai timeframe
             if is_daytrade:
-                # ~78 bar per hari (5m), 252 hari -> 19656 bar/tahun
-                annual_factor = np.sqrt(78 * 252)
+                bars_per_day = bars_per_day_map.get(actual_interval, 54)
+                annual_factor = np.sqrt(bars_per_day * 252)
             else:
                 annual_factor = np.sqrt(252)
             sharpe_bt = (daily_ret.mean()/daily_ret.std())*annual_factor if daily_ret.std() else 0
             trades_bt = len(trades)
-        else: win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
+        else:
+            win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
+
+        # Warning sample size kecil Day Trade
+        if is_daytrade and trades_bt < 15:
+            st.warning(
+                f"⚠️ Backtest hanya menghasilkan **{trades_bt}** sinyal trading dalam {backtest_window} bar. "
+                "Jumlah ini terlalu sedikit untuk backtest yang andal di mode Day Trade. "
+                "Interpretasikan Win Rate, Sharpe, dan metrik lainnya dengan sangat hati‑hati."
+            )
 
         # ============ KELLY ============
         roll_max_th = df_thresh['Close'].cummax()
@@ -839,7 +869,7 @@ if run_btn:
 
         # ============ MONTE CARLO (ADAPTIF) ============
         if is_daytrade:
-            n_sim, n_steps = 2000, 30  # 30 bar ke depan (5m) = 2.5 jam
+            n_sim, n_steps = 2000, 30
         else:
             n_sim, n_days = 2000, 30
             n_steps = n_days
@@ -1134,14 +1164,23 @@ if run_btn:
             "Faktor yang sering benar mendapat bobot lebih tinggi. Bobot ini digunakan untuk sinyal akhir."
         )
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
-        w_df = pd.DataFrame.from_dict(adaptive_w, orient='index', columns=['Weight'])
+
+        # Filter tampilan untuk Day Trade: sembunyikan Coppock
+        if is_daytrade:
+            display_adaptive_w = {k: v for k, v in adaptive_w.items() if k != "Coppock"}
+            st.caption("ℹ️ Faktor **Coppock** tidak ditampilkan dalam bobot adaptif untuk Day Trade karena kurang relevan secara intraday. "
+                       "Namun, data-nya tetap dihitung di background untuk menjaga konsistensi historis.")
+        else:
+            display_adaptive_w = adaptive_w
+
+        w_df = pd.DataFrame.from_dict(display_adaptive_w, orient='index', columns=['Weight'])
         st.bar_chart(w_df)
 
-        if adaptive_w:
-            max_factor = max(adaptive_w, key=adaptive_w.get)
-            min_factor = min(adaptive_w, key=adaptive_w.get)
-            max_weight = adaptive_w[max_factor]
-            min_weight = adaptive_w[min_factor]
+        if display_adaptive_w:
+            max_factor = max(display_adaptive_w, key=display_adaptive_w.get)
+            min_factor = min(display_adaptive_w, key=display_adaptive_w.get)
+            max_weight = display_adaptive_w[max_factor]
+            min_weight = display_adaptive_w[min_factor]
 
             weight_insight = f"🔍 **Faktor paling dominan:** **{max_factor}** (bobot {max_weight:.1%}). "
             weight_insight += f"**{min_factor}** memiliki bobot terendah ({min_weight:.1%}).\n\n"
@@ -1162,8 +1201,9 @@ if run_btn:
         )
         mem = st.session_state.v12_memory.get(ticker_raw, {})
         if mem:
-            acc_data = {k: mem.get('accuracy',{}).get(k,0.5) for k in FACTOR_KEYS}
-            err_data = {k: mem.get('error_ema',{}).get(k,1.0) for k in FACTOR_KEYS}
+            keys_to_show = [k for k in FACTOR_KEYS if not (is_daytrade and k == "Coppock")]
+            acc_data = {k: mem.get('accuracy',{}).get(k,0.5) for k in keys_to_show}
+            err_data = {k: mem.get('error_ema',{}).get(k,1.0) for k in keys_to_show}
             col_a,col_e = st.columns(2)
             with col_a:
                 st.caption("✅ Accuracy (higher = better)")
