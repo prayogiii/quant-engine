@@ -1359,6 +1359,100 @@ if run_btn:
 
     simpan_riwayat(ringkasan)
 
+# ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
+else:
+    st.title("📊 Quant & Risk Engine Pro")
+    st.markdown("""
+    ## Selamat Datang di Dashboard Analisis Saham IHSG
+    
+    **Fitur Utama:**
+    - 🔍 Analisis teknikal lengkap (EMA, ADX, RSI, Z-Score, Momentum, dll)
+    - 📈 Sinyal trading adaptif (BUY/HOLD/AVOID) berdasarkan kondisi pasar
+    - 🧠 V12 Adaptive Engine dengan self-learning untuk bobot indikator
+    - 📰 Analisis sentimen berita dari berbagai sumber
+    - 📊 Metrik fundamental (Market Cap, PER, PBV, ROE, D/E)
+    - 🎲 Simulasi Monte Carlo untuk probabilitas naik & sentuh level
+    - 🤖 AI Insight otomatis menggunakan Google Gemini (perlu API key)
+    - 💾 Riwayat analisis tersimpan di Google Sheets (persisten)
+    
+    **Cara Memulai:**
+    1. Pilih **Gaya Trading** di sidebar (Swing Trade mingguan / Day Trade harian)
+    2. Masukkan **kode saham** IHSG (contoh: BBRI, TLKM, BMRI) – akhiran `.JK` otomatis ditambahkan
+    3. Klik tombol **🚀 ANALISIS** dan tunggu beberapa detik
+    
+    > **Disclaimer:** Dashboard ini merupakan alat bantu analisis kuantitatif. Keputusan investasi tetap tanggung jawab masing-masing. Data historis tidak menjamin performa masa depan.
+    """)
+
+    st.markdown("---")
+    st.subheader("📈 Informasi Pasar Terkini (IHSG)")
+    try:
+        df_ihsg_preview = load_ihsg_data(period="5d", interval="1d")
+        if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
+            ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
+            ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
+            ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
+            ihsg_volume = float(df_ihsg_preview['Volume'].iloc[-1])
+            ihsg_high = float(df_ihsg_preview['High'].iloc[-1])
+            ihsg_low = float(df_ihsg_preview['Low'].iloc[-1])
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
+            col2.metric("High Hari Ini", f"{ihsg_high:,.0f}")
+            col3.metric("Low Hari Ini", f"{ihsg_low:,.0f}")
+            col4.metric("Volume", f"{ihsg_volume:,.0f}")
+
+            # Chart dengan guard Plotly
+            if PLOTLY_AVAILABLE:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df_ihsg_preview.index,
+                    y=df_ihsg_preview['Close'],
+                    mode='lines',
+                    line=dict(color='#f59e0b', width=2),
+                    name='IHSG'
+                ))
+                fig.update_layout(
+                    title="IHSG 5 Hari Terakhir",
+                    template="plotly_dark",
+                    height=350,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    xaxis_title="Tanggal",
+                    yaxis_title="Harga"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.line_chart(df_ihsg_preview['Close'])
+
+        elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
+            # Hanya 1 baris, tidak bisa hitung perubahan harian
+            ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
+            st.metric("IHSG", f"{ihsg_close:,.0f}")
+            st.warning("Data IHSG hanya tersedia 1 hari, tidak cukup untuk menghitung perubahan harian.")
+            if PLOTLY_AVAILABLE:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df_ihsg_preview.index,
+                    y=df_ihsg_preview['Close'],
+                    mode='lines',
+                    line=dict(color='#f59e0b', width=2),
+                    name='IHSG'
+                ))
+                fig.update_layout(
+                    title="IHSG 5 Hari Terakhir",
+                    template="plotly_dark",
+                    height=350,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    xaxis_title="Tanggal",
+                    yaxis_title="Harga"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.line_chart(df_ihsg_preview['Close'])
+        else:
+            st.warning("Data IHSG tidak tersedia saat ini.")
+    except Exception as e:
+        st.error(f"Gagal memuat data IHSG: {e}")
+
 # --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
     if not st.session_state.gemini_api_key: st.error("Masukkan API Key terlebih dahulu!")
