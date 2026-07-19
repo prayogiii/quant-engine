@@ -7,7 +7,6 @@ from scipy.optimize import minimize
 import warnings
 import urllib.parse
 import re
-import csv
 import os
 import json
 from datetime import datetime, timedelta
@@ -51,7 +50,6 @@ WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
 AI_SIGNAL_CAP = 0.30
 MC_PESSIMISM  = 0.82
-V12_PRED_FILE = "v12_predictions.csv"
 
 # ====================== GOOGLE SHEETS FUNCTIONS ======================
 def get_gsheet():
@@ -64,14 +62,16 @@ def get_gsheet():
     return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
 
 def init_sheets():
-    """Membuat sheet 'riwayat' dan 'v12_memory' jika belum ada."""
+    """Membuat sheet 'riwayat', 'v12_memory', dan 'v12_predictions' jika belum ada."""
     try:
         sheet = get_gsheet()
         existing = [ws.title for ws in sheet.worksheets()]
         if "riwayat" not in existing:
-            sheet.add_worksheet("riwayat", rows=100, cols=25)
+            sheet.add_worksheet("riwayat", rows=100, cols=35)   # 35 kolom
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
+        if "v12_predictions" not in existing:
+            sheet.add_worksheet("v12_predictions", rows=500, cols=8)
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -99,9 +99,55 @@ def save_v12_memory(mem):
         sheet.clear()
         if rows:
             sheet.insert_row(['ticker', 'data'], 1)
-            sheet.append_rows([[r['ticker'], r['data']] for r in rows])
+            sheet.append_rows([[r['ticker'], r['data']] for r in rows], value_input_option='RAW')
     except Exception as e:
         st.error(f"Gagal menyimpan V12 memory: {e}")
+
+def load_v12_predictions(ticker):
+    """Mengembalikan dict sinyal terakhir untuk ticker dari sheet v12_predictions.
+       Jika tidak ditemukan, return None."""
+    try:
+        sheet = get_gsheet().worksheet("v12_predictions")
+        records = sheet.get_all_records()
+        for row in records:
+            if row.get('ticker') == ticker:
+                return row
+        return None
+    except Exception as e:
+        st.error(f"Gagal memuat prediksi: {e}")
+        return None
+
+def save_v12_prediction(ticker, close_price, factor_signals):
+    """Simpan/update prediksi terbaru untuk satu ticker ke sheet v12_predictions.
+       Menggunakan 'RAW' untuk mencegah konversi tipe data."""
+    try:
+        sheet = get_gsheet().worksheet("v12_predictions")
+        new_row = {
+            'ticker': ticker,
+            'close_price': close_price,
+            'timestamp': datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
+        }
+        for k in FACTOR_KEYS:
+            new_row[f'sig_{k}'] = factor_signals.get(k, 0.0)
+
+        records = sheet.get_all_records()
+        row_index = None
+        headers = list(new_row.keys())
+        for i, row in enumerate(records):
+            if row.get('ticker') == ticker:
+                row_index = i + 2  # +2 karena header di baris 1
+                break
+
+        if row_index:
+            values = [new_row[h] for h in headers]
+            sheet.update(f'A{row_index}:H{row_index}', [values], value_input_option='RAW')
+        else:
+            if not records:
+                sheet.insert_row(headers, 1)
+            values = [new_row[h] for h in headers]
+            sheet.append_row(values, value_input_option='RAW')
+    except Exception as e:
+        st.error(f"Gagal menyimpan prediksi: {e}")
 
 def default_weight(factor, regime):
     defaults = {
@@ -203,7 +249,7 @@ def simpan_riwayat(ringkasan):
             sheet.clear()
             sheet.insert_row(headers, 1)
             rows = [[row.get(h, "") for h in headers] for row in data]
-            sheet.append_rows(rows, value_input_option='USER_ENTERED')
+            sheet.append_rows(rows, value_input_option='RAW')
         st.session_state.riwayat = data
     except Exception as e:
         st.error(f"❌ Gagal menyimpan riwayat: {e}")
@@ -313,8 +359,10 @@ def bersihkan_teks_ai(teks):
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
-# ✅ Inisialisasi Google Sheets & Session State (HARUS di awal, sebelum sidebar)
-init_sheets()
+# ✅ Jalankan init hanya sekali per session
+if "sheets_initialized" not in st.session_state:
+    init_sheets()
+    st.session_state.sheets_initialized = True
 
 if 'v12_memory' not in st.session_state:
     st.session_state.v12_memory = load_v12_memory()
@@ -1255,25 +1303,19 @@ if run_btn:
             "Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. "
             "Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan."
         )
-        if os.path.isfile(V12_PRED_FILE):
-            pred_df = pd.read_csv(V12_PRED_FILE)
-            prev = pred_df[pred_df['ticker']==ticker_raw]
-            if not prev.empty:
-                last = prev.iloc[-1]
-                last_close = last['close_price']
-                last_signals = {k: last[f'sig_{k}'] for k in FACTOR_KEYS if f'sig_{k}' in last}
-                actual_return = (harga_terakhir - last_close) / last_close if last_close>0 else 0.0
-                volatility = returns.std()
-                update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
-                st.success(f"✅ **Memory updated!** Actual return sejak prediksi terakhir: {actual_return*100:.2f}%")
-                pred_df = pred_df[pred_df['ticker']!=ticker_raw]
-                pred_df.to_csv(V12_PRED_FILE, index=False)
-            else:
-                st.info("ℹ️ Tidak ada prediksi sebelumnya. Engine akan mulai belajar pada analisis berikutnya.")
+        # --- SELF-LEARNING via Google Sheets ---
+        last_pred = load_v12_predictions(ticker_raw)
+        if last_pred:
+            last_close = last_pred['close_price']
+            last_signals = {k: last_pred[f'sig_{k}'] for k in FACTOR_KEYS}
+            actual_return = (harga_terakhir - float(last_close)) / float(last_close) if float(last_close) > 0 else 0.0
+            volatility = returns.std()
+            update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
+            st.success(f"✅ **Memory updated!** Actual return sejak prediksi terakhir: {actual_return*100:.2f}%")
         else:
-            st.info("ℹ️ File prediksi belum ada. Engine akan membuatnya setelah analisis pertama.")
+            st.info("ℹ️ Tidak ada prediksi sebelumnya. Engine akan mulai belajar pada analisis berikutnya.")
 
-        new_pred = {'ticker': ticker_raw, 'close_price': harga_terakhir}
+        # Simpan prediksi sekarang
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
             "AI_Senti": avg_sentiment,
@@ -1281,12 +1323,8 @@ if run_btn:
             "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
             "Coppock": coppock_val / 10.0
         }
-        for k,v in factor_signals.items(): new_pred[f'sig_{k}'] = max(-1.0,min(1.0,v))
-        pred_df = pd.DataFrame([new_pred])
-        if os.path.isfile(V12_PRED_FILE):
-            pred_df.to_csv(V12_PRED_FILE, mode='a', header=False, index=False)
-        else:
-            pred_df.to_csv(V12_PRED_FILE, index=False)
+        norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
+        save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
 
     # ==================== AI INSIGHT OTOMATIS ====================
