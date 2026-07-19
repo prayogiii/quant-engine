@@ -1395,8 +1395,10 @@ else:
         key="ihsg_period"
     )
 
-    # Tentukan interval: 1 hari pakai intraday 5m agar grafik hidup, lainnya harian
+        # Tentukan interval: 1d -> 1m (detail), 5d -> 5m (cukup), 1mo -> 1d (harian)
     if periode_pilihan == "1d":
+        interval_ihsg = "1m"
+    elif periode_pilihan == "5d":
         interval_ihsg = "5m"
     else:
         interval_ihsg = "1d"
