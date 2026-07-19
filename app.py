@@ -1461,7 +1461,7 @@ else:
             # Tampilkan metrik (5 kolom)
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
-            col2.metric("Open", f"{open_price:,.0f}") if open_price else col2.metric("Open", "N/A")
+            col2.metric("Open", f"{open_price:,.0f}" if open_price else "N/A")
             col3.metric("High", f"{ihsg_high:,.0f}")
             col4.metric("Low", f"{ihsg_low:,.0f}")
             col5.metric("Volume", volume_str)
