@@ -1070,57 +1070,16 @@ if run_btn:
 
     if PLOTLY_AVAILABLE:
         st.header("📈 Chart Harga & Sinyal")
-        # ---- Candlestick + Volume ----
-        candlestick = go.Candlestick(
-            x=df.index,
-            open=df['Open'],
-            high=df['High'],
-            low=df['Low'],
-            close=df['Close'],
-            name='OHLC',
-            increasing_line_color='#26a69a',
-            decreasing_line_color='#ef5350',
-            increasing_fillcolor='#26a69a',
-            decreasing_fillcolor='#ef5350'
-        )
-        volume_colors = ['#26a69a' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ef5350' for i in range(len(df))]
-        volume_bars = go.Bar(
-            x=df.index,
-            y=df['Volume'],
-            name='Volume',
-            marker_color=volume_colors,
-            opacity=0.3,
-            yaxis='y2'
-        )
-        ema20 = go.Scatter(x=df.index, y=df['EMA20'], name='EMA20', line=dict(color='#f59e0b', width=1.5, dash='dot'))
-        ema50 = go.Scatter(x=df.index, y=df['EMA50'], name='EMA50', line=dict(color='#ef4444', width=1.5, dash='dot'))
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df.index, y=df['Close'], name='Close', line=dict(color='#00ffcc')))
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA20'], name='EMA20', line=dict(color='#f59e0b', dash='dot')))
+        fig.add_trace(go.Scatter(x=df.index, y=df['EMA50'], name='EMA50', line=dict(color='#ef4444', dash='dot')))
         buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
-        buy_markers = go.Scatter(
-            x=buy_signals.index,
-            y=buy_signals['Low'] * 0.995,
-            mode='markers',
-            marker=dict(symbol='triangle-up', size=12, color='#26a69a', line=dict(width=1, color='white')),
-            name='Buy Signal'
-        )
-        shapes = []
-        annotations = []
-        for lvl, lbl, clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
-            shapes.append(dict(type='line', x0=df.index[0], x1=df.index[-1], y0=lvl, y1=lvl,
-                               line=dict(color=clr, dash='dash', width=1)))
-            annotations.append(dict(x=df.index[-1], y=lvl, text=lbl, showarrow=False,
-                                    xanchor='right', font=dict(color=clr, size=10)))
-        fig = go.Figure(data=[candlestick, volume_bars, ema20, ema50, buy_markers])
-        fig.update_layout(
-            template='plotly_dark',
-            height=550,
-            margin=dict(l=10, r=10, t=30, b=10),
-            xaxis=dict(rangeslider=dict(visible=False)),
-            yaxis=dict(title='Harga', side='right'),
-            yaxis2=dict(title='Volume', overlaying='y', side='left', showgrid=False),
-            shapes=shapes,
-            annotations=annotations,
-            legend=dict(orientation='h', y=1.1)
-        )
+        fig.add_trace(go.Scatter(x=buy_signals.index, y=buy_signals['Close'], mode='markers',
+                                 marker=dict(symbol='triangle-up', size=10, color='#10b981'), name='Buy Signal'))
+        for lvl,lbl,clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
+            fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10))
         st.plotly_chart(fig, use_container_width=True)
 
     # --- RINGKASAN EKSEKUTIF ---
@@ -1442,6 +1401,7 @@ else:
             col3.metric("Low Hari Ini", f"{ihsg_low:,.0f}")
             col4.metric("Volume", f"{ihsg_volume:,.0f}")
 
+            # Chart dengan guard Plotly
             if PLOTLY_AVAILABLE:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
@@ -1449,8 +1409,6 @@ else:
                     y=df_ihsg_preview['Close'],
                     mode='lines',
                     line=dict(color='#f59e0b', width=2),
-                    fill='tozeroy',
-                    fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
                 fig.update_layout(
@@ -1459,14 +1417,14 @@ else:
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="Tanggal",
-                    yaxis_title="Harga",
-                    hovermode='x unified'
+                    yaxis_title="Harga"
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.line_chart(df_ihsg_preview['Close'])
 
         elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
+            # Hanya 1 baris, tidak bisa hitung perubahan harian
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             st.metric("IHSG", f"{ihsg_close:,.0f}")
             st.warning("Data IHSG hanya tersedia 1 hari, tidak cukup untuk menghitung perubahan harian.")
@@ -1477,8 +1435,6 @@ else:
                     y=df_ihsg_preview['Close'],
                     mode='lines',
                     line=dict(color='#f59e0b', width=2),
-                    fill='tozeroy',
-                    fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
                 fig.update_layout(
@@ -1487,8 +1443,7 @@ else:
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="Tanggal",
-                    yaxis_title="Harga",
-                    hovermode='x unified'
+                    yaxis_title="Harga"
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
