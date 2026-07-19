@@ -1395,20 +1395,34 @@ else:
         key="ihsg_period"
     )
 
+    # Tentukan interval: 1 hari pakai intraday 5m agar grafik hidup, lainnya harian
+    if periode_pilihan == "1d":
+        interval_ihsg = "5m"
+    else:
+        interval_ihsg = "1d"
+
     try:
-        df_ihsg_preview = load_ihsg_data(period=periode_pilihan, interval="1d")
+        df_ihsg_preview = load_ihsg_data(period=periode_pilihan, interval=interval_ihsg)
+
         if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
             ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
-            ihsg_volume = float(df_ihsg_preview['Volume'].iloc[-1])
-            ihsg_high = float(df_ihsg_preview['High'].iloc[-1])
-            ihsg_low = float(df_ihsg_preview['Low'].iloc[-1])
+
+            # Untuk intraday, High/Low diambil dari max/min seluruh sesi
+            ihsg_high = float(df_ihsg_preview['High'].max()) if interval_ihsg == "5m" else float(df_ihsg_preview['High'].iloc[-1])
+            ihsg_low = float(df_ihsg_preview['Low'].min()) if interval_ihsg == "5m" else float(df_ihsg_preview['Low'].iloc[-1])
+
+            # Volume: untuk intraday tampilkan rata‑rata, untuk harian tampilkan volume terakhir
+            if interval_ihsg == "5m":
+                ihsg_volume = df_ihsg_preview['Volume'].mean()
+            else:
+                ihsg_volume = float(df_ihsg_preview['Volume'].iloc[-1])
 
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
-            col2.metric("High Hari Ini", f"{ihsg_high:,.0f}")
-            col3.metric("Low Hari Ini", f"{ihsg_low:,.0f}")
+            col2.metric("High", f"{ihsg_high:,.0f}")
+            col3.metric("Low", f"{ihsg_low:,.0f}")
             col4.metric("Volume", f"{ihsg_volume:,.0f}")
 
             # Chart area dengan guard Plotly
@@ -1423,19 +1437,21 @@ else:
                     fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
+
                 # Judul dinamis
                 if periode_pilihan == "1d":
-                    chart_title = "IHSG Hari Ini"
+                    chart_title = "IHSG Hari Ini (Intraday)"
                 elif periode_pilihan == "5d":
                     chart_title = "IHSG 5 Hari Terakhir"
                 else:
                     chart_title = "IHSG 1 Bulan Terakhir"
+
                 fig.update_layout(
                     title=chart_title,
                     template="plotly_dark",
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
-                    xaxis_title="Tanggal",
+                    xaxis_title="Waktu" if interval_ihsg == "5m" else "Tanggal",
                     yaxis_title="Harga",
                     hovermode='x unified'
                 )
@@ -1444,19 +1460,17 @@ else:
                 st.line_chart(df_ihsg_preview['Close'])
 
         elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
-            # Hanya 1 baris, tidak bisa hitung perubahan harian
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             st.metric("IHSG", f"{ihsg_close:,.0f}")
-            st.warning("Data IHSG hanya tersedia 1 hari, tidak cukup untuk menghitung perubahan harian.")
+            st.warning("Data IHSG hanya tersedia 1 titik data.")
             if PLOTLY_AVAILABLE:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
-                    mode='lines',
+                    mode='lines+markers',
+                    marker=dict(color='#f59e0b', size=8),
                     line=dict(color='#f59e0b', width=2),
-                    fill='tozeroy',
-                    fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
                 fig.update_layout(
@@ -1465,8 +1479,7 @@ else:
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="Tanggal",
-                    yaxis_title="Harga",
-                    hovermode='x unified'
+                    yaxis_title="Harga"
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
