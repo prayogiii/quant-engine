@@ -1429,18 +1429,16 @@ else:
 
         if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
-            open_period = float(df_ihsg_preview['Open'].iloc[0])  # harga Open periode
+            open_period = float(df_ihsg_preview['Open'].iloc[0])
 
-            # ✅ PERBAIKAN: Hitung perubahan berdasarkan OPEN PERIODE untuk 5d/1mo
+            # Perubahan: 1d pakai previousClose, 5d/1mo pakai Open periode
             if periode_pilihan == "1d":
-                # Untuk 1 hari, gunakan previousClose atau fallback ke titik sebelumnya
                 if prev_close is not None and prev_close > 0:
                     ihsg_change = (ihsg_close - prev_close) / prev_close * 100
                 else:
                     ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
                     ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
             else:
-                # Untuk 5 Hari / 1 Bulan, gunakan Open periode
                 if open_period > 0:
                     ihsg_change = (ihsg_close - open_period) / open_period * 100
                 else:
@@ -1475,20 +1473,54 @@ else:
 
             # Grafik mountain
             if PLOTLY_AVAILABLE:
-                # ✅ Warna dinamis berdasarkan perubahan (hijau jika naik, merah jika turun)
                 line_color = '#26a69a' if ihsg_change >= 0 else '#ef5350'
                 area_color = f"rgba({38 if ihsg_change >= 0 else 239}, {166 if ihsg_change >= 0 else 83}, {154 if ihsg_change >= 0 else 80}, 0.25)"
 
                 fig = go.Figure()
-                if open_price:
-                    fig.add_hline(y=open_price, line_dash='dot', line_color='rgba(255,255,255,0.5)',
-                                  annotation_text='Open', annotation_position='right',
-                                  annotation_font=dict(size=10, color='rgba(255,255,255,0.7)'))
 
+                # Garis Open
+                if open_price:
+                    fig.add_hline(
+                        y=open_price,
+                        line_dash='dot',
+                        line_color='rgba(255,255,255,0.5)',
+                        line_width=1,
+                        annotation_text=f'O {open_price:,.0f}',
+                        annotation_position='right',
+                        annotation_font=dict(size=9, color='rgba(255,255,255,0.7)')
+                    )
+
+                # Garis High
+                fig.add_hline(
+                    y=ihsg_high,
+                    line_dash='dot',
+                    line_color='rgba(255,255,255,0.4)',
+                    line_width=1,
+                    annotation_text=f'H {ihsg_high:,.0f}',
+                    annotation_position='right',
+                    annotation_font=dict(size=9, color='rgba(255,255,255,0.6)')
+                )
+
+                # Garis Low
+                fig.add_hline(
+                    y=ihsg_low,
+                    line_dash='dot',
+                    line_color='rgba(255,255,255,0.4)',
+                    line_width=1,
+                    annotation_text=f'L {ihsg_low:,.0f}',
+                    annotation_position='right',
+                    annotation_font=dict(size=9, color='rgba(255,255,255,0.6)')
+                )
+
+                # Trace mountain
                 fig.add_trace(go.Scatter(
-                    x=df_ihsg_preview.index, y=df_ihsg_preview['Close'],
-                    mode='lines', line=dict(color=line_color, width=1.5),
-                    fill='tozeroy', fillcolor=area_color, name='IHSG',
+                    x=df_ihsg_preview.index,
+                    y=df_ihsg_preview['Close'],
+                    mode='lines',
+                    line=dict(color=line_color, width=1.5),
+                    fill='tozeroy',
+                    fillcolor=area_color,
+                    name='IHSG',
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
 
@@ -1496,18 +1528,40 @@ else:
                 y_max = float(df_ihsg_preview['High'].max()) * 1.002
                 fig.update_yaxes(range=[y_min, y_max])
 
-                chart_title = {"1d": "IHSG Hari Ini (Intraday)", "5d": "IHSG 5 Hari Terakhir", "1mo": "IHSG 1 Bulan Terakhir"}.get(periode_pilihan, "IHSG")
+                chart_title = {
+                    "1d": "IHSG Hari Ini (Intraday)",
+                    "5d": "IHSG 5 Hari Terakhir",
+                    "1mo": "IHSG 1 Bulan Terakhir"
+                }.get(periode_pilihan, "IHSG")
 
                 fig.update_layout(
                     title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
-                    template="plotly_dark", height=400,
+                    template="plotly_dark",
+                    height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
-                    xaxis=dict(title=None, showgrid=False, zeroline=False, showline=True,
-                               linecolor='rgba(128,128,128,0.2)', tickfont=dict(size=10)),
-                    yaxis=dict(title=None, showgrid=True, gridcolor='rgba(128,128,128,0.1)',
-                               zeroline=False, showline=False, side='right', tickfont=dict(size=10)),
-                    hovermode='x unified', hoverlabel=dict(bgcolor='#1e293b', font_size=11),
-                    paper_bgcolor='#0f1116', plot_bgcolor='#0f1116', showlegend=False
+                    xaxis=dict(
+                        title=None,
+                        showgrid=False,
+                        zeroline=False,
+                        showline=True,
+                        linecolor='rgba(128,128,128,0.2)',
+                        ticks='outside',
+                        tickfont=dict(size=10)
+                    ),
+                    yaxis=dict(
+                        title=None,
+                        showgrid=True,
+                        gridcolor='rgba(128,128,128,0.1)',
+                        zeroline=False,
+                        showline=False,
+                        side='right',
+                        tickfont=dict(size=10)
+                    ),
+                    hovermode='x unified',
+                    hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
+                    paper_bgcolor='#0f1116',
+                    plot_bgcolor='#0f1116',
+                    showlegend=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
