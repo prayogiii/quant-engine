@@ -1490,28 +1490,6 @@ else:
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
 
-                # Garis + label Open di dalam grafik
-                if open_price:
-                    fig.add_hline(
-                        y=open_price,
-                        line_dash='dot',
-                        line_color='rgba(255,255,255,0.5)',
-                        line_width=1,
-                    )
-                    fig.add_annotation(
-                        x=0.5, y=open_price,
-                        xref='paper', yref='y',
-                        text=f'O {open_price:,.0f}',
-                        showarrow=False,
-                        font=dict(size=9, color='rgba(255,255,255,0.7)'),
-                        bgcolor='rgba(15, 17, 22, 0.7)',
-                        bordercolor='rgba(255,255,255,0.3)',
-                        borderwidth=1,
-                        borderpad=4,
-                        xanchor='center',
-                        yanchor='bottom'
-                    )
-
                 # Garis + label High di dalam grafik
                 fig.add_hline(
                     y=ihsg_high,
