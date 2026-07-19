@@ -1473,6 +1473,17 @@ else:
                 area_color = f"rgba({38 if ihsg_change >= 0 else 239}, {166 if ihsg_change >= 0 else 83}, {154 if ihsg_change >= 0 else 80}, 0.25)"
 
                 fig = go.Figure()
+                # Garis Open (jika tersedia)
+                if open_price:
+                    fig.add_hline(
+                        y=open_price,
+                        line_dash='dot',
+                        line_color='rgba(255,255,255,0.5)',
+                        line_width=1,
+                        annotation_text='Open',
+                        annotation_position='right',
+                        annotation_font=dict(size=10, color='rgba(255,255,255,0.7)')
+                    )  
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
