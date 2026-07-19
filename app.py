@@ -1395,7 +1395,7 @@ else:
         key="ihsg_period"
     )
 
-    # Interval: coba 1m, jika gagal fallback ke 5m, lalu 1d
+    # Interval: coba 1m, jika gagal fallback ke yang lebih besar
     if periode_pilihan == "1d":
         interval_candidates = ["1m", "5m", "15m", "30m", "60m", "1d"]
     elif periode_pilihan == "5d":
@@ -1413,17 +1413,16 @@ else:
             interval_terpakai = interval
             break
         elif not temp_df.empty and len(temp_df) == 1 and interval == interval_candidates[-1]:
-            # Fallback terakhir, terima meski hanya 1 baris
             df_ihsg_preview = temp_df
             interval_terpakai = interval
             break
 
     try:
-        # Ambil previous close dari Yahoo Finance
+        # Ambil previous close & Open dari Yahoo Finance
         try:
             ihsg_info = yf.Ticker("^JKSE").info
             prev_close = ihsg_info.get('previousClose', None)
-            open_price = ihsg_info.get('regularMarketOpen', None)  # harga open
+            open_price = ihsg_info.get('regularMarketOpen', None)
         except:
             prev_close = None
             open_price = None
@@ -1431,10 +1430,11 @@ else:
         if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
 
-            # Perubahan harian
+            # ✅ Warna & perubahan: SELALU gunakan previousClose jika ada
             if prev_close is not None and prev_close > 0:
                 ihsg_change = (ihsg_close - prev_close) / prev_close * 100
             else:
+                # Fallback: bandingkan dengan titik sebelumnya (hari/menit)
                 ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
                 ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
 
@@ -1450,15 +1450,14 @@ else:
                 if open_price is None or open_price == 0:
                     open_price = float(df_ihsg_preview['Open'].iloc[-1])
 
-            # Volume (indeks biasanya 0)
+            # Volume
             if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
                 vol_val = df_ihsg_preview['Volume'].sum()
             else:
                 vol_val = float(df_ihsg_preview['Volume'].iloc[-1])
-
             volume_str = f"{vol_val:,.0f}" if vol_val > 0 else "N/A"
 
-            # Tampilkan metrik (5 kolom)
+            # Metrik
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
             col2.metric("Open", f"{open_price:,.0f}" if open_price else "N/A")
@@ -1466,65 +1465,46 @@ else:
             col4.metric("Low", f"{ihsg_low:,.0f}")
             col5.metric("Volume", volume_str)
 
-            # Grafik mountain ala Yahoo Finance
+            # Grafik mountain
             if PLOTLY_AVAILABLE:
-                # Warna dinamis
+                # ✅ Warna dinamis berdasarkan perubahan HARIAN (ihsg_change)
                 line_color = '#26a69a' if ihsg_change >= 0 else '#ef5350'
                 area_color = f"rgba({38 if ihsg_change >= 0 else 239}, {166 if ihsg_change >= 0 else 83}, {154 if ihsg_change >= 0 else 80}, 0.25)"
 
                 fig = go.Figure()
-                # Garis Open (jika tersedia)
                 if open_price:
-                    fig.add_hline(
-                        y=open_price,
-                        line_dash='dot',
-                        line_color='rgba(255,255,255,0.5)',
-                        line_width=1,
-                        annotation_text='Open',
-                        annotation_position='right',
-                        annotation_font=dict(size=10, color='rgba(255,255,255,0.7)')
-                    )  
+                    fig.add_hline(y=open_price, line_dash='dot', line_color='rgba(255,255,255,0.5)',
+                                  annotation_text='Open', annotation_position='right',
+                                  annotation_font=dict(size=10, color='rgba(255,255,255,0.7)'))
+
                 fig.add_trace(go.Scatter(
-                    x=df_ihsg_preview.index,
-                    y=df_ihsg_preview['Close'],
-                    mode='lines',
-                    line=dict(color=line_color, width=1.5),
-                    fill='tozeroy',
-                    fillcolor=area_color,
-                    name='IHSG',
+                    x=df_ihsg_preview.index, y=df_ihsg_preview['Close'],
+                    mode='lines', line=dict(color=line_color, width=1.5),
+                    fill='tozeroy', fillcolor=area_color, name='IHSG',
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
-                # Rentang sumbu Y dinamis (tidak dari nol)
+
                 y_min = float(df_ihsg_preview['Low'].min()) * 0.998
                 y_max = float(df_ihsg_preview['High'].max()) * 1.002
                 fig.update_yaxes(range=[y_min, y_max])
 
-                chart_title = {
-                    "1d": "IHSG Hari Ini (Intraday)",
-                    "5d": "IHSG 5 Hari Terakhir",
-                    "1mo": "IHSG 1 Bulan Terakhir"
-                }.get(periode_pilihan, "IHSG")
+                chart_title = {"1d": "IHSG Hari Ini (Intraday)", "5d": "IHSG 5 Hari Terakhir", "1mo": "IHSG 1 Bulan Terakhir"}.get(periode_pilihan, "IHSG")
 
                 fig.update_layout(
                     title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
-                    template="plotly_dark",
-                    height=400,
+                    template="plotly_dark", height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
                     xaxis=dict(title=None, showgrid=False, zeroline=False, showline=True,
-                               linecolor='rgba(128,128,128,0.2)', ticks='outside', tickfont=dict(size=10)),
+                               linecolor='rgba(128,128,128,0.2)', tickfont=dict(size=10)),
                     yaxis=dict(title=None, showgrid=True, gridcolor='rgba(128,128,128,0.1)',
                                zeroline=False, showline=False, side='right', tickfont=dict(size=10)),
-                    hovermode='x unified',
-                    hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
-                    paper_bgcolor='#0f1116',
-                    plot_bgcolor='#0f1116',
-                    showlegend=False
+                    hovermode='x unified', hoverlabel=dict(bgcolor='#1e293b', font_size=11),
+                    paper_bgcolor='#0f1116', plot_bgcolor='#0f1116', showlegend=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
                 if interval_terpakai != "1m" and periode_pilihan == "1d":
                     st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
-
             else:
                 st.line_chart(df_ihsg_preview['Close'])
 
