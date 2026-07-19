@@ -13,3 +13,5 @@ python-dotenv
 pytz
 pytesseract
 Pillow
+gspread==6.1.2
+google-auth==2.36.0
