@@ -1425,16 +1425,24 @@ else:
             col3.metric("Low", f"{ihsg_low:,.0f}")
             col4.metric("Volume", f"{ihsg_volume:,.0f}")
 
-            # Chart area dengan guard Plotly
+                        # Chart mountain ala Yahoo Finance
             if PLOTLY_AVAILABLE:
+                # Warna dinamis: hijau jika naik, merah jika turun
+                if ihsg_change >= 0:
+                    line_color = '#26a69a'
+                    area_color = 'rgba(38, 166, 154, 0.25)'
+                else:
+                    line_color = '#ef5350'
+                    area_color = 'rgba(239, 83, 80, 0.25)'
+
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
                     mode='lines',
-                    line=dict(color='#f59e0b', width=2),
+                    line=dict(color=line_color, width=2),
                     fill='tozeroy',
-                    fillcolor='rgba(245, 158, 11, 0.1)',
+                    fillcolor=area_color,
                     name='IHSG'
                 ))
 
@@ -1453,12 +1461,12 @@ else:
                     margin=dict(l=10, r=10, t=30, b=10),
                     xaxis_title="Waktu" if interval_ihsg == "5m" else "Tanggal",
                     yaxis_title="Harga",
-                    hovermode='x unified'
+                    hovermode='x unified',
+                    showlegend=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.line_chart(df_ihsg_preview['Close'])
-
         elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             st.metric("IHSG", f"{ihsg_close:,.0f}")
