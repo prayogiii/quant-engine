@@ -1395,66 +1395,82 @@ else:
         key="ihsg_period"
     )
 
-    # Interval data: 1 hari pakai 1 menit (detail), 5 hari pakai 5 menit, lainnya harian
+    # Interval: coba 1m, jika gagal fallback ke 5m, lalu 1d
     if periode_pilihan == "1d":
-        interval_ihsg = "1m"
+        interval_candidates = ["1m", "5m", "15m", "30m", "60m", "1d"]
     elif periode_pilihan == "5d":
-        interval_ihsg = "5m"
+        interval_candidates = ["5m", "15m", "30m", "60m", "1d"]
     else:
-        interval_ihsg = "1d"
+        interval_candidates = ["1d"]
+
+    df_ihsg_preview = pd.DataFrame()
+    interval_terpakai = None
+
+    for interval in interval_candidates:
+        temp_df = load_ihsg_data(period=periode_pilihan, interval=interval)
+        if not temp_df.empty and len(temp_df) >= 2:
+            df_ihsg_preview = temp_df
+            interval_terpakai = interval
+            break
+        elif not temp_df.empty and len(temp_df) == 1 and interval == interval_candidates[-1]:
+            # Fallback terakhir, terima meski hanya 1 baris
+            df_ihsg_preview = temp_df
+            interval_terpakai = interval
+            break
 
     try:
-        # Ambil data grafik
-        df_ihsg_preview = load_ihsg_data(period=periode_pilihan, interval=interval_ihsg)
-
-        # Ambil previous close dari Yahoo Finance (untuk perubahan harian)
+        # Ambil previous close dari Yahoo Finance
         try:
             ihsg_info = yf.Ticker("^JKSE").info
             prev_close = ihsg_info.get('previousClose', None)
+            open_price = ihsg_info.get('regularMarketOpen', None)  # harga open
         except:
             prev_close = None
+            open_price = None
 
         if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
 
-            # Hitung perubahan dari previous close (jika tersedia)
+            # Perubahan harian
             if prev_close is not None and prev_close > 0:
                 ihsg_change = (ihsg_close - prev_close) / prev_close * 100
             else:
-                # Fallback: bandingkan dengan titik sebelumnya (intraday)
                 ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
                 ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
 
             # High/Low
-            if interval_ihsg in ("1m", "5m"):
+            if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
                 ihsg_high = float(df_ihsg_preview['High'].max())
                 ihsg_low = float(df_ihsg_preview['Low'].min())
+                if open_price is None or open_price == 0:
+                    open_price = float(df_ihsg_preview['Open'].iloc[0])
             else:
                 ihsg_high = float(df_ihsg_preview['High'].iloc[-1])
                 ihsg_low = float(df_ihsg_preview['Low'].iloc[-1])
+                if open_price is None or open_price == 0:
+                    open_price = float(df_ihsg_preview['Open'].iloc[-1])
 
-            # Volume
-            if interval_ihsg in ("1m", "5m"):
-                ihsg_volume = df_ihsg_preview['Volume'].mean()
+            # Volume (indeks biasanya 0)
+            if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
+                vol_val = df_ihsg_preview['Volume'].sum()
             else:
-                ihsg_volume = float(df_ihsg_preview['Volume'].iloc[-1])
+                vol_val = float(df_ihsg_preview['Volume'].iloc[-1])
 
-            # ---- Tampilkan metrik ----
-            col1, col2, col3, col4 = st.columns(4)
+            volume_str = f"{vol_val:,.0f}" if vol_val > 0 else "N/A"
+
+            # Tampilkan metrik (5 kolom)
+            col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
-            col2.metric("High", f"{ihsg_high:,.0f}")
-            col3.metric("Low", f"{ihsg_low:,.0f}")
-            col4.metric("Volume", f"{ihsg_volume:,.0f}")
+            col2.metric("Open", f"{open_price:,.0f}") if open_price else col2.metric("Open", "N/A")
+            col3.metric("High", f"{ihsg_high:,.0f}")
+            col4.metric("Low", f"{ihsg_low:,.0f}")
+            col5.metric("Volume", volume_str)
 
-            # ---- Grafik mountain ala Yahoo Finance ----
+            # Grafik mountain ala Yahoo Finance
             if PLOTLY_AVAILABLE:
-                # Warna berdasarkan perubahan harian
-                if ihsg_change >= 0:
-                    line_color = '#26a69a'
-                    area_color = 'rgba(38, 166, 154, 0.25)'
-                else:
-                    line_color = '#ef5350'
-                    area_color = 'rgba(239, 83, 80, 0.25)'
+                # Warna dinamis
+                line_color = '#26a69a' if ihsg_change >= 0 else '#ef5350'
+                area_color = f"rgba({38 if ihsg_change >= 0 else 239}, {166 if ihsg_change >= 0 else 83}, {154 if ihsg_change >= 0 else 80}, 0.25)"
 
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
@@ -1468,37 +1484,21 @@ else:
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
 
-                # Judul dinamis
-                if periode_pilihan == "1d":
-                    chart_title = "IHSG Hari Ini (Intraday)"
-                elif periode_pilihan == "5d":
-                    chart_title = "IHSG 5 Hari Terakhir"
-                else:
-                    chart_title = "IHSG 1 Bulan Terakhir"
+                chart_title = {
+                    "1d": "IHSG Hari Ini (Intraday)",
+                    "5d": "IHSG 5 Hari Terakhir",
+                    "1mo": "IHSG 1 Bulan Terakhir"
+                }.get(periode_pilihan, "IHSG")
 
                 fig.update_layout(
                     title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
-                    xaxis=dict(
-                        title=None,
-                        showgrid=False,
-                        zeroline=False,
-                        showline=True,
-                        linecolor='rgba(128,128,128,0.2)',
-                        ticks='outside',
-                        tickfont=dict(size=10)
-                    ),
-                    yaxis=dict(
-                        title=None,
-                        showgrid=True,
-                        gridcolor='rgba(128,128,128,0.1)',
-                        zeroline=False,
-                        showline=False,
-                        side='right',
-                        tickfont=dict(size=10)
-                    ),
+                    xaxis=dict(title=None, showgrid=False, zeroline=False, showline=True,
+                               linecolor='rgba(128,128,128,0.2)', ticks='outside', tickfont=dict(size=10)),
+                    yaxis=dict(title=None, showgrid=True, gridcolor='rgba(128,128,128,0.1)',
+                               zeroline=False, showline=False, side='right', tickfont=dict(size=10)),
                     hovermode='x unified',
                     hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
                     paper_bgcolor='#0f1116',
@@ -1506,36 +1506,21 @@ else:
                     showlegend=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+                if interval_terpakai != "1m" and periode_pilihan == "1d":
+                    st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
+
             else:
                 st.line_chart(df_ihsg_preview['Close'])
 
         elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
-            if prev_close is not None and prev_close > 0:
+            if prev_close:
                 ihsg_change = (ihsg_close - prev_close) / prev_close * 100
                 st.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
             else:
                 st.metric("IHSG", f"{ihsg_close:,.0f}")
-            st.warning("Data IHSG hanya tersedia 1 titik data.")
-            if PLOTLY_AVAILABLE:
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=df_ihsg_preview.index,
-                    y=df_ihsg_preview['Close'],
-                    mode='lines+markers',
-                    marker=dict(color='#f59e0b', size=8),
-                    line=dict(color='#f59e0b', width=2),
-                    name='IHSG'
-                ))
-                fig.update_layout(
-                    title="IHSG (Data Terbatas)",
-                    template="plotly_dark",
-                    height=350,
-                    margin=dict(l=10, r=10, t=30, b=10)
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.line_chart(df_ihsg_preview['Close'])
+            st.warning("Data IHSG hanya tersedia 1 titik (kemungkinan di luar jam bursa). Grafik tidak dapat ditampilkan.")
         else:
             st.warning("Data IHSG tidak tersedia untuk periode yang dipilih.")
     except Exception as e:
