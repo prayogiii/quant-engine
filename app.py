@@ -1427,9 +1427,9 @@ else:
             col3.metric("Low", f"{ihsg_low:,.0f}")
             col4.metric("Volume", f"{ihsg_volume:,.0f}")
 
-                        # Chart mountain ala Yahoo Finance
+                        # Chart mountain ala Yahoo Finance (paling mirip)
             if PLOTLY_AVAILABLE:
-                # Warna dinamis: hijau jika naik, merah jika turun
+                # Warna dinamis
                 if ihsg_change >= 0:
                     line_color = '#26a69a'
                     area_color = 'rgba(38, 166, 154, 0.25)'
@@ -1442,13 +1442,17 @@ else:
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
                     mode='lines',
-                    line=dict(color=line_color, width=2),
+                    line=dict(color=line_color, width=1.5),
                     fill='tozeroy',
                     fillcolor=area_color,
-                    name='IHSG'
+                    name='IHSG',
+                    hovertemplate=(
+                        '<b>%{x|%d %b %H:%M WIB}</b><br>'
+                        'Close: %{y:,.0f}<br>'
+                        '<extra></extra>'
+                    )
                 ))
 
-                # Judul dinamis
                 if periode_pilihan == "1d":
                     chart_title = "IHSG Hari Ini (Intraday)"
                 elif periode_pilihan == "5d":
@@ -1457,13 +1461,32 @@ else:
                     chart_title = "IHSG 1 Bulan Terakhir"
 
                 fig.update_layout(
-                    title=chart_title,
+                    title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
                     template="plotly_dark",
-                    height=350,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    xaxis_title="Waktu" if interval_ihsg == "5m" else "Tanggal",
-                    yaxis_title="Harga",
+                    height=400,
+                    margin=dict(l=10, r=20, t=40, b=10),
+                    xaxis=dict(
+                        title=None,
+                        showgrid=False,          # tanpa grid vertikal
+                        zeroline=False,
+                        showline=True,
+                        linecolor='rgba(128,128,128,0.2)',
+                        ticks='outside',
+                        tickfont=dict(size=10)
+                    ),
+                    yaxis=dict(
+                        title=None,
+                        showgrid=True,
+                        gridcolor='rgba(128,128,128,0.1)',
+                        zeroline=False,
+                        showline=False,
+                        side='right',
+                        tickfont=dict(size=10)
+                    ),
                     hovermode='x unified',
+                    hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
+                    paper_bgcolor='#0f1116',    # latar sama dengan dashboard
+                    plot_bgcolor='#0f1116',
                     showlegend=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
