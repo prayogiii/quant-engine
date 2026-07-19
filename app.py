@@ -1494,6 +1494,10 @@ else:
                     name='IHSG',
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
+                # Rentang sumbu Y dinamis (tidak dari nol)
+                y_min = float(df_ihsg_preview['Low'].min()) * 0.998
+                y_max = float(df_ihsg_preview['High'].max()) * 1.002
+                fig.update_yaxes(range=[y_min, y_max])
 
                 chart_title = {
                     "1d": "IHSG Hari Ini (Intraday)",
