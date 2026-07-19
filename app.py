@@ -156,59 +156,40 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
     save_v12_memory(st.session_state.v12_memory)
 
 # ==========================================
-# KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON) – REVISI
+# KONFIGURASI FILE RIWAYAT & SESSION STATE (JSON)
 # ==========================================
 RIWAYAT_FILE = "riwayat_analisis.json"
 
 def bersihkan_untuk_json(obj):
-    """Konversi nilai numpy/Series ke tipe Python murni."""
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    elif isinstance(obj, (np.floating,)):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, pd.Timestamp):
-        return obj.isoformat()
-    elif isinstance(obj, (np.bool_,)):
-        return bool(obj)
+    if isinstance(obj, (np.integer,)): return int(obj)
+    elif isinstance(obj, (np.floating,)): return float(obj)
+    elif isinstance(obj, np.ndarray): return obj.tolist()
+    elif isinstance(obj, pd.Timestamp): return obj.isoformat()
+    elif isinstance(obj, (np.bool_,)): return bool(obj)
     return obj
 
 def simpan_riwayat(ringkasan):
     try:
-        # Bersihkan semua nilai di ringkasan
         ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in ringkasan.items()}
-        
         if os.path.isfile(RIWAYAT_FILE):
             with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
-                try:
-                    data = json.load(f)
-                except json.JSONDecodeError:
-                    data = []
-        else:
-            data = []
-        
+                try: data = json.load(f)
+                except: data = []
+        else: data = []
         data.insert(0, ringkasan_bersih)
-        # Batasi maks 50 entri
         data = data[:50]
-        
         with open(RIWAYAT_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
-        
-        # Update session state langsung (hindari race condition)
         st.session_state.riwayat = data
     except Exception as e:
         st.error(f"❌ Gagal menyimpan riwayat: {e}")
 
 def muat_riwayat_dari_csv():
-    if not os.path.isfile(RIWAYAT_FILE):
-        return []
+    if not os.path.isfile(RIWAYAT_FILE): return []
     try:
         with open(RIWAYAT_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        return data
-    except (json.JSONDecodeError, FileNotFoundError):
-        return []
+            return json.load(f)
+    except: return []
 
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_csv()
@@ -217,33 +198,24 @@ if "riwayat" not in st.session_state:
 # FUNGSI AI GEMINI
 # ==========================================
 def dapatkan_model_gemini(api_key):
-    if not api_key:
-        return None, "API key belum diisi."
+    if not api_key: return None, "API key belum diisi."
     try:
         genai.configure(api_key=api_key)
-        available = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                model_id = m.name.split('/')[-1]
-                available.append(model_id)
-        if not available:
-            return None, "Tidak ada model Gemini."
+        available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        if not available: return None, "Tidak ada model Gemini."
         for model_id in available:
             try:
                 model = genai.GenerativeModel(model_id)
                 model.generate_content("test", generation_config={"max_output_tokens": 1})
                 return model, None
-            except Exception:
-                continue
+            except Exception: continue
         return None, "Model gagal digunakan."
     except Exception as e:
         return None, f"Error: {str(e)}"
 
 def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     model, error = dapatkan_model_gemini(api_key)
-    if error:
-        return None, error
-
+    if error: return None, error
     riwayat_text = ""
     if riwayat:
         riwayat_text = "Riwayat analisis sebelumnya:\n"
@@ -254,8 +226,7 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
                 short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
                 base += f" | AI Insight: {short_insight}"
             riwayat_text += base + "\n"
-    else:
-        riwayat_text = "Belum ada riwayat sebelumnya."
+    else: riwayat_text = "Belum ada riwayat sebelumnya."
 
     prompt = f"""
 Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
@@ -265,10 +236,10 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Rezim Pasar: {data_saham['Rezim']}
 - Sentimen Berita: {data_saham['Sentimen']}
 - Risk/Reward Ratio (RRR): {data_saham['RRR']}
-- Probabilitas Naik Besok: {data_saham['Prob Naik']}
+- Probabilitas Naik: {data_saham['Prob Naik']}
 - Take Profit: +{data_saham['TP%']}%
 - Stop Loss: -{data_saham['SL%']}%
-- Estimasi Harga Besok: Rp {data_saham['Estimasi']}
+- Estimasi: Rp {data_saham['Estimasi']}
 - Beta terhadap IHSG: {data_saham.get('Beta', 'N/A')}
 - Win Rate Backtest: {data_saham.get('WinRate', 'N/A')}
 - Profit Factor Backtest: {data_saham.get('ProfitFactor', 'N/A')}
@@ -294,25 +265,12 @@ Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
 
 def analisis_riwayat_global(riwayat_data, api_key):
     model, error = dapatkan_model_gemini(api_key)
-    if error:
-        return None, error
-    if not riwayat_data:
-        return None, "Belum ada riwayat."
-
+    if error: return None, error
+    if not riwayat_data: return None, "Belum ada riwayat."
     prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
     for r in riwayat_data[:30]:
-        prompt += (
-            f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | "
-            f"Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | "
-            f"Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
-        )
-    prompt += (
-        "\nBerdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia):\n"
-        "- Pola sinyal yang sering muncul\n"
-        "- Saham dengan peluang terbaik menurut data\n"
-        "- Rekomendasi perbaikan strategi\n"
-        "- Insight tambahan yang berguna untuk trader"
-    )
+        prompt += f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
+    prompt += "\nBerdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia):\n- Pola sinyal yang sering muncul\n- Saham dengan peluang terbaik menurut data\n- Rekomendasi perbaikan strategi\n- Insight tambahan yang berguna untuk trader"
     try:
         response = model.generate_content(prompt)
         return response.text.strip(), None
@@ -320,8 +278,7 @@ def analisis_riwayat_global(riwayat_data, api_key):
         return None, f"Gagal menghasilkan insight: {str(e)}"
 
 def bersihkan_teks_ai(teks):
-    if not teks:
-        return teks
+    if not teks: return teks
     teks = re.sub(r'^#{1,3}\s*', '', teks, flags=re.MULTILINE)
     teks = re.sub(r'\*\*', '', teks)
     teks = re.sub(r'\*', '', teks)
@@ -356,25 +313,13 @@ st.markdown("""
     .fundamental-table { width: 100%; border-collapse: collapse; color: #cbd5e1; }
     .fundamental-table td { padding: 6px 12px; border-bottom: 1px solid #334155; }
     .fundamental-table td:first-child { color: #8892b0; width: 180px; }
-    
     .ai-insight-card {
         background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        border-radius: 16px;
-        padding: 20px;
-        margin: 15px 0;
-        border-left: 5px solid #8b5cf6;
-        color: #cbd5e1;
-        font-size: 15px;
-        line-height: 1.6;
+        border-radius: 16px; padding: 20px; margin: 15px 0;
+        border-left: 5px solid #8b5cf6; color: #cbd5e1; font-size: 15px; line-height: 1.6;
     }
-    .ai-insight-card h3 {
-        color: #a78bfa;
-        margin-top: 0;
-        font-size: 20px;
-    }
-    .ai-insight-card p {
-        margin-bottom: 10px;
-    }
+    .ai-insight-card h3 { color: #a78bfa; margin-top: 0; font-size: 20px; }
+    .ai-insight-card p { margin-bottom: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -389,12 +334,8 @@ with st.sidebar:
         key="trading_style"
     )
     if "Day Trade" in trading_style:
-        timeframe_label = "5m"
-        period = "5d"
         st.caption("Menggunakan data 5-menit (5 hari terakhir)")
     else:
-        timeframe_label = "1d"
-        period = "2y"
         st.caption("Menggunakan data harian (2 tahun terakhir)")
     
     st.markdown("Masukkan kode saham IHSG untuk analisis lengkap.")
@@ -413,93 +354,46 @@ with st.sidebar:
             st.success("Cache dibersihkan!")
     st.markdown("---")
 
-    # ---------- RIWAYAT ANALISIS (FORMAT BARU) ----------
+    # ---------- RIWAYAT ANALISIS ----------
     st.subheader("📜 Riwayat Analisis")
     if st.session_state.riwayat:
         for r in st.session_state.riwayat[:10]:
-            if "STRONG BUY" in r.get('Sinyal',''):
-                sig_icon = "🔥"
-            elif "BUY" in r.get('Sinyal',''):
-                sig_icon = "⚡"
-            elif "HOLD" in r.get('Sinyal',''):
-                sig_icon = "⏸️"
-            else:
-                sig_icon = "🚨"
-            
+            sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else ("⚡" if "BUY" in r.get('Sinyal','') else ("⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
             conf_str = r.get('Confidence', '0%')
-            try:
-                conf_val = float(conf_str.replace('%',''))
-            except:
-                conf_val = 0
-            if conf_val >= 70: conf_text = "Tinggi ▲"
-            elif conf_val >= 50: conf_text = "Sedang ►"
-            else: conf_text = "Rendah ▼"
-            
+            try: conf_val = float(conf_str.replace('%',''))
+            except: conf_val = 0
+            conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
             est_ret_str = r.get('Est_Return', '0%')
-            try:
-                est_ret = float(est_ret_str.replace('%','').replace(',',''))
-            except:
-                est_ret = 0
-            if est_ret > 1: ret_color = "🟢"
-            elif est_ret > 0: ret_color = "🟡"
-            else: ret_color = "🔴"
-            
+            try: est_ret = float(est_ret_str.replace('%','').replace(',',''))
+            except: est_ret = 0
+            ret_color = "🟢" if est_ret > 1 else ("🟡" if est_ret > 0 else "🔴")
             gaya = r.get('Gaya','?')
-            if gaya == "DT":
-                gaya_label = "⏱️DT"
-            elif gaya == "SW":
-                gaya_label = "📆SW"
-            else:
-                gaya_label = ""
+            gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
             expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
             with st.expander(expander_title):
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
                 st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
                 st.divider()
-                
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
                 c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
-                
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.markdown(
-                        f"""
-                        <div style="margin-top: 0px;">
-                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. TP Besok</label>
-                            <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. TP Besok</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div></div>""", unsafe_allow_html=True)
                 with c2:
-                    st.markdown(
-                        f"""
-                        <div style="margin-top: 0px;">
-                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. SL Besok</label>
-                            <div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True
-                    )
-                
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">Est. SL Besok</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div></div>""", unsafe_allow_html=True)
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
                 ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
                 ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
                 ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
-                
                 b1, b2 = st.columns(2)
                 b1.metric("Beta", r.get('Beta','?'))
                 b2.metric("Momentum (5D)", r.get('Momentum','?'))
-                
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
-                
                 ai = r.get("AI_Insight", "").strip()
-                if ai:
-                    st.caption(f"💡 {ai[:150]}")
+                if ai: st.caption(f"💡 {ai[:150]}")
         if len(st.session_state.riwayat) > 10:
             st.caption(f"Menampilkan 10 dari {len(st.session_state.riwayat)} riwayat.")
     else:
@@ -507,97 +401,57 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🧠 AI (Gemini)")
-
     def get_api_key():
         try: return st.secrets["GEMINI_API_KEY"]
         except KeyError: pass
         env_key = os.getenv("GEMINI_API_KEY")
         if env_key: return env_key
         return st.session_state.get("gemini_api_key", "")
-
     if "gemini_api_key" not in st.session_state:
         st.session_state.gemini_api_key = get_api_key()
-
-    api_key = st.text_input(
-        "Gemini API Key",
-        type="password",
-        value=st.session_state.gemini_api_key,
-        placeholder="AIza...",
-        help="Kunci API Gemini. Disimpan di secrets atau env."
-    )
+    api_key = st.text_input("Gemini API Key", type="password", value=st.session_state.gemini_api_key, placeholder="AIza...", help="Kunci API Gemini. Disimpan di secrets atau env.")
     if api_key: st.session_state.gemini_api_key = api_key
-
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
-
     if st.button("🗑️ Hapus Semua Riwayat"):
         if os.path.isfile(RIWAYAT_FILE): os.remove(RIWAYAT_FILE)
         st.session_state.riwayat = []
         st.success("Riwayat dihapus!")
 
-    # ---------- KALENDER BURSA (TIMEZONE WIB + JAM OPERASIONAL) ----------
+    # ---------- KALENDER BURSA ----------
     st.markdown("---")
     now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
     today_str = now_jkt.strftime("%Y-%m-%d")
     today_day = now_jkt.strftime("%A")
-    current_hour = now_jkt.hour
-    current_minute = now_jkt.minute
+    current_hour, current_minute = now_jkt.hour, now_jkt.minute
     current_year = now_jkt.strftime("%Y")
-
     st.subheader(f"📅 Kalender Bursa {current_year}")
     libur_bursa = {
-        "2025-01-01": "Tahun Baru Masehi",
-        "2025-01-29": "Tahun Baru Imlek 2576 Kongzili",
-        "2025-03-14": "Hari Suci Nyepi (Tahun Baru Saka 1947)",
-        "2025-04-18": "Wafat Yesus Kristus",
-        "2025-05-01": "Hari Buruh Internasional",
-        "2025-05-29": "Kenaikan Yesus Kristus",
-        "2025-05-30": "Hari Raya Waisak 2569",
-        "2025-06-06": "Idul Adha 1446 H",
-        "2025-06-27": "Tahun Baru Islam 1447 H",
-        "2025-08-17": "Hari Kemerdekaan Republik Indonesia",
-        "2025-09-05": "Maulid Nabi Muhammad SAW 1447 H",
-        "2025-12-25": "Hari Raya Natal",
-        "2026-01-01": "Tahun Baru Masehi",
-        "2026-02-17": "Tahun Baru Imlek 2577 Kongzili",
-        "2026-03-03": "Hari Suci Nyepi (Tahun Baru Saka 1948)",
-        "2026-04-03": "Wafat Yesus Kristus",
-        "2026-05-01": "Hari Buruh Internasional",
-        "2026-05-14": "Kenaikan Yesus Kristus",
-        "2026-05-15": "Hari Raya Waisak 2570",
-        "2026-05-25": "Idul Adha 1447 H",
-        "2026-06-15": "Tahun Baru Islam 1448 H",
-        "2026-08-17": "Hari Kemerdekaan Republik Indonesia",
-        "2026-08-24": "Maulid Nabi Muhammad SAW 1448 H",
-        "2026-12-25": "Hari Raya Natal",
+        "2025-01-01": "Tahun Baru Masehi", "2025-01-29": "Tahun Baru Imlek", "2025-03-14": "Hari Suci Nyepi",
+        "2025-04-18": "Wafat Yesus Kristus", "2025-05-01": "Hari Buruh", "2025-05-29": "Kenaikan Yesus Kristus",
+        "2025-05-30": "Hari Raya Waisak", "2025-06-06": "Idul Adha", "2025-06-27": "Tahun Baru Islam",
+        "2025-08-17": "Hari Kemerdekaan", "2025-09-05": "Maulid Nabi", "2025-12-25": "Hari Raya Natal",
+        "2026-01-01": "Tahun Baru Masehi", "2026-02-17": "Tahun Baru Imlek", "2026-03-03": "Hari Suci Nyepi",
+        "2026-04-03": "Wafat Yesus Kristus", "2026-05-01": "Hari Buruh", "2026-05-14": "Kenaikan Yesus Kristus",
+        "2026-05-15": "Hari Raya Waisak", "2026-05-25": "Idul Adha", "2026-06-15": "Tahun Baru Islam",
+        "2026-08-17": "Hari Kemerdekaan", "2026-08-24": "Maulid Nabi", "2026-12-25": "Hari Raya Natal",
     }
-
     def dalam_jam_perdagangan(hour, minute):
         sesi1 = (hour == 9 and minute >= 0) or (10 <= hour < 12) or (hour == 12 and minute == 0)
         sesi2 = (hour == 13 and minute >= 30) or (hour == 14) or (hour == 15 and minute == 0)
         return sesi1 or sesi2
-
-    if today_str in libur_bursa:
-        st.warning(f"Hari ini bursa **TUTUP**: {libur_bursa[today_str]}")
-    elif today_day in ["Saturday", "Sunday"]:
-        st.warning("Hari ini **AKHIR PEKAN**, bursa tutup.")
-    elif dalam_jam_perdagangan(current_hour, current_minute):
-        st.success("Bursa **TERBUKA** (Sesi 1: 09:00-12:00, Sesi 2: 13:30-15:00 WIB)")
-    else:
-        st.info("Bursa **TUTUP** (di luar jam perdagangan).")
-
+    if today_str in libur_bursa: st.warning(f"Hari ini bursa **TUTUP**: {libur_bursa[today_str]}")
+    elif today_day in ["Saturday", "Sunday"]: st.warning("Hari ini **AKHIR PEKAN**, bursa tutup.")
+    elif dalam_jam_perdagangan(current_hour, current_minute): st.success("Bursa **TERBUKA** (Sesi 1: 09:00-12:00, Sesi 2: 13:30-15:00 WIB)")
+    else: st.info("Bursa **TUTUP** (di luar jam perdagangan).")
     st.caption("Libur dalam 2 minggu ke depan:")
     future_libur = []
     for date_str, desc in libur_bursa.items():
         dt = datetime.strptime(date_str, "%Y-%m-%d")
         delta = (dt.date() - now_jkt.date()).days
-        if 0 < delta <= 14:
-            future_libur.append(f"- {dt.strftime('%d %b')}: {desc}")
+        if 0 < delta <= 14: future_libur.append(f"- {dt.strftime('%d %b')}: {desc}")
     if future_libur:
-        for item in future_libur:
-            st.caption(item)
-    else:
-        st.caption("Tidak ada libur dalam 2 minggu.")
-
+        for item in future_libur: st.caption(item)
+    else: st.caption("Tidak ada libur dalam 2 minggu.")
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
 
@@ -634,11 +488,7 @@ def get_google_news_rss(query_str, num=5):
     try:
         url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
         feed = feedparser.parse(url)
-        news = []
-        for e in feed.entries[:num]:
-            title = e.get('title','').strip()
-            summary = re.sub('<[^<]+?>','',e.get('summary',''))
-            news.append({'title':title,'summary':summary,'source':'Google News'})
+        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
         return news, None
     except Exception as e: return [], str(e)
 
@@ -648,8 +498,8 @@ def get_yahoo_search_news(query_str, num=5):
         news = []
         for item in items[:num]:
             inner = item.get('content') or item
-            title = (inner.get('title') or inner.get('shortTitle') or inner.get('headline') or '')
-            summary = (inner.get('summary') or inner.get('longSummary') or inner.get('description') or '')
+            title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
+            summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
             if title: news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
         return news, None
     except: return [], "Yahoo Search gagal"
@@ -706,7 +556,9 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        if "Day Trade" in st.session_state.trading_style:
+        is_daytrade = "Day Trade" in st.session_state.trading_style
+        
+        if is_daytrade:
             df = load_stock_data(ticker_input, period="5d", interval="5m")
             if df.empty or len(df) < 20:
                 st.warning("Data 5 menit tidak lengkap, mencoba interval 15 menit...")
@@ -718,9 +570,12 @@ if run_btn:
                 st.warning("Data 30 menit tidak lengkap, menggunakan interval 60 menit...")
                 df = load_stock_data(ticker_input, period="5d", interval="60m")
             df_ihsg = load_ihsg_data(period="5d", interval="5m")
+            # Untuk pivot harian, ambil data 1 bulan terakhir dengan interval 1d
+            df_daily = load_stock_data(ticker_input, period="1mo", interval="1d")
         else:
             df = load_stock_data(ticker_input, period="2y", interval="1d")
             df_ihsg = load_ihsg_data(period="2y", interval="1d")
+            df_daily = df  # sudah daily
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
@@ -811,10 +666,8 @@ if run_btn:
                 common = returns.index.intersection(ihsg_ret.index)
                 if len(common) > 20:
                     beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])
-                else:
-                    beta_ihsg = 1.0
-            else:
-                beta_ihsg = 1.0
+                else: beta_ihsg = 1.0
+            else: beta_ihsg = 1.0
         except: beta_ihsg = 1.0
 
         # ============ ATR & RSI ============
@@ -831,20 +684,14 @@ if run_btn:
         loss = -delta.where(delta < 0, 0.0)
         avg_gain = gain.rolling(14).mean().iloc[-1]
         avg_loss = loss.rolling(14).mean().iloc[-1]
-        if avg_loss is None or avg_loss == 0:
-            rsi14 = 100.0
-        else:
-            rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
+        if avg_loss is None or avg_loss == 0: rsi14 = 100.0
+        else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
 
         # === MULTIPLIER TP/SL ===
-        tp_mult = 2.0
-        sl_mult = 1.0
-        if adx > 30 and 30 < rsi14 < 70:
-            tp_mult = 2.5; sl_mult = 1.0
-        elif adx < 20:
-            tp_mult = 1.5; sl_mult = 0.75
-        if rsi14 > 70 or rsi14 < 30:
-            tp_mult = min(tp_mult, 1.5)
+        tp_mult, sl_mult = 2.0, 1.0
+        if adx > 30 and 30 < rsi14 < 70: tp_mult, sl_mult = 2.5, 1.0
+        elif adx < 20: tp_mult, sl_mult = 1.5, 0.75
+        if rsi14 > 70 or rsi14 < 30: tp_mult = min(tp_mult, 1.5)
 
         sl_pct = sl_mult * atr_pct
         tp_pct = tp_mult * atr_pct
@@ -857,29 +704,63 @@ if run_btn:
         elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
         else: rrr_status = "Buruk (< 1.0) 🔴"
 
-        # ============ PIVOT (DENGAN VALIDASI) ============
-        hi = lo = cl = None
-        for i in range(1, min(6, len(df))):
-            row = df.iloc[-i]
-            h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
-            if h_val != l_val and h_val > 0 and l_val > 0:
-                hi, lo, cl = h_val, l_val, c_val
-                break
-        if hi is None or lo is None:
-            hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
-        if hi == lo:
-            pp = r1 = s1 = r2 = s2 = cl
+        # ============ PIVOT (ADAPTIF) ============
+        if is_daytrade:
+            # Day Trade: hitung pivot dari data harian (kemarin)
+            if not df_daily.empty and len(df_daily) >= 2:
+                prev_day = df_daily.iloc[-2]
+                hi_daily = float(prev_day['High'])
+                lo_daily = float(prev_day['Low'])
+                cl_daily = float(prev_day['Close'])
+                if hi_daily != lo_daily:
+                    pp = (hi_daily + lo_daily + cl_daily) / 3
+                    r1 = 2 * pp - lo_daily
+                    s1 = 2 * pp - hi_daily
+                    r2 = pp + (hi_daily - lo_daily)
+                    s2 = pp - (hi_daily - lo_daily)
+                else:
+                    pp = r1 = s1 = r2 = s2 = cl_daily
+            else:
+                # fallback: gunakan bar terakhir (mungkin sama)
+                hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
+                if hi != lo:
+                    pp = (hi + lo + cl) / 3
+                    r1 = 2 * pp - lo; s1 = 2 * pp - hi
+                    r2 = pp + (hi - lo); s2 = pp - (hi - lo)
+                else: pp = r1 = s1 = r2 = s2 = cl
         else:
-            pp = (hi + lo + cl) / 3
-            r1 = 2 * pp - lo
-            s1 = 2 * pp - hi
-            r2 = pp + (hi - lo)
-            s2 = pp - (hi - lo)
-        if len(df) >= 21:
-            res20 = float(df['High'].iloc[-21:-1].max())
+            # Swing Trade: seperti sebelumnya (validasi candle terakhir)
+            hi = lo = cl = None
+            for i in range(1, min(6, len(df))):
+                row = df.iloc[-i]
+                h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
+                if h_val != l_val and h_val > 0 and l_val > 0:
+                    hi, lo, cl = h_val, l_val, c_val
+                    break
+            if hi is None:
+                hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
+            if hi == lo: pp = r1 = s1 = r2 = s2 = cl
+            else:
+                pp = (hi + lo + cl) / 3
+                r1 = 2 * pp - lo; s1 = 2 * pp - hi
+                r2 = pp + (hi - lo); s2 = pp - (hi - lo)
+
+        # Breakout (adaptif)
+        if is_daytrade:
+            # Bandingkan dengan high dari sesi sebelumnya (78 bar untuk 5m, atau 1 hari)
+            if len(df) >= 78:
+                res20 = float(df['High'].iloc[-78:-1].max())
+                breakout_label = "Breakout Sesi Sebelumnya"
+            else:
+                res20 = float(df['High'].max())
+                breakout_label = "Breakout N-Bar"
         else:
-            res20 = float(df['High'].max())
-        breakout = "YES (🔥)" if cl > res20 else "NO"
+            if len(df) >= 21:
+                res20 = float(df['High'].iloc[-21:-1].max())
+            else:
+                res20 = float(df['High'].max())
+            breakout_label = "Breakout 20 Hari"
+        breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
         # ============ SINYAL ============
         def generate_signals_vectorized(dataframe, mom_th):
@@ -897,18 +778,18 @@ if run_btn:
         signal = df['Signal'].iloc[-1]
 
         # ============ ENTRY ZONE ADAPTIF ============
-        if s1 >= harga_terakhir * 0.95:
-            entry_low = s1
-        else:
-            entry_low = harga_terakhir * (1 - atr_pct/100)
-        if "STRONG BUY" in signal:
-            entry_high = harga_terakhir
-        else:
-            entry_high = harga_terakhir * (1 - 0.5 * atr_pct/100)
+        if s1 >= harga_terakhir * 0.95: entry_low = s1
+        else: entry_low = harga_terakhir * (1 - atr_pct/100)
+        if "STRONG BUY" in signal: entry_high = harga_terakhir
+        else: entry_high = harga_terakhir * (1 - 0.5 * atr_pct/100)
         entry_zone = f"Rp {entry_low:,.0f} - {entry_high:,.0f}"
 
-        # ============ BACKTEST ============
-        df_back = df.iloc[-126:].copy()
+        # ============ BACKTEST (ADAPTIF) ============
+        if is_daytrade:
+            backtest_window = min(500, len(df))  # ~1 minggu data 5m
+        else:
+            backtest_window = 126
+        df_back = df.iloc[-backtest_window:].copy()
         trades, daily_returns = [], []
         in_position, entry_price = False, 0.0
         for i in range(len(df_back)):
@@ -930,7 +811,13 @@ if run_btn:
             equity = np.cumprod([1+r for r in trades])
             max_dd_bt = float(np.min(equity/np.maximum.accumulate(equity)-1)*100) if len(equity) else 0
             daily_ret = np.array(daily_returns)
-            sharpe_bt = (daily_ret.mean()/daily_ret.std())*np.sqrt(252) if daily_ret.std() else 0
+            # Sharpe: annualisasi sesuai timeframe
+            if is_daytrade:
+                # ~78 bar per hari (5m), 252 hari -> 19656 bar/tahun
+                annual_factor = np.sqrt(78 * 252)
+            else:
+                annual_factor = np.sqrt(252)
+            sharpe_bt = (daily_ret.mean()/daily_ret.std())*annual_factor if daily_ret.std() else 0
             trades_bt = len(trades)
         else: win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
 
@@ -950,17 +837,21 @@ if run_btn:
         kurt_penalty = 0.5 if ret_kurt>3 else 1.0
         kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
 
-        # ============ MONTE CARLO ============
-        n_sim,n_days = 2000,30
+        # ============ MONTE CARLO (ADAPTIF) ============
+        if is_daytrade:
+            n_sim, n_steps = 2000, 30  # 30 bar ke depan (5m) = 2.5 jam
+        else:
+            n_sim, n_days = 2000, 30
+            n_steps = n_days
         latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
         scale_corrected = latest_vol/np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
         theta_ou = estimate_theta_ou(df['Close'])
         locked_log_mean20 = np.log(df['Close']).tail(20).mean()
-        paths = np.zeros((n_days,n_sim)); current_log = np.ones((1,n_sim))*np.log(harga_terakhir)
-        for day in range(n_days):
+        paths = np.zeros((n_steps,n_sim)); current_log = np.ones((1,n_sim))*np.log(harga_terakhir)
+        for step in range(n_steps):
             inov = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
             next_log = current_log[-1] + theta_ou*(locked_log_mean20-current_log[-1]) + inov
-            current_log = np.vstack([current_log, next_log]); paths[day] = np.exp(next_log)
+            current_log = np.vstack([current_log, next_log]); paths[step] = np.exp(next_log)
         mu_ou = theta_ou*(locked_log_mean20-np.log(harga_terakhir))
         est_besok = float(np.exp(np.log(harga_terakhir)+mu_ou))
         sim_h1 = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=2000)
@@ -969,6 +860,14 @@ if run_btn:
         hit_tp = (np.any(paths>=r1,axis=0).sum()/n_sim)*100
         hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
         prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
+
+        # Label untuk UI
+        if is_daytrade:
+            estimasi_label = "Estimasi Sesi Berikutnya"
+            prob_label = "Prob Naik Sesi Berikutnya"
+        else:
+            estimasi_label = "Estimasi Besok"
+            prob_label = "Prob Naik Besok"
 
         # ============ METRIK TAMBAHAN UNTUK RIWAYAT ============
         if "STRONG BUY" in signal: signal_score = 0.7 + (prob_bull / 200)
@@ -1045,7 +944,7 @@ if run_btn:
             "Beta": f"{beta_ihsg:.2f}",
             "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
             "Entry_Zone": entry_zone,
-            "Gaya": "SW" if "Swing" in st.session_state.trading_style else "DT"
+            "Gaya": "DT" if is_daytrade else "SW"
         }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -1055,9 +954,9 @@ if run_btn:
 
     col1,col2,col3 = st.columns(3)
     col1.metric("Sinyal Eksekusi", signal)
-    col2.metric("Estimasi Besok", f"Rp {est_besok:,.0f}".replace(",","."),
+    col2.metric(estimasi_label, f"Rp {est_besok:,.0f}".replace(",","."),
                 f"50% range: Rp {low_est:,.0f} - {up_est:,.0f}".replace(",","."))
-    col3.metric("Prob. Naik Besok", f"{prob_bull:.1f}%")
+    col3.metric(prob_label, f"{prob_bull:.1f}%")
 
     if PLOTLY_AVAILABLE:
         st.header("📈 Chart Harga & Sinyal")
@@ -1165,12 +1064,13 @@ if run_btn:
         st.subheader("🎯 Target Pivot & Support/Resistance"); p1,p2,p3,p4,p5=st.columns(5)
         p1.metric("R2",f"Rp {r2:,.0f}".replace(",",".")); p2.metric("R1",f"Rp {r1:,.0f}".replace(",",".")); p3.metric("Pivot",f"Rp {pp:,.0f}".replace(",","."))
         p4.metric("S1",f"Rp {s1:,.0f}".replace(",",".")); p5.metric("S2",f"Rp {s2:,.0f}".replace(",","."))
-        st.write(f"Kondisi Breakout 20 Hari: **{breakout}**"); st.divider()
-        st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest (6 Bulan)"); t1,t2,t3,t4,t5=st.columns(5)
-        t1.metric("Sinyal",signal); t2.metric("Estimasi Besok",f"Rp {est_besok:,.0f}".replace(",","."))
+        st.write(f"Kondisi {breakout_label}: **{breakout}**"); st.divider()
+        st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest" + (" (Intraday)" if is_daytrade else " (6 Bulan)"))
+        t1,t2,t3,t4,t5=st.columns(5)
+        t1.metric("Sinyal",signal); t2.metric(estimasi_label, f"Rp {est_besok:,.0f}".replace(",","."))
         t3.metric("Entry Zone", entry_zone); t4.metric("Take Profit",f"Rp {tp_harga:,.0f} (+{tp_pct:.1f}%)".replace(",","."), "Target Profit")
         t5.metric("Stop Loss",f"Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)".replace(",","."), "Proteksi Batas S2")
-        st.markdown("**Hasil Backtest Stateful Tracking 126 Hari:**"); b1,b2,b3,b4,b5,b6=st.columns(6)
+        st.markdown(f"**Hasil Backtest ({backtest_window} Bar):**"); b1,b2,b3,b4,b5,b6=st.columns(6)
         b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
         b3.metric("Avg Return/Trade",f"{avg_bt:.2%}" if trades_bt else "N/A"); b4.metric("Max DD Strat",f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
         b5.metric("Sharpe",f"{sharpe_bt:.2f}" if trades_bt else "N/A"); b6.metric("Total Trades",trades_bt)
@@ -1181,7 +1081,7 @@ if run_btn:
         st.markdown(f"Max DD Historis: `{max_dd:.2f}%` | DD 30 Hari: `{max_dd_30:.2f}%`")
         st.divider()
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
-        pr1.metric("Prob. Naik Besok",f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
+        pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
     # ══════════════════════════════════════════════════════════
     # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
@@ -1193,30 +1093,40 @@ if run_btn:
             "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
         )
 
-        st.markdown("### 📈 Coppock Curve & Beta IHSG")
-        if coppock_turning_up:
-            coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
-        elif coppock_rising:
-            coppock_insight = "🟢 **Rising** – Tren bullish jangka panjang masih sehat. Akumulasi masih berlangsung."
+        # Coppock Curve – hanya tampil jika Swing Trade
+        if not is_daytrade:
+            st.markdown("### 📈 Coppock Curve & Beta IHSG")
+            if coppock_turning_up:
+                coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
+            elif coppock_rising:
+                coppock_insight = "🟢 **Rising** – Tren bullish jangka panjang masih sehat. Akumulasi masih berlangsung."
+            else:
+                coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
+            if beta_ihsg > 1.2:
+                beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
+            elif beta_ihsg > 0.8:
+                beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
+            else:
+                beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
+            col_cop1, col_cop2 = st.columns(2)
+            with col_cop1:
+                st.metric("Coppock Curve", f"{coppock_val:.3f}",
+                          "Turning Up ✅" if coppock_turning_up else ("Rising 📈" if coppock_rising else "Falling 📉"))
+                st.caption(coppock_insight)
+            with col_cop2:
+                st.metric("Beta IHSG", f"{beta_ihsg:.2f}x", help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
+                st.caption(beta_insight)
         else:
-            coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
-
-        if beta_ihsg > 1.2:
-            beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
-        elif beta_ihsg > 0.8:
-            beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
-        else:
-            beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
-
-        col_cop1, col_cop2 = st.columns(2)
-        with col_cop1:
-            st.metric("Coppock Curve", f"{coppock_val:.3f}",
-                      "Turning Up ✅" if coppock_turning_up else ("Rising 📈" if coppock_rising else "Falling 📉"))
-            st.caption(coppock_insight)
-        with col_cop2:
-            st.metric("Beta IHSG", f"{beta_ihsg:.2f}x",
-                      help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
+            st.markdown("### 📈 Beta IHSG")
+            if beta_ihsg > 1.2:
+                beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
+            elif beta_ihsg > 0.8:
+                beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
+            else:
+                beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
+            st.metric("Beta IHSG", f"{beta_ihsg:.2f}x", help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
             st.caption(beta_insight)
+            st.info("ℹ️ Coppock Curve tidak ditampilkan untuk Day Trade karena kurang relevan dengan timeframe intraday.")
 
         st.markdown("### ⚖️ Bobot Adaptif per Faktor")
         st.caption(
@@ -1339,7 +1249,6 @@ if run_btn:
             elif error_ai: st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
     else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
-    # PANGGIL simpan_riwayat SEKALI SAJA (fungsi ini sudah mengupdate session state)
     simpan_riwayat(ringkasan)
 
 # --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
