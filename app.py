@@ -1478,52 +1478,6 @@ else:
 
                 fig = go.Figure()
 
-                # Garis Open
-                if open_price:
-                    fig.add_hline(
-                        y=open_price,
-                        line_dash='dot',
-                        line_color='rgba(255,255,255,0.5)',
-                        line_width=1,
-                        annotation_text=f'O {open_price:,.0f}',
-                        annotation_position='inside',
-                        annotation=dict(
-                            x=0.01,
-                            xanchor='left',
-                            font=dict(size=9, color='rgba(255,255,255,0.7)')
-                        )
-                    )
-
-                # Garis High
-                fig.add_hline(
-                    y=ihsg_high,
-                    line_dash='dot',
-                    line_color='rgba(255,255,255,0.4)',
-                    line_width=1,
-                    annotation_text=f'H {ihsg_high:,.0f}',
-                    annotation_position='inside',
-                    annotation=dict(
-                        x=0.01,
-                        xanchor='left',
-                        font=dict(size=9, color='rgba(255,255,255,0.6)')
-                    )
-                )
-
-                # Garis Low
-                fig.add_hline(
-                    y=ihsg_low,
-                    line_dash='dot',
-                    line_color='rgba(255,255,255,0.4)',
-                    line_width=1,
-                    annotation_text=f'L {ihsg_low:,.0f}',
-                    annotation_position='inside',
-                    annotation=dict(
-                        x=0.01,
-                        xanchor='left',
-                        font=dict(size=9, color='rgba(255,255,255,0.6)')
-                    )
-                )
-
                 # Trace mountain
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
@@ -1535,6 +1489,70 @@ else:
                     name='IHSG',
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
+
+                # Garis + label Open di dalam grafik
+                if open_price:
+                    fig.add_hline(
+                        y=open_price,
+                        line_dash='dot',
+                        line_color='rgba(255,255,255,0.5)',
+                        line_width=1,
+                    )
+                    fig.add_annotation(
+                        x=0.5, y=open_price,
+                        xref='paper', yref='y',
+                        text=f'O {open_price:,.0f}',
+                        showarrow=False,
+                        font=dict(size=9, color='rgba(255,255,255,0.7)'),
+                        bgcolor='rgba(15, 17, 22, 0.7)',
+                        bordercolor='rgba(255,255,255,0.3)',
+                        borderwidth=1,
+                        borderpad=4,
+                        xanchor='center',
+                        yanchor='bottom'
+                    )
+
+                # Garis + label High di dalam grafik
+                fig.add_hline(
+                    y=ihsg_high,
+                    line_dash='dot',
+                    line_color='rgba(255,255,255,0.4)',
+                    line_width=1,
+                )
+                fig.add_annotation(
+                    x=0.5, y=ihsg_high,
+                    xref='paper', yref='y',
+                    text=f'H {ihsg_high:,.0f}',
+                    showarrow=False,
+                    font=dict(size=9, color='rgba(255,255,255,0.6)'),
+                    bgcolor='rgba(15, 17, 22, 0.7)',
+                    bordercolor='rgba(255,255,255,0.3)',
+                    borderwidth=1,
+                    borderpad=4,
+                    xanchor='center',
+                    yanchor='bottom'
+                )
+
+                # Garis + label Low di dalam grafik
+                fig.add_hline(
+                    y=ihsg_low,
+                    line_dash='dot',
+                    line_color='rgba(255,255,255,0.4)',
+                    line_width=1,
+                )
+                fig.add_annotation(
+                    x=0.5, y=ihsg_low,
+                    xref='paper', yref='y',
+                    text=f'L {ihsg_low:,.0f}',
+                    showarrow=False,
+                    font=dict(size=9, color='rgba(255,255,255,0.6)'),
+                    bgcolor='rgba(15, 17, 22, 0.7)',
+                    bordercolor='rgba(255,255,255,0.3)',
+                    borderwidth=1,
+                    borderpad=4,
+                    xanchor='center',
+                    yanchor='bottom'
+                )
 
                 y_min = float(df_ihsg_preview['Low'].min()) * 0.998
                 y_max = float(df_ihsg_preview['High'].max()) * 1.002
