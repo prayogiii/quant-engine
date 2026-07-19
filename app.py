@@ -1385,8 +1385,18 @@ else:
 
     st.markdown("---")
     st.subheader("📈 Informasi Pasar Terkini (IHSG)")
+
+    # Pilihan periode IHSG
+    periode_pilihan = st.selectbox(
+        "Periode data IHSG:",
+        options=["1d", "5d", "1mo"],
+        format_func=lambda x: {"1d": "1 Hari", "5d": "5 Hari", "1mo": "1 Bulan"}[x],
+        index=0,
+        key="ihsg_period"
+    )
+
     try:
-        df_ihsg_preview = load_ihsg_data(period="5d", interval="1d")
+        df_ihsg_preview = load_ihsg_data(period=periode_pilihan, interval="1d")
         if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
@@ -1401,7 +1411,7 @@ else:
             col3.metric("Low Hari Ini", f"{ihsg_low:,.0f}")
             col4.metric("Volume", f"{ihsg_volume:,.0f}")
 
-            # Chart dengan guard Plotly
+            # Chart area dengan guard Plotly
             if PLOTLY_AVAILABLE:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
@@ -1413,8 +1423,15 @@ else:
                     fillcolor='rgba(245, 158, 11, 0.1)',
                     name='IHSG'
                 ))
+                # Judul dinamis
+                if periode_pilihan == "1d":
+                    chart_title = "IHSG Hari Ini"
+                elif periode_pilihan == "5d":
+                    chart_title = "IHSG 5 Hari Terakhir"
+                else:
+                    chart_title = "IHSG 1 Bulan Terakhir"
                 fig.update_layout(
-                    title="IHSG 5 Hari Terakhir",
+                    title=chart_title,
                     template="plotly_dark",
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
@@ -1443,7 +1460,7 @@ else:
                     name='IHSG'
                 ))
                 fig.update_layout(
-                    title="IHSG 5 Hari Terakhir",
+                    title="IHSG (Data Terbatas)",
                     template="plotly_dark",
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
@@ -1455,10 +1472,10 @@ else:
             else:
                 st.line_chart(df_ihsg_preview['Close'])
         else:
-            st.warning("Data IHSG tidak tersedia saat ini.")
+            st.warning("Data IHSG tidak tersedia untuk periode yang dipilih.")
     except Exception as e:
         st.error(f"Gagal memuat data IHSG: {e}")
-
+        
 # --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
     if not st.session_state.gemini_api_key: st.error("Masukkan API Key terlebih dahulu!")
