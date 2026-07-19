@@ -56,28 +56,42 @@ V12_PRED_FILE = "v12_predictions.csv"  # prediksi tetap pakai file lokal
 # ====================== GOOGLE SHEETS FUNCTIONS ======================
 def get_gsheet():
     """Mengembalikan objek spreadsheet berdasarkan secrets."""
-    creds = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"]
-    )
-    client = gspread.authorize(creds)
-    return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
+    try:
+        creds = Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
+        client = gspread.authorize(creds)
+        return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
+    except Exception as e:
+        st.error(f"❌ Gagal koneksi ke Google Sheets: {e}")
+        return None
 
 def init_sheets():
     """Membuat sheet 'riwayat' dan 'v12_memory' jika belum ada."""
-    sheet = get_gsheet()
-    existing = [ws.title for ws in sheet.worksheets()]
-    if "riwayat" not in existing:
-        sheet.add_worksheet("riwayat", rows=100, cols=25)
-    if "v12_memory" not in existing:
-        sheet.add_worksheet("v12_memory", rows=100, cols=3)
+    try:
+        sheet = get_gsheet()
+        if sheet is None:
+            return
+        existing = [ws.title for ws in sheet.worksheets()]
+        if "riwayat" not in existing:
+            sheet.add_worksheet("riwayat", rows=100, cols=25)
+            st.sidebar.success("✅ Sheet 'riwayat' dibuat.")
+        if "v12_memory" not in existing:
+            sheet.add_worksheet("v12_memory", rows=100, cols=3)
+            st.sidebar.success("✅ Sheet 'v12_memory' dibuat.")
+    except Exception as e:
+        st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
 # V12 Memory (Google Sheets)
 def load_v12_memory():
     mem = {}
     try:
-        sheet = get_gsheet().worksheet("v12_memory")
-        records = sheet.get_all_records()
+        sheet = get_gsheet()
+        if sheet is None:
+            return mem
+        ws = sheet.worksheet("v12_memory")
+        records = ws.get_all_records()
         for row in records:
             t = row.get('ticker')
             if t and 'data' in row and row['data']:
@@ -86,19 +100,22 @@ def load_v12_memory():
                 except:
                     pass
     except Exception as e:
-        st.error(f"Gagal memuat V12 memory dari Google Sheets: {e}")
+        st.error(f"❌ Gagal memuat V12 memory: {e}")
     return mem
 
 def save_v12_memory(mem):
     try:
-        sheet = get_gsheet().worksheet("v12_memory")
+        sheet = get_gsheet()
+        if sheet is None:
+            return
+        ws = sheet.worksheet("v12_memory")
         rows = [{'ticker': t, 'data': json.dumps(d)} for t, d in mem.items()]
-        sheet.clear()
+        ws.clear()
         if rows:
-            sheet.insert_row(['ticker', 'data'], 1)
-            sheet.append_rows([[r['ticker'], r['data']] for r in rows])
+            ws.insert_row(['ticker', 'data'], 1)
+            ws.append_rows([[r['ticker'], r['data']] for r in rows])
     except Exception as e:
-        st.error(f"Gagal menyimpan V12 memory ke Google Sheets: {e}")
+        st.error(f"❌ Gagal menyimpan V12 memory: {e}")
 
 def default_weight(factor, regime):
     defaults = {
@@ -109,11 +126,6 @@ def default_weight(factor, regime):
         "BEARISH ACCUMULATION": {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.20,"Beta_IHSG":0.15,"Coppock":0.27}
     }
     return defaults.get(regime, {"Momentum":0.23,"AI_Senti":0.17,"MeanRev":0.15,"Beta_IHSG":0.15,"Coppock":0.30}).get(factor,0.15)
-
-if 'v12_memory' not in st.session_state:
-    # Inisialisasi Google Sheets sebelum load memory
-    init_sheets()
-    st.session_state.v12_memory = load_v12_memory()
 
 # ---------- Coppock Curve ----------
 def coppock_curve(prices, rP1=14, rP2=11, wP=10):
@@ -194,35 +206,37 @@ def bersihkan_untuk_json(obj):
 
 def simpan_riwayat(ringkasan):
     try:
-        sheet = get_gsheet().worksheet("riwayat")
+        sheet = get_gsheet()
+        if sheet is None:
+            st.error("❌ Tidak dapat menyimpan riwayat: koneksi Google Sheets gagal.")
+            return
+        ws = sheet.worksheet("riwayat")
         ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in ringkasan.items()}
-        # Ambil data yang sudah ada
-        records = sheet.get_all_records()
+        records = ws.get_all_records()
         data = list(records)
         data.insert(0, ringkasan_bersih)
-        data = data[:50]  # batasi 50 entri
-        # Tulis ulang sheet
+        data = data[:50]
         if data:
             headers = list(data[0].keys())
-            sheet.clear()
-            sheet.insert_row(headers, 1)
+            ws.clear()
+            ws.insert_row(headers, 1)
             rows = [[row.get(h, "") for h in headers] for row in data]
-            sheet.append_rows(rows, value_input_option='USER_ENTERED')
+            ws.append_rows(rows, value_input_option='USER_ENTERED')
         st.session_state.riwayat = data
     except Exception as e:
         st.error(f"❌ Gagal menyimpan riwayat ke Google Sheets: {e}")
 
 def muat_riwayat_dari_sheets():
     try:
-        sheet = get_gsheet().worksheet("riwayat")
-        records = sheet.get_all_records()
+        sheet = get_gsheet()
+        if sheet is None:
+            return []
+        ws = sheet.worksheet("riwayat")
+        records = ws.get_all_records()
         return list(records)[:50]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
-
-if "riwayat" not in st.session_state:
-    st.session_state.riwayat = muat_riwayat_dari_sheets()
 
 # ==========================================
 # FUNGSI AI GEMINI
@@ -319,6 +333,9 @@ def bersihkan_teks_ai(teks):
 # KONFIGURASI HALAMAN & STYLING
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
+
+# ✅ Panggil init_sheets() di awal aplikasi agar sheet selalu siap
+init_sheets()
 
 st.markdown("""
     <style>
@@ -446,10 +463,14 @@ with st.sidebar:
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
-            sheet = get_gsheet().worksheet("riwayat")
-            sheet.clear()
-            st.session_state.riwayat = []
-            st.success("Riwayat dihapus!")
+            sheet = get_gsheet()
+            if sheet:
+                ws = sheet.worksheet("riwayat")
+                ws.clear()
+                st.session_state.riwayat = []
+                st.success("Riwayat dihapus!")
+            else:
+                st.error("Gagal menghapus: koneksi tidak tersedia.")
         except Exception as e:
             st.error(f"Gagal menghapus riwayat: {e}")
 
@@ -586,6 +607,13 @@ REGIME_INFO = {
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
 
+# ==================== SESSION STATE ====================
+if 'v12_memory' not in st.session_state:
+    st.session_state.v12_memory = load_v12_memory()
+
+if "riwayat" not in st.session_state:
+    st.session_state.riwayat = muat_riwayat_dari_sheets()
+
 # ==================== PROSES ANALISIS ====================
 if run_btn:
     if not ticker_input:
@@ -593,7 +621,7 @@ if run_btn:
 
     with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
         is_daytrade = "Day Trade" in st.session_state.trading_style
-        bars_per_day_map = {"5m": 54, "15m": 18, "30m": 9, "60m": 5}  # IDX session 4.5h
+        bars_per_day_map = {"5m": 54, "15m": 18, "30m": 9, "60m": 5}
         
         if is_daytrade:
             actual_interval = "5m"
@@ -615,7 +643,7 @@ if run_btn:
         else:
             df = load_stock_data(ticker_input, period="2y", interval="1d")
             df_ihsg = load_ihsg_data(period="2y", interval="1d")
-            df_daily = df  # sudah daily
+            df_daily = df
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
@@ -755,7 +783,6 @@ if run_btn:
                     lo_daily = float(prev_day['Low'])
                     cl_daily = float(prev_day['Close'])
                 else:
-                    # Fallback: cari baris valid terakhir (High != Low)
                     prev_day = None
                     for i in range(1, min(len(df_daily), 6)):
                         row = df_daily.iloc[-i]
@@ -785,7 +812,6 @@ if run_btn:
             else:
                 pp = r1 = s1 = r2 = s2 = cl_daily
         else:
-            # Swing Trade
             hi = lo = cl = None
             for i in range(1, min(6, len(df))):
                 row = df.iloc[-i]
@@ -877,7 +903,6 @@ if run_btn:
         else:
             win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
 
-        # Warning sample size kecil Day Trade
         if is_daytrade and trades_bt < 15:
             st.warning(
                 f"⚠️ Backtest hanya menghasilkan **{trades_bt}** sinyal trading dalam {backtest_window} bar. "
@@ -925,7 +950,6 @@ if run_btn:
         hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
         prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
 
-        # Label untuk UI
         if is_daytrade:
             estimasi_label = "Estimasi Sesi Berikutnya"
             prob_label = "Prob Naik Sesi Berikutnya"
@@ -1157,7 +1181,6 @@ if run_btn:
             "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
         )
 
-        # Coppock Curve – hanya tampil jika Swing Trade
         if not is_daytrade:
             st.markdown("### 📈 Coppock Curve & Beta IHSG")
             if coppock_turning_up:
@@ -1199,7 +1222,6 @@ if run_btn:
         )
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
 
-        # Filter tampilan untuk Day Trade: sembunyikan Coppock
         if is_daytrade:
             display_adaptive_w = {k: v for k, v in adaptive_w.items() if k != "Coppock"}
             st.caption("ℹ️ Faktor **Coppock** tidak ditampilkan dalam bobot adaptif untuk Day Trade karena kurang relevan secara intraday. "
