@@ -1444,19 +1444,14 @@ else:
                 else:
                     ihsg_change = 0.0
 
-            # High/Low
-            if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
-                ihsg_high = float(df_ihsg_preview['High'].max())
-                ihsg_low = float(df_ihsg_preview['Low'].min())
-                if open_price is None or open_price == 0:
-                    open_price = open_period
-            else:
-                ihsg_high = float(df_ihsg_preview['High'].iloc[-1])
-                ihsg_low = float(df_ihsg_preview['Low'].iloc[-1])
-                if open_price is None or open_price == 0:
-                    open_price = open_period
+            # ✅ PERBAIKAN: High/Low selalu menggunakan max/min seluruh data (mencakup seluruh periode)
+            ihsg_high = float(df_ihsg_preview['High'].max())
+            ihsg_low = float(df_ihsg_preview['Low'].min())
+            # Open periode
+            if open_price is None or open_price == 0:
+                open_price = open_period
 
-            # Volume
+            # Volume: untuk intraday gunakan total, untuk harian gunakan volume terakhir
             if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
                 vol_val = df_ihsg_preview['Volume'].sum()
             else:
