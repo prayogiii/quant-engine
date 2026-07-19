@@ -1429,26 +1429,34 @@ else:
 
         if not df_ihsg_preview.empty and len(df_ihsg_preview) >= 2:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
+            open_period = float(df_ihsg_preview['Open'].iloc[0])  # harga Open periode
 
-            # ✅ Warna & perubahan: SELALU gunakan previousClose jika ada
-            if prev_close is not None and prev_close > 0:
-                ihsg_change = (ihsg_close - prev_close) / prev_close * 100
+            # ✅ PERBAIKAN: Hitung perubahan berdasarkan OPEN PERIODE untuk 5d/1mo
+            if periode_pilihan == "1d":
+                # Untuk 1 hari, gunakan previousClose atau fallback ke titik sebelumnya
+                if prev_close is not None and prev_close > 0:
+                    ihsg_change = (ihsg_close - prev_close) / prev_close * 100
+                else:
+                    ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
+                    ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
             else:
-                # Fallback: bandingkan dengan titik sebelumnya (hari/menit)
-                ihsg_prev = float(df_ihsg_preview['Close'].iloc[-2])
-                ihsg_change = (ihsg_close - ihsg_prev) / ihsg_prev * 100
+                # Untuk 5 Hari / 1 Bulan, gunakan Open periode
+                if open_period > 0:
+                    ihsg_change = (ihsg_close - open_period) / open_period * 100
+                else:
+                    ihsg_change = 0.0
 
             # High/Low
             if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
                 ihsg_high = float(df_ihsg_preview['High'].max())
                 ihsg_low = float(df_ihsg_preview['Low'].min())
                 if open_price is None or open_price == 0:
-                    open_price = float(df_ihsg_preview['Open'].iloc[0])
+                    open_price = open_period
             else:
                 ihsg_high = float(df_ihsg_preview['High'].iloc[-1])
                 ihsg_low = float(df_ihsg_preview['Low'].iloc[-1])
                 if open_price is None or open_price == 0:
-                    open_price = float(df_ihsg_preview['Open'].iloc[-1])
+                    open_price = open_period
 
             # Volume
             if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
@@ -1467,7 +1475,7 @@ else:
 
             # Grafik mountain
             if PLOTLY_AVAILABLE:
-                # ✅ Warna dinamis berdasarkan perubahan HARIAN (ihsg_change)
+                # ✅ Warna dinamis berdasarkan perubahan (hijau jika naik, merah jika turun)
                 line_color = '#26a69a' if ihsg_change >= 0 else '#ef5350'
                 area_color = f"rgba({38 if ihsg_change >= 0 else 239}, {166 if ihsg_change >= 0 else 83}, {154 if ihsg_change >= 0 else 80}, 0.25)"
 
