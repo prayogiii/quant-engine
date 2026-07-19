@@ -1413,7 +1413,6 @@ else:
             interval_terpakai = interval
             break
         elif not temp_df.empty and len(temp_df) == 1 and interval == interval_candidates[-1]:
-            # hanya fallback terakhir jika tidak ada pilihan lain
             df_ihsg_preview = temp_df
             interval_terpakai = interval
             break
@@ -1445,12 +1444,21 @@ else:
                 else:
                     ihsg_change = 0.0
 
-            # ✅ High/Low menggunakan max/min seluruh data (mencakup seluruh periode)
-            ihsg_high = float(df_ihsg_preview['High'].max())
-            ihsg_low = float(df_ihsg_preview['Low'].min())
-            # Open untuk metrik & garis
+            # ✅ High/Low: untuk harian gunakan nilai terakhir, untuk intraday gunakan max/min
+            if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
+                ihsg_high = float(df_ihsg_preview['High'].max())
+                ihsg_low = float(df_ihsg_preview['Low'].min())
+            else:
+                # Data harian → High/Low hari terakhir (hari ini)
+                ihsg_high = float(df_ihsg_preview['High'].iloc[-1])
+                ihsg_low = float(df_ihsg_preview['Low'].iloc[-1])
+
+            # Open untuk metrik & garis (gunakan open_price dari Yahoo Finance jika ada)
             if open_price is None or open_price == 0:
-                open_price = open_period
+                if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
+                    open_price = open_period   # Open sesi
+                else:
+                    open_price = float(df_ihsg_preview['Open'].iloc[-1])   # Open hari ini
 
             # Volume: total untuk intraday, terakhir untuk harian
             if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
@@ -1485,7 +1493,7 @@ else:
                     name='IHSG',
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
-                
+
                 # Garis + label High di dalam grafik
                 fig.add_hline(
                     y=ihsg_high,
@@ -1528,7 +1536,7 @@ else:
                     yanchor='bottom'
                 )
 
-                # Rentang sumbu Y dinamis
+                # Rentang sumbu Y dinamis (tetap pakai max/min seluruh data untuk grafik)
                 y_min = float(df_ihsg_preview['Low'].min()) * 0.998
                 y_max = float(df_ihsg_preview['High'].max()) * 1.002
                 fig.update_yaxes(range=[y_min, y_max])
