@@ -1403,7 +1403,7 @@ else:
 
             # Chart dengan guard Plotly
             if PLOTLY_AVAILABLE:
-                                fig = go.Figure()
+                fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
@@ -1432,7 +1432,7 @@ else:
             st.metric("IHSG", f"{ihsg_close:,.0f}")
             st.warning("Data IHSG hanya tersedia 1 hari, tidak cukup untuk menghitung perubahan harian.")
             if PLOTLY_AVAILABLE:
-                                fig = go.Figure()
+                fig = go.Figure()
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
