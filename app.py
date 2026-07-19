@@ -1486,8 +1486,12 @@ else:
                         line_color='rgba(255,255,255,0.5)',
                         line_width=1,
                         annotation_text=f'O {open_price:,.0f}',
-                        annotation_position='right',
-                        annotation_font=dict(size=9, color='rgba(255,255,255,0.7)')
+                        annotation_position='inside',
+                        annotation=dict(
+                            x=0.01,
+                            xanchor='left',
+                            font=dict(size=9, color='rgba(255,255,255,0.7)')
+                        )
                     )
 
                 # Garis High
@@ -1497,8 +1501,12 @@ else:
                     line_color='rgba(255,255,255,0.4)',
                     line_width=1,
                     annotation_text=f'H {ihsg_high:,.0f}',
-                    annotation_position='right',
-                    annotation_font=dict(size=9, color='rgba(255,255,255,0.6)')
+                    annotation_position='inside',
+                    annotation=dict(
+                        x=0.01,
+                        xanchor='left',
+                        font=dict(size=9, color='rgba(255,255,255,0.6)')
+                    )
                 )
 
                 # Garis Low
@@ -1508,8 +1516,12 @@ else:
                     line_color='rgba(255,255,255,0.4)',
                     line_width=1,
                     annotation_text=f'L {ihsg_low:,.0f}',
-                    annotation_position='right',
-                    annotation_font=dict(size=9, color='rgba(255,255,255,0.6)')
+                    annotation_position='inside',
+                    annotation=dict(
+                        x=0.01,
+                        xanchor='left',
+                        font=dict(size=9, color='rgba(255,255,255,0.6)')
+                    )
                 )
 
                 # Trace mountain
