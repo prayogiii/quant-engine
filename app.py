@@ -1820,8 +1820,7 @@ else:
                     st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
             else:
                 st.line_chart(df_ihsg_preview['Close'])
-
-                elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
+            elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             if prev_close:
                 ihsg_change = (ihsg_close - prev_close) / prev_close * 100
