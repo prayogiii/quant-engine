@@ -72,6 +72,8 @@ def init_sheets():
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
         if "v12_predictions" not in existing:
             sheet.add_worksheet("v12_predictions", rows=500, cols=8)
+        if "riwayat_actual" not in existing:
+            sheet.add_worksheet("riwayat_actual", rows=100, cols=6)
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -262,6 +264,52 @@ def muat_riwayat_dari_sheets():
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
+    def muat_riwayat_actual():
+    """Mengembalikan dict { (waktu, saham): {Actual_High, Actual_Low, Actual_Close, Outcome} }"""
+    data = {}
+    try:
+        sheet = get_gsheet().worksheet("riwayat_actual")
+        records = sheet.get_all_records()
+        for row in records:
+            key = (row.get('Waktu',''), row.get('Saham',''))
+            if key[0] and key[1]:
+                data[key] = {
+                    'Actual_High': row.get('Actual_High', ''),
+                    'Actual_Low': row.get('Actual_Low', ''),
+                    'Actual_Close': row.get('Actual_Close', ''),
+                    'Outcome': row.get('Outcome', '')
+                }
+    except Exception as e:
+        st.error(f"Gagal memuat actual: {e}")
+    return data
+
+    def simpan_riwayat_actual(waktu, saham, actual_data):
+        """Simpan/update data actual untuk satu entri riwayat."""
+        try:
+            sheet = get_gsheet().worksheet("riwayat_actual")
+            records = sheet.get_all_records()
+            headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome']
+            # Cari apakah sudah ada
+            row_index = None
+            for i, row in enumerate(records):
+                if row.get('Waktu') == waktu and row.get('Saham') == saham:
+                    row_index = i + 2
+                    break
+            new_row = [waktu, saham,
+                       actual_data.get('Actual_High', ''),
+                       actual_data.get('Actual_Low', ''),
+                       actual_data.get('Actual_Close', ''),
+                       actual_data.get('Outcome', '')]
+            if row_index:
+                sheet.update(f'A{row_index}:F{row_index}', [new_row], value_input_option='RAW')
+            else:
+                if not records:
+                    sheet.insert_row(headers, 1)
+                sheet.append_row(new_row, value_input_option='RAW')
+            # Refresh session state
+            st.session_state.riwayat_actual = muat_riwayat_actual()
+        except Exception as e:
+            st.error(f"Gagal menyimpan actual: {e}")
 
 # ==========================================
 # FUNGSI AI GEMINI
@@ -369,6 +417,8 @@ if 'v12_memory' not in st.session_state:
 
 if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_sheets()
+if "riwayat_actual" not in st.session_state:
+    st.session_state.riwayat_actual = muat_riwayat_actual()
 
 st.markdown("""
     <style>
@@ -519,6 +569,55 @@ with st.sidebar:
                 b2.metric("Momentum (5D)", r.get('Momentum','?'))
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
                 ai = r.get("AI_Insight", "").strip()
+                                # ---- Fitur Catat Actual ----
+                waktu_key = r.get('Waktu','')
+                saham_key = r.get('Saham','')
+                actual_key = (waktu_key, saham_key)
+                actual_data = st.session_state.riwayat_actual.get(actual_key, None)
+
+                # Tampilkan data actual jika sudah ada
+                if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
+                    st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
+                    if actual_data.get('Outcome'):
+                        warna_outcome = {
+                            'Win': '🟢',
+                            'Loss': '🔴',
+                            'Partial': '🟡',
+                            'Not Touched': '⚪'
+                        }.get(actual_data['Outcome'], '')
+                        st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
+                else:
+                    # Tombol untuk menampilkan form
+                    btn_key = f"btn_actual_{waktu_key}_{saham_key}"
+                    form_key = f"form_actual_{waktu_key}_{saham_key}"
+                    show_key = f"show_form_{waktu_key}_{saham_key}"
+
+                    if st.button("📝 Catat Hasil", key=btn_key):
+                        st.session_state[show_key] = True
+
+                    # Form input (muncul jika tombol diklik)
+                    if st.session_state.get(show_key, False):
+                        with st.form(key=form_key):
+                            actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
+                            actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
+                            actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
+                            outcome = st.selectbox(
+                                "Outcome",
+                                options=["", "Win", "Loss", "Partial", "Not Touched"],
+                                format_func=lambda x: "Pilih Outcome" if x == "" else x
+                            )
+                            submitted = st.form_submit_button("Simpan")
+                            if submitted:
+                                data = {
+                                    'Actual_High': actual_high.strip(),
+                                    'Actual_Low': actual_low.strip(),
+                                    'Actual_Close': actual_close.strip(),
+                                    'Outcome': outcome
+                                }
+                                simpan_riwayat_actual(waktu_key, saham_key, data)
+                                st.success("Data actual tersimpan!")
+                                st.session_state[show_key] = False
+                                st.rerun()
                 if ai: st.caption(f"💡 {ai[:150]}")
         # Informasi jumlah tampilan
         st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
