@@ -1839,8 +1839,8 @@ else:
                 'scrollZoom': False,
                 'displayModeBar': False
             })
-                if interval_terpakai != "1m" and periode_pilihan == "1d":
-                    st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
+            if interval_terpakai != "1m" and periode_pilihan == "1d":
+                st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
             else:
                 st.line_chart(df_ihsg_preview['Close'])
                 
