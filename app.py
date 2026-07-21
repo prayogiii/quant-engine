@@ -283,34 +283,33 @@ def muat_riwayat_actual():
         st.error(f"Gagal memuat actual: {e}")
     return data
 
-    def simpan_riwayat_actual(waktu, saham, actual_data):
-        """Simpan/update data actual untuk satu entri riwayat."""
-        try:
-            sheet = get_gsheet().worksheet("riwayat_actual")
-            records = sheet.get_all_records()
-            headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome']
-            # Cari apakah sudah ada
-            row_index = None
-            for i, row in enumerate(records):
-                if row.get('Waktu') == waktu and row.get('Saham') == saham:
-                    row_index = i + 2
-                    break
-            new_row = [waktu, saham,
-                       actual_data.get('Actual_High', ''),
-                       actual_data.get('Actual_Low', ''),
-                       actual_data.get('Actual_Close', ''),
-                       actual_data.get('Outcome', '')]
-            if row_index:
-                sheet.update(f'A{row_index}:F{row_index}', [new_row], value_input_option='RAW')
-            else:
-                if not records:
-                    sheet.insert_row(headers, 1)
-                sheet.append_row(new_row, value_input_option='RAW')
-            # Refresh session state
-            st.session_state.riwayat_actual = muat_riwayat_actual()
-        except Exception as e:
-            st.error(f"Gagal menyimpan actual: {e}")
-
+def simpan_riwayat_actual(waktu, saham, actual_data):
+    """Simpan/update data actual untuk satu entri riwayat."""
+    try:
+        sheet = get_gsheet().worksheet("riwayat_actual")
+        records = sheet.get_all_records()
+        headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome']
+        # Cari apakah sudah ada
+        row_index = None
+        for i, row in enumerate(records):
+            if row.get('Waktu') == waktu and row.get('Saham') == saham:
+                row_index = i + 2
+                break
+        new_row = [waktu, saham,
+                   actual_data.get('Actual_High', ''),
+                   actual_data.get('Actual_Low', ''),
+                   actual_data.get('Actual_Close', ''),
+                   actual_data.get('Outcome', '')]
+        if row_index:
+            sheet.update(f'A{row_index}:F{row_index}', [new_row], value_input_option='RAW')
+        else:
+            if not records:
+                sheet.insert_row(headers, 1)
+            sheet.append_row(new_row, value_input_option='RAW')
+        # Refresh session state
+        st.session_state.riwayat_actual = muat_riwayat_actual()
+    except Exception as e:
+        st.error(f"Gagal menyimpan actual: {e}")
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
