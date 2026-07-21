@@ -581,7 +581,6 @@ with st.sidebar:
                         warna_outcome = {
                             'Win': '🟢',
                             'Loss': '🔴',
-                            'Partial': '🟡',
                             'Not Touched': '⚪'
                         }.get(actual_data['Outcome'], '')
                         st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
@@ -602,7 +601,7 @@ with st.sidebar:
                             actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
                             outcome = st.selectbox(
                                 "Outcome",
-                                options=["", "Win", "Loss", "Partial", "Not Touched"],
+                                options=["", "Win", "Loss",  "Not Touched"],
                                 format_func=lambda x: "Pilih Outcome" if x == "" else x
                             )
                             submitted = st.form_submit_button("Simpan")
