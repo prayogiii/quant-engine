@@ -40,20 +40,6 @@ try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
-# ====================== FRAKSI HARGA BEI ======================
-        def fraksi_bei(harga):
-            """Membulatkan harga ke kelipatan fraksi sesuai aturan BEI."""
-            if harga < 200:
-                fraksi = 1
-            elif harga < 500:
-                fraksi = 2
-            elif harga < 2000:
-                fraksi = 5
-            elif harga < 5000:
-                fraksi = 10
-            else:
-                fraksi = 25
-            return round(harga / fraksi) * fraksi
 
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
@@ -64,6 +50,21 @@ WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
 AI_SIGNAL_CAP = 0.30
 MC_PESSIMISM  = 0.82
+
+# ====================== FRAKSI HARGA BEI ======================
+def fraksi_bei(harga):
+    """Membulatkan harga ke kelipatan fraksi sesuai aturan BEI."""
+    if harga < 200:
+        fraksi = 1
+    elif harga < 500:
+        fraksi = 2
+    elif harga < 2000:
+        fraksi = 5
+    elif harga < 5000:
+        fraksi = 10
+    else:
+        fraksi = 25
+    return round(harga / fraksi) * fraksi
 
 # ====================== GOOGLE SHEETS FUNCTIONS ======================
 def get_gsheet():
@@ -1267,8 +1268,8 @@ if run_btn:
     est_besok_f = fraksi_bei(est_besok)
     low_est_f = fraksi_bei(low_est)
     up_est_f = fraksi_bei(up_est)
-    col2.metric(estimasi_label, f"Rp {est_besok:,.0f}".replace(",","."),
-                f"50% range: Rp {low_est:,.0f} - {up_est:,.0f}".replace(",","."))
+    col2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."),
+                f"50% range: Rp {low_est_f:,.0f} - {up_est_f:,.0f}".replace(",","."))
     col3.metric(prob_label, f"{prob_bull:.1f}%")
 
     if PLOTLY_AVAILABLE:
@@ -1413,7 +1414,7 @@ if run_btn:
         st.write(f"Kondisi {breakout_label}: **{breakout}**"); st.divider()
         st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest" + (" (Intraday)" if is_daytrade else " (6 Bulan)"))
         t1,t2,t3,t4,t5=st.columns(5)
-        t1.metric("Sinyal",signal); t2.metric(estimasi_label, f"Rp {est_besok:,.0f}".replace(",","."))
+        t1.metric("Sinyal",signal); t2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."))
         entry_low_f = fraksi_bei(entry_low)
         entry_high_f = fraksi_bei(entry_high)
         entry_zone_f = f"Rp {entry_low_f:,.0f} - {entry_high_f:,.0f}"
@@ -1436,7 +1437,7 @@ if run_btn:
         st.divider()
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
-        
+
     # ══════════════════════════════════════════════════════════
     # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
     # ══════════════════════════════════════════════════════════
@@ -1843,4 +1844,4 @@ if ai_riwayat_btn:
             elif hasil:
                 hasil_bersih = bersihkan_teks_ai(hasil)
                 st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{hasil_bersih}</p></div>', unsafe_allow_html=True)
-        
+            
