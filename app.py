@@ -1281,8 +1281,8 @@ if run_btn:
         buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
         fig.add_trace(go.Scatter(x=buy_signals.index, y=buy_signals['Close'], mode='markers',
                                  marker=dict(symbol='triangle-up', size=10, color='#10b981'), name='Buy Signal'))
-     for lvl, lbl, clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
-        fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
+        for lvl, lbl, clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
+            fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
         fig.update_layout(
         title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
         template="plotly_dark",
