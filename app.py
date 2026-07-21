@@ -1793,7 +1793,7 @@ else:
                     height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
                     dragmode='hover', 
-                    hoverdistance=5
+                    hoverdistance=5,
                     xaxis=dict(
                         title=None,
                         showgrid=False,
@@ -1853,7 +1853,7 @@ else:
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
                     dragmode='hover', 
-                    hoverdistance=5
+                    hoverdistance=5,
                 )
                 st.plotly_chart(fig, use_container_width=True, config={
                 'scrollZoom': False,
