@@ -264,6 +264,7 @@ def muat_riwayat_dari_sheets():
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
+
 def muat_riwayat_actual():
     """Mengembalikan dict { (waktu, saham): {Actual_High, Actual_Low, Actual_Close, Outcome} }"""
     data = {}
@@ -308,8 +309,50 @@ def simpan_riwayat_actual(waktu, saham, actual_data):
             sheet.append_row(new_row, value_input_option='RAW')
         # Refresh session state
         st.session_state.riwayat_actual = muat_riwayat_actual()
+        # === INTEGRASI KE V12 ENGINE ===
+        integrate_actual_to_v12(waktu, saham, actual_data)
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
+
+def integrate_actual_to_v12(waktu, saham, actual_data):
+    """Mengintegrasikan catatan actual ke V12 adaptive engine."""
+    try:
+        ticker = saham
+        last_pred = load_v12_predictions(ticker)
+        if not last_pred:
+            return  # Tidak ada prediksi sebelumnya, tidak bisa dibandingkan
+
+        factor_signals = {}
+        for k in FACTOR_KEYS:
+            key = f'sig_{k}'
+            if key in last_pred:
+                factor_signals[k] = float(last_pred[key])
+
+        # Konversi outcome ke actual_return (-1..1)
+        outcome = actual_data.get('Outcome', '')
+        if outcome == 'Win':
+            actual_return = 1.0
+        elif outcome == 'Loss':
+            actual_return = -1.0
+        else:
+            actual_return = 0.0
+
+        # Jika ada Actual_Close, hitung return lebih presisi
+        if actual_data.get('Actual_Close'):
+            try:
+                actual_close = float(actual_data['Actual_Close'])
+                last_close = float(last_pred['close_price'])
+                if last_close > 0:
+                    actual_return = (actual_close - last_close) / last_close
+                    actual_return = max(-1.0, min(1.0, actual_return))
+            except:
+                pass
+
+        update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
+
+    except Exception as e:
+        st.error(f"Gagal integrasi V12: {e}")
+
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
@@ -1742,3 +1785,4 @@ if ai_riwayat_btn:
             elif hasil:
                 hasil_bersih = bersihkan_teks_ai(hasil)
                 st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{hasil_bersih}</p></div>', unsafe_allow_html=True)
+        
