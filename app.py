@@ -1283,7 +1283,7 @@ if run_btn:
                                  marker=dict(symbol='triangle-up', size=10, color='#10b981'), name='Buy Signal'))
         for lvl,lbl,clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
             fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
-        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10), dragmode='pan')
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10), dragmode='hover', hoverdistance=5)
         st.plotly_chart(fig, use_container_width=True, config={
         'scrollZoom': False,
         'displayModeBar': False
@@ -1792,7 +1792,8 @@ else:
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
-                    dragmode='pan',
+                    dragmode='hover', 
+                    hoverdistance=5
                     xaxis=dict(
                         title=None,
                         showgrid=False,
@@ -1851,7 +1852,8 @@ else:
                     template="plotly_dark",
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
-                    dragmode='pan'          # ← agar grafik bisa digeser
+                    dragmode='hover', 
+                    hoverdistance=5
                 )
                 st.plotly_chart(fig, use_container_width=True, config={
                 'scrollZoom': False,
