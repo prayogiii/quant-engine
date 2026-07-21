@@ -1779,7 +1779,7 @@ else:
                 fig.update_yaxes(range=[y_min, y_max])
 
                 chart_title = {
-                    "1d": "IHSG Hari Ini (Intraday)",
+                    "1d": "IHSG Hari Ini",
                     "5d": "IHSG 5 Hari Terakhir",
                     "1mo": "IHSG 1 Bulan Terakhir"
                 }.get(periode_pilihan, "IHSG")
