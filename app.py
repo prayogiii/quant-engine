@@ -1281,47 +1281,11 @@ if run_btn:
         buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
         fig.add_trace(go.Scatter(x=buy_signals.index, y=buy_signals['Close'], mode='markers',
                                  marker=dict(symbol='triangle-up', size=10, color='#10b981'), name='Buy Signal'))
-        for lvl, lbl, clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
+        for lvl,lbl,clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
             fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
-        fig.update_layout(
-        title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
-        template="plotly_dark",
-        height=400,
-        margin=dict(l=10, r=20, t=40, b=10),
-        dragmode=False,                    # grafik diam
-        hovermode='x unified',
-        hoverdistance=5,
-        xaxis=dict(
-            title=None,
-            showgrid=False,
-            zeroline=False,
-            showline=True,
-            linecolor='rgba(128,128,128,0.2)',
-            ticks='outside',
-            tickfont=dict(size=10),
-            showspikes=True,
-            spikemode='across',
-            spikethickness=1,
-            spikecolor='rgba(255,255,255,0.3)'
-        ),
-        yaxis=dict(
-            title=None,
-            showgrid=True,
-            gridcolor='rgba(128,128,128,0.1)',
-            zeroline=False,
-            showline=False,
-            side='right',
-            tickfont=dict(size=10)
-        ),
-        hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
-        paper_bgcolor='#0f1116',
-        plot_bgcolor='#0f1116',
-        showlegend=False
-    )
-    st.plotly_chart(fig, use_container_width=True, config={
-        'scrollZoom': False,
-        'displayModeBar': False
-    })
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10), dragmode='pan')
+        st.plotly_chart(fig, use_container_width=True)
+
     # --- RINGKASAN EKSEKUTIF ---
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
     if rrr < 1.0 and ("BUY" in signal):
@@ -1821,26 +1785,39 @@ else:
                 }.get(periode_pilihan, "IHSG")
 
                 fig.update_layout(
-                title="IHSG (Data Terbatas)",
-                template="plotly_dark",
-                height=350,
-                margin=dict(l=10, r=10, t=30, b=10),
-                dragmode=False,
-                hovermode='x unified',
-                hoverdistance=5,
-                xaxis=dict(
-                    showspikes=True,
-                    spikemode='across',
-                    spikethickness=1,
-                    spikecolor='rgba(255,255,255,0.3)'
-                ),
-            )
-            st.plotly_chart(fig, use_container_width=True, config={
-                'scrollZoom': False,
-                'displayModeBar': False
-            })
-            if interval_terpakai != "1m" and periode_pilihan == "1d":
-                st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
+                    title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
+                    template="plotly_dark",
+                    height=400,
+                    margin=dict(l=10, r=20, t=40, b=10),
+                    dragmode='pan',
+                    xaxis=dict(
+                        title=None,
+                        showgrid=False,
+                        zeroline=False,
+                        showline=True,
+                        linecolor='rgba(128,128,128,0.2)',
+                        ticks='outside',
+                        tickfont=dict(size=10)
+                    ),
+                    yaxis=dict(
+                        title=None,
+                        showgrid=True,
+                        gridcolor='rgba(128,128,128,0.1)',
+                        zeroline=False,
+                        showline=False,
+                        side='right',
+                        tickfont=dict(size=10)
+                    ),
+                    hovermode='x unified',
+                    hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
+                    paper_bgcolor='#0f1116',
+                    plot_bgcolor='#0f1116',
+                    showlegend=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                if interval_terpakai != "1m" and periode_pilihan == "1d":
+                    st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
             else:
                 st.line_chart(df_ihsg_preview['Close'])
                 
@@ -1868,13 +1845,9 @@ else:
                     template="plotly_dark",
                     height=350,
                     margin=dict(l=10, r=10, t=30, b=10),
-                    dragmode='hover', 
-                    hoverdistance=5,
+                    dragmode='pan'          # ← agar grafik bisa digeser
                 )
-                st.plotly_chart(fig, use_container_width=True, config={
-                'scrollZoom': False,
-                'displayModeBar': False
-            })
+                st.plotly_chart(fig, use_container_width=True)
             else:
                 st.line_chart(df_ihsg_preview['Close'])
         else:
@@ -1893,4 +1866,4 @@ if ai_riwayat_btn:
             elif hasil:
                 hasil_bersih = bersihkan_teks_ai(hasil)
                 st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{hasil_bersih}</p></div>', unsafe_allow_html=True)
-            
+                
