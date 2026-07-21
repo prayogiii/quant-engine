@@ -1788,7 +1788,7 @@ else:
                     title=dict(text=chart_title, x=0.5, font=dict(size=14, color='#e0e0e0')),
                     template="plotly_dark",
                     height=400,
-                    margin=dict(l=10, r=20, t=40, b=10),
+                    margin=dict(l=10, r=20, t=60, b=10),
                     dragmode='pan',
                     xaxis=dict(
                         title=None,
