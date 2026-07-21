@@ -1322,7 +1322,20 @@ if run_btn:
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
             def clean_val(v,f="{:.2f}"): return "N/A" if v is None else f.format(v)
-            table_html=f"<table class='fundamental-table'><tr><td>Market Cap</td><td>{clean_val(mc,'{:,.0f} IDR')}</td></tr><tr><td>PER</td><td>{clean_val(per,'{:.2f}x')}</td></tr><tr><td>PBV</td><td>{clean_val(pbv,'{:.2f}x')}</td></tr><tr><td>ROE</td><td>{clean_val(roe*100 if roe else None,'{:.1f}%')}</td></tr><tr><td>D/E</td><td>{clean_val(de,'{:.2f}%')}</td></tr></table>"
+            # Fungsi bantu untuk menyingkat angka
+            def singkat_angka(n):
+                if n is None:
+                    return "N/A"
+                n = float(n)
+                if n >= 1e12:
+                    return f"{n/1e12:,.1f} T"
+                elif n >= 1e9:
+                    return f"{n/1e9:,.0f} M"
+                else:
+                    return f"{n:,.0f}"
+            
+            mc_short = singkat_angka(mc)
+            table_html=f"<table class='fundamental-table'><tr><td>Market Cap</td><td>{mc_short} IDR</td></tr>...
             st.markdown(table_html,unsafe_allow_html=True)
             interpretation_items=[]
             if mc:
