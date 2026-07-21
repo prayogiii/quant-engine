@@ -1818,7 +1818,7 @@ else:
                     fig,
                     use_container_width=True,
                     config={
-                        'modeBarButtonSize': 8,   # perkecil tombol (default 12)
+                        'modeBarButtonSize': 4,   # perkecil tombol (default 12)
                         'displaylogo': False      # opsional: hilangkan logo Plotly
                     }
                 )
