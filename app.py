@@ -1284,7 +1284,10 @@ if run_btn:
         for lvl,lbl,clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
             fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10), dragmode='pan')
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config={
+        'scrollZoom': False,
+        'displayModeBar': False
+    })
 
     # --- RINGKASAN EKSEKUTIF ---
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
@@ -1814,7 +1817,10 @@ else:
                     plot_bgcolor='#0f1116',
                     showlegend=False
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, config={
+                'scrollZoom': False,
+                'displayModeBar': False
+            })
 
                 if interval_terpakai != "1m" and periode_pilihan == "1d":
                     st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
@@ -1847,7 +1853,10 @@ else:
                     margin=dict(l=10, r=10, t=30, b=10),
                     dragmode='pan'          # ← agar grafik bisa digeser
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, config={
+                'scrollZoom': False,
+                'displayModeBar': False
+            })
             else:
                 st.line_chart(df_ihsg_preview['Close'])
         else:
