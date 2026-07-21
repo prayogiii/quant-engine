@@ -264,7 +264,7 @@ def muat_riwayat_dari_sheets():
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
-    def muat_riwayat_actual():
+def muat_riwayat_actual():
     """Mengembalikan dict { (waktu, saham): {Actual_High, Actual_Low, Actual_Close, Outcome} }"""
     data = {}
     try:
