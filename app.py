@@ -588,7 +588,100 @@ with st.sidebar:
     else: st.caption("Tidak ada libur dalam 2 minggu.")
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
+    # ==================== FUNGSI DATA & INDIKATOR ====================
+@st.cache_data(ttl=3600)
+def load_stock_data(ticker, period="2y", interval="1d"):
+    df = yf.download(ticker, period=period, interval=interval)
+    if df.empty: return pd.DataFrame()
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    return df
 
+@st.cache_data(ttl=3600)
+def load_ihsg_data(period="2y", interval="1d"):
+    df = yf.download("^JKSE", period=period, interval=interval)
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    return df
+
+def compute_adx_series(df, period=14):
+    high, low, close = df['High'], df['Low'], df['Close']
+    up = high.diff(); down = -low.diff()
+    plus_dm = np.where((up>down)&(up>0), up, 0.0)
+    minus_dm = np.where((down>up)&(down>0), down, 0.0)
+    plus_dm = pd.Series(plus_dm, index=df.index)
+    minus_dm = pd.Series(minus_dm, index=df.index)
+    tr = pd.concat([high-low, (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1/period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
+    dx = (abs(plus_di-minus_di)/(plus_di+minus_di))*100
+    return dx.ewm(alpha=1/period, adjust=False).mean()
+
+def get_google_news_rss(query_str, num=5):
+    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
+    try:
+        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
+        feed = feedparser.parse(url)
+        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
+        return news, None
+    except Exception as e: return [], str(e)
+
+def get_yahoo_search_news(query_str, num=5):
+    try:
+        items = yf.Search(query_str).news or []
+        news = []
+        for item in items[:num]:
+            inner = item.get('content') or item
+            title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
+            summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
+            if title: news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
+        return news, None
+    except: return [], "Yahoo Search gagal"
+
+def filter_relevant(news_list, ticker):
+    keywords = [ticker.lower(),'saham','ihsg','bei','idx']
+    filtered = [n for n in news_list if any(k in (n['title']+n['summary']).lower() for k in keywords)]
+    return filtered if filtered else news_list
+
+def analyze_sentiment_weighted(news_items, translator):
+    if not SENTIMENT_AVAILABLE or not news_items: return 0.0
+    analyzer = SentimentIntensityAnalyzer()
+    total_w, w_sum = 0, 0
+    for i, item in enumerate(news_items):
+        text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
+        if any(ord(c)>127 for c in text) and translator:
+            try: text = translator.translate(text)
+            except: pass
+        score = analyzer.polarity_scores(text)['compound']
+        weight = 1/(i+1)
+        w_sum += score*weight; total_w += weight
+    return w_sum/total_w if total_w>0 else 0.0
+
+def estimate_theta_ou(close_series):
+    log_price = np.log(close_series.dropna())
+    log_lag = log_price.shift(1).dropna()
+    diff = log_price.diff().dropna()
+    common_idx = diff.index.intersection(log_lag.index)
+    if len(common_idx)<20: return 0.05
+    y = diff.loc[common_idx].values
+    X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
+    coeff = np.linalg.lstsq(X, y, rcond=None)[0]
+    theta = -coeff[1] if coeff[1]<0 else 0.05
+    return theta
+
+REGIME_INFO = {
+    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi.",
+    "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
+    "Panic Sell 🚨": "Penurunan tajam, sering oversold.",
+    "Bearish 🔻": "Tren turun terkendali.",
+    "Early Recovery 🔄": "Harga di atas EMA20 tapi EMA20 < EMA50.",
+    "Distribution 📉": "Harga di bawah EMA20, EMA20 > EMA50.",
+    "Konsolidasi Tren ↔️": "Trending namun harga bolak-balik di EMA.",
+    "Bullish Accumulation 🏗️": "Sideways dengan harga > EMA.",
+    "Bearish Accumulation 🧊": "Sideways di bawah EMA.",
+    "Sideways Bias Naik ↗️": "Sideways cenderung naik.",
+    "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
+    "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
+}
 # ==================== PROSES ANALISIS ====================
 if run_btn:
     if not ticker_input:
