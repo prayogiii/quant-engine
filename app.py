@@ -1422,7 +1422,20 @@ if run_btn:
         st.divider()
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
-
+        # ====================== FRAKSI HARGA BEI ======================
+        def fraksi_bei(harga):
+            """Membulatkan harga ke kelipatan fraksi sesuai aturan BEI."""
+            if harga < 200:
+                fraksi = 1
+            elif harga < 500:
+                fraksi = 2
+            elif harga < 2000:
+                fraksi = 5
+            elif harga < 5000:
+                fraksi = 10
+            else:
+                fraksi = 25
+            return round(harga / fraksi) * fraksi
     # ══════════════════════════════════════════════════════════
     # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
     # ══════════════════════════════════════════════════════════
