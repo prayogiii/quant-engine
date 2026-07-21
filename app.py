@@ -435,99 +435,99 @@ with st.sidebar:
     st.markdown("---")
 
     # ---------- RIWAYAT ANALISIS (dengan Search & Paginasi) ----------
-st.subheader("📜 Riwayat Analisis")
+    st.subheader("📜 Riwayat Analisis")
 
-# Inisialisasi state paginasi & pencarian
-if "riwayat_page" not in st.session_state:
-    st.session_state.riwayat_page = 0
-if "prev_search" not in st.session_state:
-    st.session_state.prev_search = ""
+    # Inisialisasi state paginasi & pencarian
+    if "riwayat_page" not in st.session_state:
+        st.session_state.riwayat_page = 0
+    if "prev_search" not in st.session_state:
+        st.session_state.prev_search = ""
 
-# Search bar
-search_query = st.text_input("🔎 Cari Saham", key="search_riwayat", placeholder="Ketik kode saham...")
+    # Search bar
+    search_query = st.text_input("🔎 Cari Saham", key="search_riwayat", placeholder="Ketik kode saham...")
 
-# Reset halaman jika query berubah
-if search_query != st.session_state.prev_search:
-    st.session_state.riwayat_page = 0
-    st.session_state.prev_search = search_query
+    # Reset halaman jika query berubah
+    if search_query != st.session_state.prev_search:
+        st.session_state.riwayat_page = 0
+        st.session_state.prev_search = search_query
 
-# Filter data
-riwayat_data = st.session_state.riwayat if st.session_state.riwayat else []
-if search_query:
-    riwayat_data = [r for r in riwayat_data if search_query.lower() in r.get('Saham', '').lower()]
-
-items_per_page = 10
-total_items = len(riwayat_data)
-total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
-
-# Navigasi halaman (hanya tampil jika lebih dari 1 halaman)
-if total_pages > 1:
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("◀ Sebelumnya", disabled=(st.session_state.riwayat_page == 0),
-                     key="prev_page"):
-            st.session_state.riwayat_page = max(0, st.session_state.riwayat_page - 1)
-    with col2:
-        st.markdown(f"<div style='text-align:center; color:#8892b0;'>Hal. {st.session_state.riwayat_page + 1} / {total_pages}</div>", unsafe_allow_html=True)
-    with col3:
-        if st.button("Selanjutnya ▶", disabled=(st.session_state.riwayat_page >= total_pages - 1),
-                     key="next_page"):
-            st.session_state.riwayat_page = min(total_pages - 1, st.session_state.riwayat_page + 1)
-
-# Ambil data sesuai halaman
-start_idx = st.session_state.riwayat_page * items_per_page
-end_idx = start_idx + items_per_page
-display_riwayat = riwayat_data[start_idx:end_idx]
-
-if display_riwayat:
-    for r in display_riwayat:
-        # === Kode expander yang SAMA PERSIS dengan sebelumnya ===
-        sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else ("⚡" if "BUY" in r.get('Sinyal','') else ("⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
-        conf_str = r.get('Confidence', '0%')
-        try: conf_val = float(conf_str.replace('%',''))
-        except: conf_val = 0
-        conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
-        est_ret_str = r.get('Est_Return', '0%')
-        try: est_ret = float(est_ret_str.replace('%','').replace(',',''))
-        except: est_ret = 0
-        ret_color = "🟢" if est_ret > 1 else ("🟡" if est_ret > 0 else "🔴")
-        gaya = r.get('Gaya','?')
-        gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
-        expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
-        with st.expander(expander_title):
-            st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
-            st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
-            st.divider()
-            c1, c2 = st.columns(2)
-            c1.metric("Coppock", r.get('Coppock','?'))
-            c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
-            c1, c2 = st.columns(2)
-            tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
-            sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
-            with c1:
-                st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div></div>""", unsafe_allow_html=True)
-            with c2:
-                st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div></div>""", unsafe_allow_html=True)
-            st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-            ind1, ind2, ind3, ind4 = st.columns(4)
-            ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
-            ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
-            ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
-            ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
-            b1, b2 = st.columns(2)
-            b1.metric("Beta", r.get('Beta','?'))
-            b2.metric("Momentum (5D)", r.get('Momentum','?'))
-            st.caption(f"Regime: **{r.get('Rezim','?')}**")
-            ai = r.get("AI_Insight", "").strip()
-            if ai: st.caption(f"💡 {ai[:150]}")
-    # Informasi jumlah tampilan
-    st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
-              (f" (hasil pencarian '{search_query}')" if search_query else ""))
-else:
+    # Filter data
+    riwayat_data = st.session_state.riwayat if st.session_state.riwayat else []
     if search_query:
-        st.caption(f"❌ Tidak ada riwayat yang cocok dengan '{search_query}'.")
+        riwayat_data = [r for r in riwayat_data if search_query.lower() in r.get('Saham', '').lower()]
+
+    items_per_page = 10
+    total_items = len(riwayat_data)
+    total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+
+    # Navigasi halaman (hanya tampil jika lebih dari 1 halaman)
+    if total_pages > 1:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col1:
+            if st.button("◀ Sebelumnya", disabled=(st.session_state.riwayat_page == 0),
+                         key="prev_page"):
+                st.session_state.riwayat_page = max(0, st.session_state.riwayat_page - 1)
+        with col2:
+            st.markdown(f"<div style='text-align:center; color:#8892b0;'>Hal. {st.session_state.riwayat_page + 1} / {total_pages}</div>", unsafe_allow_html=True)
+        with col3:
+            if st.button("Selanjutnya ▶", disabled=(st.session_state.riwayat_page >= total_pages - 1),
+                         key="next_page"):
+                st.session_state.riwayat_page = min(total_pages - 1, st.session_state.riwayat_page + 1)
+
+    # Ambil data sesuai halaman
+    start_idx = st.session_state.riwayat_page * items_per_page
+    end_idx = start_idx + items_per_page
+    display_riwayat = riwayat_data[start_idx:end_idx]
+
+    if display_riwayat:
+        for r in display_riwayat:
+            # === Kode expander yang SAMA PERSIS dengan sebelumnya ===
+            sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else ("⚡" if "BUY" in r.get('Sinyal','') else ("⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
+            conf_str = r.get('Confidence', '0%')
+            try: conf_val = float(conf_str.replace('%',''))
+            except: conf_val = 0
+            conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
+            est_ret_str = r.get('Est_Return', '0%')
+            try: est_ret = float(est_ret_str.replace('%','').replace(',',''))
+            except: est_ret = 0
+            ret_color = "🟢" if est_ret > 1 else ("🟡" if est_ret > 0 else "🔴")
+            gaya = r.get('Gaya','?')
+            gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
+            expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
+            with st.expander(expander_title):
+                st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
+                st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
+                st.divider()
+                c1, c2 = st.columns(2)
+                c1.metric("Coppock", r.get('Coppock','?'))
+                c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
+                c1, c2 = st.columns(2)
+                tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
+                sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
+                with c1:
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div></div>""", unsafe_allow_html=True)
+                with c2:
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div></div>""", unsafe_allow_html=True)
+                st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
+                ind1, ind2, ind3, ind4 = st.columns(4)
+                ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
+                ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
+                ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
+                ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
+                b1, b2 = st.columns(2)
+                b1.metric("Beta", r.get('Beta','?'))
+                b2.metric("Momentum (5D)", r.get('Momentum','?'))
+                st.caption(f"Regime: **{r.get('Rezim','?')}**")
+                ai = r.get("AI_Insight", "").strip()
+                if ai: st.caption(f"💡 {ai[:150]}")
+        # Informasi jumlah tampilan
+        st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
+                  (f" (hasil pencarian '{search_query}')" if search_query else ""))
     else:
-        st.caption("Belum ada riwayat.")
+        if search_query:
+            st.caption(f"❌ Tidak ada riwayat yang cocok dengan '{search_query}'.")
+        else:
+            st.caption("Belum ada riwayat.")
 
     st.markdown("---")
     st.subheader("🧠 AI (Gemini)")
@@ -588,101 +588,6 @@ else:
     else: st.caption("Tidak ada libur dalam 2 minggu.")
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
-
-# ==================== FUNGSI DATA & INDIKATOR ====================
-@st.cache_data(ttl=3600)
-def load_stock_data(ticker, period="2y", interval="1d"):
-    df = yf.download(ticker, period=period, interval=interval)
-    if df.empty: return pd.DataFrame()
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-    return df
-
-@st.cache_data(ttl=3600)
-def load_ihsg_data(period="2y", interval="1d"):
-    df = yf.download("^JKSE", period=period, interval=interval)
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
-    return df
-
-def compute_adx_series(df, period=14):
-    high, low, close = df['High'], df['Low'], df['Close']
-    up = high.diff(); down = -low.diff()
-    plus_dm = np.where((up>down)&(up>0), up, 0.0)
-    minus_dm = np.where((down>up)&(down>0), down, 0.0)
-    plus_dm = pd.Series(plus_dm, index=df.index)
-    minus_dm = pd.Series(minus_dm, index=df.index)
-    tr = pd.concat([high-low, (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1)
-    atr = tr.ewm(alpha=1/period, adjust=False).mean()
-    plus_di = 100 * (plus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    minus_di = 100 * (minus_dm.ewm(alpha=1/period, adjust=False).mean() / atr)
-    dx = (abs(plus_di-minus_di)/(plus_di+minus_di))*100
-    return dx.ewm(alpha=1/period, adjust=False).mean()
-
-def get_google_news_rss(query_str, num=5):
-    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
-    try:
-        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
-        feed = feedparser.parse(url)
-        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
-        return news, None
-    except Exception as e: return [], str(e)
-
-def get_yahoo_search_news(query_str, num=5):
-    try:
-        items = yf.Search(query_str).news or []
-        news = []
-        for item in items[:num]:
-            inner = item.get('content') or item
-            title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
-            summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
-            if title: news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
-        return news, None
-    except: return [], "Yahoo Search gagal"
-
-def filter_relevant(news_list, ticker):
-    keywords = [ticker.lower(),'saham','ihsg','bei','idx']
-    filtered = [n for n in news_list if any(k in (n['title']+n['summary']).lower() for k in keywords)]
-    return filtered if filtered else news_list
-
-def analyze_sentiment_weighted(news_items, translator):
-    if not SENTIMENT_AVAILABLE or not news_items: return 0.0
-    analyzer = SentimentIntensityAnalyzer()
-    total_w, w_sum = 0, 0
-    for i, item in enumerate(news_items):
-        text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
-        if any(ord(c)>127 for c in text) and translator:
-            try: text = translator.translate(text)
-            except: pass
-        score = analyzer.polarity_scores(text)['compound']
-        weight = 1/(i+1)
-        w_sum += score*weight; total_w += weight
-    return w_sum/total_w if total_w>0 else 0.0
-
-def estimate_theta_ou(close_series):
-    log_price = np.log(close_series.dropna())
-    log_lag = log_price.shift(1).dropna()
-    diff = log_price.diff().dropna()
-    common_idx = diff.index.intersection(log_lag.index)
-    if len(common_idx)<20: return 0.05
-    y = diff.loc[common_idx].values
-    X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
-    coeff = np.linalg.lstsq(X, y, rcond=None)[0]
-    theta = -coeff[1] if coeff[1]<0 else 0.05
-    return theta
-
-REGIME_INFO = {
-    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi.",
-    "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
-    "Panic Sell 🚨": "Penurunan tajam, sering oversold.",
-    "Bearish 🔻": "Tren turun terkendali.",
-    "Early Recovery 🔄": "Harga di atas EMA20 tapi EMA20 < EMA50.",
-    "Distribution 📉": "Harga di bawah EMA20, EMA20 > EMA50.",
-    "Konsolidasi Tren ↔️": "Trending namun harga bolak-balik di EMA.",
-    "Bullish Accumulation 🏗️": "Sideways dengan harga > EMA.",
-    "Bearish Accumulation 🧊": "Sideways di bawah EMA.",
-    "Sideways Bias Naik ↗️": "Sideways cenderung naik.",
-    "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
-    "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
-}
 
 # ==================== PROSES ANALISIS ====================
 if run_btn:
