@@ -1321,8 +1321,11 @@ if run_btn:
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
-            def clean_val(v,f="{:.2f}"): return "N/A" if v is None else f.format(v)
-            # Fungsi bantu untuk menyingkat angka
+  # --- Penyusunan ulang tabel fundamental dengan Market Cap yang sudah disingkat ---
+            def clean_val(v, f="{:.2f}"):
+                return "N/A" if v is None else f.format(v)
+
+            # Fungsi singkat angka untuk Market Cap
             def singkat_angka(n):
                 if n is None:
                     return "N/A"
@@ -1333,10 +1336,18 @@ if run_btn:
                     return f"{n/1e9:,.0f} M"
                 else:
                     return f"{n:,.0f}"
-            
+
             mc_short = singkat_angka(mc)
-            table_html=f"<table class='fundamental-table'><tr><td>Market Cap</td><td>{mc_short} IDR</td></tr>...
-            st.markdown(table_html,unsafe_allow_html=True)
+            table_html = (
+                f"<table class='fundamental-table'>"
+                f"<tr><td>Market Cap</td><td>{mc_short} IDR</td></tr>"
+                f"<tr><td>PER</td><td>{clean_val(per, '{:.2f}x')}</td></tr>"
+                f"<tr><td>PBV</td><td>{clean_val(pbv, '{:.2f}x')}</td></tr>"
+                f"<tr><td>ROE</td><td>{clean_val(roe*100 if roe else None, '{:.1f}%')}</td></tr>"
+                f"<tr><td>D/E</td><td>{clean_val(de, '{:.2f}%')}</td></tr>"
+                f"</table>"
+            )
+            st.markdown(table_html, unsafe_allow_html=True)
             interpretation_items=[]
             if mc:
                 if mc>=1e13: mct=f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
