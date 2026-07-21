@@ -1283,7 +1283,7 @@ if run_btn:
                                  marker=dict(symbol='triangle-up', size=10, color='#10b981'), name='Buy Signal'))
         for lvl,lbl,clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
             fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
-        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10))
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10), dragmode='pan')
         st.plotly_chart(fig, use_container_width=True)
 
     # --- RINGKASAN EKSEKUTIF ---
@@ -1789,6 +1789,7 @@ else:
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
+                    dragmode='pan',
                     xaxis=dict(
                         title=None,
                         showgrid=False,
@@ -1820,7 +1821,7 @@ else:
             else:
                 st.line_chart(df_ihsg_preview['Close'])
 
-        elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
+                elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             if prev_close:
                 ihsg_change = (ihsg_close - prev_close) / prev_close * 100
@@ -1828,6 +1829,27 @@ else:
             else:
                 st.metric("IHSG", f"{ihsg_close:,.0f}")
             st.warning("Data IHSG hanya tersedia 1 titik (kemungkinan di luar jam bursa). Grafik tidak dapat ditampilkan.")
+            # --- Tambahan: grafik dengan dragmode='pan' ---
+            if PLOTLY_AVAILABLE:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df_ihsg_preview.index,
+                    y=df_ihsg_preview['Close'],
+                    mode='lines+markers',
+                    marker=dict(color='#f59e0b', size=8),
+                    line=dict(color='#f59e0b', width=2),
+                    name='IHSG'
+                ))
+                fig.update_layout(
+                    title="IHSG (Data Terbatas)",
+                    template="plotly_dark",
+                    height=350,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    dragmode='pan'          # ← agar grafik bisa digeser
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.line_chart(df_ihsg_preview['Close'])
         else:
             st.warning("Data IHSG tidak tersedia untuk periode yang dipilih.")
     except Exception as e:
