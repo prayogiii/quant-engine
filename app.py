@@ -1814,7 +1814,14 @@ else:
                     plot_bgcolor='#0f1116',
                     showlegend=False
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                    config={
+                        'modeBarButtonSize': 8,   # perkecil tombol (default 12)
+                        'displaylogo': False      # opsional: hilangkan logo Plotly
+                    }
+                )
 
                 if interval_terpakai != "1m" and periode_pilihan == "1d":
                     st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
