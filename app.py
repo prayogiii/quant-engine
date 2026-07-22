@@ -1077,6 +1077,51 @@ if run_btn:
                 f"</table>"
             )
             st.markdown(table_html, unsafe_allow_html=True)
+                        interpretation_items = []
+            if mc:
+                if mc >= 1e13: mct = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
+                elif mc >= 1e12: mct = f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
+                elif mc >= 1e10: mct = f"Market Cap Rp {mc:,.0f} tergolong menengah (Mid Cap)."
+                else: mct = f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
+            else: mct = "Market Cap tidak tersedia."
+            interpretation_items.append(f"<li><b>Market Cap:</b> {mct}</li>")
+
+            if per:
+                if per < 10: pt = f"PER {per:.2f}x tergolong rendah (potensi undervalue)."
+                elif per < 20: pt = f"PER {per:.2f}x moderat."
+                else: pt = f"PER {per:.2f}x tergolong tinggi (premium)."
+            else: pt = "PER tidak tersedia."
+            interpretation_items.append(f"<li><b>PER:</b> {pt}</li>")
+
+            if pbv:
+                if pbv < 1: pbt = f"PBV {pbv:.2f}x di bawah 1 (di bawah nilai buku, bisa undervalue)."
+                elif pbv < 3: pbt = f"PBV {pbv:.2f}x moderat."
+                else: pbt = f"PBV {pbv:.2f}x tinggi (premium)."
+            else: pbt = "PBV tidak tersedia."
+            interpretation_items.append(f"<li><b>PBV:</b> {pbt}</li>")
+
+            if roe:
+                roep = roe * 100
+                if roep > 20: rt = f"ROE {roep:.1f}% sangat baik (profitabilitas tinggi)."
+                elif roep > 10: rt = f"ROE {roep:.1f}% cukup baik."
+                else: rt = f"ROE {roep:.1f}% rendah."
+            else: rt = "ROE tidak tersedia."
+            interpretation_items.append(f"<li><b>ROE:</b> {rt}</li>")
+
+            if de:
+                if de > 1: dt = f"D/E {de:.2f} tinggi (leverage tinggi, risiko lebih besar)."
+                elif de > 0.5: dt = f"D/E {de:.2f} moderat."
+                else: dt = f"D/E {de:.2f} rendah (konservatif)."
+            else: dt = "D/E tidak tersedia."
+            interpretation_items.append(f"<li><b>D/E:</b> {dt}</li>")
+
+            st.markdown(
+                f'<div style="background-color:#1e293b;border-radius:12px;padding:15px;margin-top:15px;color:#cbd5e1;font-size:14px;">'
+                f'<b style="color:#00ffcc;">📝 Interpretasi Metrik:</b>'
+                f'<ul style="margin-top:8px;padding-left:20px;">{"".join(interpretation_items)}</ul>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
         st.divider()
         st.subheader("🎯 Target Pivot & Support/Resistance"); p1,p2,p3,p4,p5=st.columns(5)
         p1.metric("R2", f"Rp {fraksi_bei(r2):,.0f}"); p2.metric("R1", f"Rp {fraksi_bei(r1):,.0f}")
