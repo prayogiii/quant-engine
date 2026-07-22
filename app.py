@@ -1305,7 +1305,7 @@ if run_btn:
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
         if st.session_state.get("gemini_api_key"):
-        with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
+           with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
             hasil_ai, error_ai = analisis_saham_dengan_ai({
                 "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
                 "Rezim": regime, "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
