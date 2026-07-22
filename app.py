@@ -1180,35 +1180,121 @@ if run_btn:
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
-    with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
-        st.info("⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** Engine secara otomatis mempelajari akurasi setiap faktor teknikal berdasarkan riwayat analisis kamu.")
+        with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
+        st.info(
+            "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
+            "Engine secara otomatis mempelajari akurasi setiap faktor teknikal berdasarkan riwayat analisis kamu. "
+            "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
+        )
+
+        # --- Coppock & Beta (hanya untuk Swing Trade) ---
         if not is_daytrade:
             st.markdown("### 📈 Coppock Curve & Beta IHSG")
-            coppock_insight = "🟢 **Turning Up**" if coppock_turning_up else ("🟢 **Rising**" if coppock_rising else "🔴 **Falling**")
-            st.metric("Coppock Curve", f"{coppock_val:.3f}", coppock_insight)
+            if coppock_turning_up:
+                coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
+            elif coppock_rising:
+                coppock_insight = "🟢 **Rising** – Tren bullish jangka panjang masih sehat. Akumulasi masih berlangsung."
+            else:
+                coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
+            
+            if beta_ihsg > 1.2:
+                beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
+            elif beta_ihsg > 0.8:
+                beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
+            else:
+                beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
+            
+            col_cop1, col_cop2 = st.columns(2)
+            with col_cop1:
+                st.metric("Coppock Curve", f"{coppock_val:.3f}",
+                          "Turning Up ✅" if coppock_turning_up else ("Rising 📈" if coppock_rising else "Falling 📉"))
+                st.caption(coppock_insight)
+            with col_cop2:
+                st.metric("Beta IHSG", f"{beta_ihsg:.2f}x", help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
+                st.caption(beta_insight)
+        else:
+            st.markdown("### 📈 Beta IHSG")
+            if beta_ihsg > 1.2:
+                beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
+            elif beta_ihsg > 0.8:
+                beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
+            else:
+                beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
+            st.metric("Beta IHSG", f"{beta_ihsg:.2f}x", help="Beta > 1 : lebih volatile dari IHSG, Beta < 1 : lebih stabil.")
+            st.caption(beta_insight)
+            st.info("ℹ️ Coppock Curve tidak ditampilkan untuk Day Trade karena kurang relevan dengan timeframe intraday.")
+
+        # --- Bobot Adaptif ---
         st.markdown("### ⚖️ Bobot Adaptif per Faktor")
+        st.caption("Bobot dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. Faktor yang sering benar mendapat bobot lebih tinggi.")
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
-        if is_daytrade: display_adaptive_w = {k:v for k,v in adaptive_w.items() if k != "Coppock"}
-        else: display_adaptive_w = adaptive_w
-        st.bar_chart(pd.DataFrame.from_dict(display_adaptive_w, orient='index', columns=['Weight']))
+
+        if is_daytrade:
+            display_adaptive_w = {k: v for k, v in adaptive_w.items() if k != "Coppock"}
+            st.caption("ℹ️ Faktor **Coppock** tidak ditampilkan untuk Day Trade, tapi tetap dihitung di background.")
+        else:
+            display_adaptive_w = adaptive_w
+
+        w_df = pd.DataFrame.from_dict(display_adaptive_w, orient='index', columns=['Weight'])
+        st.bar_chart(w_df)
+
+        if display_adaptive_w:
+            max_factor = max(display_adaptive_w, key=display_adaptive_w.get)
+            min_factor = min(display_adaptive_w, key=display_adaptive_w.get)
+            max_weight = display_adaptive_w[max_factor]
+            min_weight = display_adaptive_w[min_factor]
+
+            weight_insight = f"🔍 **Faktor paling dominan:** **{max_factor}** (bobot {max_weight:.1%}). "
+            weight_insight += f"**{min_factor}** memiliki bobot terendah ({min_weight:.1%}).\n\n"
+
+            interpretations = {
+                "Momentum": "Sinyal momentum (harga 5 hari) paling berpengaruh – pasar sedang *trend-following*. Ikuti tren yang sedang berlangsung.",
+                "AI_Senti": "Sentimen berita paling berpengaruh – pergerakan saham banyak dipicu oleh berita/isu terkini. Pantau terus sentimen.",
+                "MeanRev": "*Reversal* ke rata-rata (Z-Score) paling berpengaruh – saham cenderung kembali ke level wajar setelah jenuh beli/jual.",
+                "Beta_IHSG": "Beta IHSG paling berpengaruh – saham sangat terpengaruh oleh pergerakan pasar secara keseluruhan. Perhatikan arah IHSG.",
+                "Coppock": "Coppock Curve paling berpengaruh – sinyal jangka panjang mendominasi, tren utama sedang kuat. Ikuti sinyal makro."
+            }
+            weight_insight += interpretations.get(max_factor, "")
+            st.info(weight_insight)
+
+        # --- Status Memori ---
         st.markdown("### 🧠 Status Memori Adaptif")
+        st.caption("**Accuracy** = seberapa sering sinyal faktor sesuai arah harga. **Error EMA** = rata‑rata kesalahan prediksi (makin kecil makin baik).")
         mem = st.session_state.v12_memory.get(ticker_raw, {})
         if mem:
             keys_to_show = [k for k in FACTOR_KEYS if not (is_daytrade and k == "Coppock")]
             acc_data = {k: mem.get('accuracy',{}).get(k,0.5) for k in keys_to_show}
             err_data = {k: mem.get('error_ema',{}).get(k,1.0) for k in keys_to_show}
-            col_a,col_e = st.columns(2)
-            with col_a: st.caption("✅ Accuracy"); st.bar_chart(pd.Series(acc_data))
-            with col_e: st.caption("⚠️ Error EMA"); st.bar_chart(pd.Series(err_data))
+            col_a, col_e = st.columns(2)
+            with col_a:
+                st.caption("✅ Accuracy (higher = better)")
+                st.bar_chart(pd.Series(acc_data))
+            with col_e:
+                st.caption("⚠️ Error EMA (lower = better)")
+                st.bar_chart(pd.Series(err_data))
+
+            best_factor = max(acc_data, key=acc_data.get)
+            worst_factor = min(acc_data, key=acc_data.get)
+            mem_insight = f"🏆 **Faktor paling akurat:** **{best_factor}** (akurasi {acc_data[best_factor]:.1%}). "
+            mem_insight += f"Faktor **{worst_factor}** perlu dievaluasi (akurasi {acc_data[worst_factor]:.1%})."
+            st.caption(mem_insight)
+        else:
+            st.info("Belum ada data memori untuk ticker ini. Lakukan analisis beberapa kali agar engine mulai belajar.")
+
+        # --- Proses Self‑Learning ---
         st.markdown("### 🔁 Proses Self‑Learning")
+        st.caption("Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan.")
         last_pred = load_v12_predictions(ticker_raw)
         if last_pred:
             last_close = last_pred['close_price']
             last_signals = {k: last_pred[f'sig_{k}'] for k in FACTOR_KEYS}
-            actual_return = (harga_terakhir - float(last_close)) / float(last_close) if float(last_close)>0 else 0.0
+            actual_return = (harga_terakhir - float(last_close)) / float(last_close) if float(last_close) > 0 else 0.0
             update_v12_memory(ticker_raw, last_signals, actual_return, returns.std())
-            st.success(f"✅ Memory updated! Actual return: {actual_return*100:.2f}%")
-        else: st.info("ℹ️ Tidak ada prediksi sebelumnya.")
+            st.success(f"✅ **Memory updated!** Actual return sejak prediksi terakhir: {actual_return*100:.2f}%")
+        else:
+            st.info("ℹ️ Tidak ada prediksi sebelumnya.")
+
+        # Simpan prediksi sekarang (wajib)
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
             "AI_Senti": avg_sentiment,
@@ -1216,9 +1302,9 @@ if run_btn:
             "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
             "Coppock": coppock_val / 10.0
         }
-        norm_signals = {k: max(-1.0, min(1.0, v)) for k,v in factor_signals.items()}
+        norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
-        st.caption("📌 Prediksi hari ini telah disimpan.")
+        st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
 
     if st.session_state.get("gemini_api_key"):
         with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
