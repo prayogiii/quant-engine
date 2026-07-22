@@ -1077,7 +1077,7 @@ if run_btn:
                 f"</table>"
             )
             st.markdown(table_html, unsafe_allow_html=True)
-                        interpretation_items = []
+            interpretation_items = []
             if mc:
                 if mc >= 1e13: mct = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
                 elif mc >= 1e12: mct = f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
