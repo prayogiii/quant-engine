@@ -1193,7 +1193,7 @@ if run_btn:
             st.markdown("### 📈 Coppock Curve & Beta IHSG")
             if coppock_turning_up:
                 coppock_insight = "🟢 **Turning Up** – Sinyal awal akumulasi. Momentum bullish jangka panjang mulai terbentuk, potensi tren naik."
-            elif coppock_status == "Rising"::
+            elif coppock_status == "Rising":
                 coppock_insight = "🟢 **Rising** – Tren bullish jangka panjang masih sehat. Akumulasi masih berlangsung."
             else:
                 coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
