@@ -627,53 +627,74 @@ with st.sidebar:
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
                 ai = r.get("AI_Insight", "").strip()
                                 # ---- Fitur Catat Actual ----
-                waktu_key = r.get('Waktu','')
-                saham_key = r.get('Saham','')
-                actual_key = (waktu_key, saham_key)
-                actual_data = st.session_state.riwayat_actual.get(actual_key, None)
+waktu_key = r.get('Waktu','')
+saham_key = r.get('Saham','')
+actual_key = (waktu_key, saham_key)
+actual_data = st.session_state.riwayat_actual.get(actual_key, None)
 
-                # Tampilkan data actual jika sudah ada
-                if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
-                    st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
-                    if actual_data.get('Outcome'):
-                        warna_outcome = {
-                            'Win': '🟢',
-                            'Loss': '🔴',
-                            'Not Touched': '⚪'
-                        }.get(actual_data['Outcome'], '')
-                        st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
+# Tampilkan data actual jika sudah ada
+if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
+    st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
+    if actual_data.get('Entry_Miss') == 'Yes':
+        st.caption("⚠️ Entry Tidak Tersentuh")
+    if actual_data.get('Outcome'):
+        warna_outcome = {
+            'Win': '🟢',
+            'Loss': '🔴',
+            'Not Touched': '⚪'
+        }.get(actual_data['Outcome'], '')
+        st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
+else:
+    # Tombol untuk menampilkan form
+    btn_key = f"btn_actual_{waktu_key}_{saham_key}"
+    form_key = f"form_actual_{waktu_key}_{saham_key}"
+    show_key = f"show_form_{waktu_key}_{saham_key}"
+
+    if st.button("📝 Catat Hasil", key=btn_key):
+        st.session_state[show_key] = True
+
+    # Form input (muncul jika tombol diklik)
+    if st.session_state.get(show_key, False):
+        with st.form(key=form_key):
+            actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
+            actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
+            actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
+
+            # Checkbox entry missed (sebelum outcome)
+            entry_miss = st.checkbox(
+                "🚫 Entry Tidak Tersentuh",
+                value=False,
+                help="Centang jika harga tidak pernah menyentuh zona entry (meskipun TP/ SL tersentuh)."
+            )
+
+            # Outcome otomatis jika entry missed
+            if entry_miss:
+                outcome = "Not Touched"
+                st.info("ℹ️ Entry tidak tersentuh → outcome otomatis **Not Touched**.")
+            else:
+                outcome = st.selectbox(
+                    "Outcome",
+                    options=["", "Win", "Loss", "Not Touched"],
+                    format_func=lambda x: "Pilih Outcome" if x == "" else x
+                )
+
+            submitted = st.form_submit_button("Simpan")
+            if submitted:
+                # Validasi: jika tidak entry_miss dan outcome kosong, tolak
+                if not entry_miss and outcome == "":
+                    st.error("Pilih Outcome terlebih dahulu.")
                 else:
-                    # Tombol untuk menampilkan form
-                    btn_key = f"btn_actual_{waktu_key}_{saham_key}"
-                    form_key = f"form_actual_{waktu_key}_{saham_key}"
-                    show_key = f"show_form_{waktu_key}_{saham_key}"
-
-                    if st.button("📝 Catat Hasil", key=btn_key):
-                        st.session_state[show_key] = True
-
-                    # Form input (muncul jika tombol diklik)
-                    if st.session_state.get(show_key, False):
-                        with st.form(key=form_key):
-                            actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
-                            actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
-                            actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
-                            outcome = st.selectbox(
-                                "Outcome",
-                                options=["", "Win", "Loss",  "Not Touched"],
-                                format_func=lambda x: "Pilih Outcome" if x == "" else x
-                            )
-                            submitted = st.form_submit_button("Simpan")
-                            if submitted:
-                                data = {
-                                    'Actual_High': actual_high.strip(),
-                                    'Actual_Low': actual_low.strip(),
-                                    'Actual_Close': actual_close.strip(),
-                                    'Outcome': outcome
-                                }
-                                simpan_riwayat_actual(waktu_key, saham_key, data)
-                                st.success("Data actual tersimpan!")
-                                st.session_state[show_key] = False
-                                st.rerun()
+                    data = {
+                        'Actual_High': actual_high.strip(),
+                        'Actual_Low': actual_low.strip(),
+                        'Actual_Close': actual_close.strip(),
+                        'Outcome': outcome,
+                        'Entry_Miss': 'Yes' if entry_miss else ''
+                    }
+                    simpan_riwayat_actual(waktu_key, saham_key, data)
+                    st.success("Data actual tersimpan!")
+                    st.session_state[show_key] = False
+                    st.rerun()
                 if ai: st.caption(f"💡 {ai[:150]}")
         # Informasi jumlah tampilan
         st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
