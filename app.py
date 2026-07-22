@@ -1180,7 +1180,7 @@ if run_btn:
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
-            with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
+    with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
         st.info(
             "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
             "Engine secara otomatis mempelajari akurasi setiap faktor teknikal berdasarkan riwayat analisis kamu. "
