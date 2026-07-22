@@ -1293,7 +1293,7 @@ if run_btn:
         else:
             st.info("ℹ️ Tidak ada prediksi sebelumnya.")
 
-        # Simpan prediksi sekarang (wajib)
+        # Simpan prediksi sekarang
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
             "AI_Senti": avg_sentiment,
@@ -1304,7 +1304,7 @@ if run_btn:
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
-    if st.session_state.get("gemini_api_key"):
+        if st.session_state.get("gemini_api_key"):
         with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
             hasil_ai, error_ai = analisis_saham_dengan_ai({
                 "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
