@@ -1179,7 +1179,6 @@ if run_btn:
         st.divider()
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
-
     with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
         st.info(
             "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
@@ -1187,6 +1186,7 @@ if run_btn:
             "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
         )
 
+        # --- Coppock & Beta (hanya untuk Swing Trade) ---
         if not is_daytrade:
             st.markdown("### 📈 Coppock Curve & Beta IHSG")
             if coppock_turning_up:
@@ -1195,12 +1195,14 @@ if run_btn:
                 coppock_insight = "🟢 **Rising** – Tren bullish jangka panjang masih sehat. Akumulasi masih berlangsung."
             else:
                 coppock_insight = "🔴 **Falling** – Momentum bullish melemah. Waspadai potensi koreksi atau perubahan tren."
+            
             if beta_ihsg > 1.2:
                 beta_insight = f"⚠️ **Beta Tinggi ({beta_ihsg:.2f})** – Saham lebih volatile dari IHSG. Cocok untuk *trading agresif*, namun risikonya lebih besar saat pasar turun."
             elif beta_ihsg > 0.8:
                 beta_insight = f"✅ **Beta Moderat ({beta_ihsg:.2f})** – Pergerakan selaras dengan IHSG. Cocok untuk *swing trading*."
             else:
                 beta_insight = f"🛡️ **Beta Rendah ({beta_ihsg:.2f})** – Saham defensif, lebih stabil dari IHSG. Cocok untuk *investasi jangka panjang*."
+            
             col_cop1, col_cop2 = st.columns(2)
             with col_cop1:
                 st.metric("Coppock Curve", f"{coppock_val:.3f}",
@@ -1221,6 +1223,7 @@ if run_btn:
             st.caption(beta_insight)
             st.info("ℹ️ Coppock Curve tidak ditampilkan untuk Day Trade karena kurang relevan dengan timeframe intraday.")
 
+        # --- Bobot Adaptif ---
         st.markdown("### ⚖️ Bobot Adaptif per Faktor")
         st.caption("Bobot dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. Faktor yang sering benar mendapat bobot lebih tinggi.")
         adaptive_w = get_adaptive_weights(ticker_raw, regime)
@@ -1253,6 +1256,7 @@ if run_btn:
             weight_insight += interpretations.get(max_factor, "")
             st.info(weight_insight)
 
+        # --- Status Memori ---
         st.markdown("### 🧠 Status Memori Adaptif")
         st.caption("**Accuracy** = seberapa sering sinyal faktor sesuai arah harga. **Error EMA** = rata‑rata kesalahan prediksi (makin kecil makin baik).")
         mem = st.session_state.v12_memory.get(ticker_raw, {})
@@ -1276,6 +1280,7 @@ if run_btn:
         else:
             st.info("Belum ada data memori untuk ticker ini. Lakukan analisis beberapa kali agar engine mulai belajar.")
 
+        # --- Proses Self‑Learning ---
         st.markdown("### 🔁 Proses Self‑Learning")
         st.caption("Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan.")
         last_pred = load_v12_predictions(ticker_raw)
@@ -1288,6 +1293,7 @@ if run_btn:
         else:
             st.info("ℹ️ Tidak ada prediksi sebelumnya.")
 
+        # Simpan prediksi sekarang (wajib)
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
             "AI_Senti": avg_sentiment,
@@ -1298,7 +1304,6 @@ if run_btn:
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
-
     if st.session_state.get("gemini_api_key"):
         with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
             hasil_ai, error_ai = analisis_saham_dengan_ai({
