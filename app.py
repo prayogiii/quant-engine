@@ -544,21 +544,17 @@ with st.sidebar:
     # ---------- RIWAYAT ANALISIS (dengan Search & Paginasi) ----------
     st.subheader("📜 Riwayat Analisis")
 
-    # Inisialisasi state paginasi & pencarian
     if "riwayat_page" not in st.session_state:
         st.session_state.riwayat_page = 0
     if "prev_search" not in st.session_state:
         st.session_state.prev_search = ""
 
-    # Search bar
     search_query = st.text_input("🔎 Cari Saham", key="search_riwayat", placeholder="Ketik kode saham...")
 
-    # Reset halaman jika query berubah
     if search_query != st.session_state.prev_search:
         st.session_state.riwayat_page = 0
         st.session_state.prev_search = search_query
 
-    # Filter data
     riwayat_data = st.session_state.riwayat if st.session_state.riwayat else []
     if search_query:
         riwayat_data = [r for r in riwayat_data if search_query.lower() in r.get('Saham', '').lower()]
@@ -567,7 +563,6 @@ with st.sidebar:
     total_items = len(riwayat_data)
     total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
 
-    # Navigasi halaman (hanya tampil jika lebih dari 1 halaman)
     if total_pages > 1:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col1:
@@ -581,14 +576,12 @@ with st.sidebar:
                          key="next_page"):
                 st.session_state.riwayat_page = min(total_pages - 1, st.session_state.riwayat_page + 1)
 
-    # Ambil data sesuai halaman
     start_idx = st.session_state.riwayat_page * items_per_page
     end_idx = start_idx + items_per_page
     display_riwayat = riwayat_data[start_idx:end_idx]
 
     if display_riwayat:
         for r in display_riwayat:
-            # === Kode expander yang SAMA PERSIS dengan sebelumnya ===
             sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else ("⚡" if "BUY" in r.get('Sinyal','') else ("⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
             conf_str = r.get('Confidence', '0%')
             try: conf_val = float(conf_str.replace('%',''))
@@ -626,76 +619,77 @@ with st.sidebar:
                 b2.metric("Momentum (5D)", r.get('Momentum','?'))
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
                 ai = r.get("AI_Insight", "").strip()
-                                # ---- Fitur Catat Actual ----
-waktu_key = r.get('Waktu','')
-saham_key = r.get('Saham','')
-actual_key = (waktu_key, saham_key)
-actual_data = st.session_state.riwayat_actual.get(actual_key, None)
 
-# Tampilkan data actual jika sudah ada
-if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
-    st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
-    if actual_data.get('Entry_Miss') == 'Yes':
-        st.caption("⚠️ Entry Tidak Tersentuh")
-    if actual_data.get('Outcome'):
-        warna_outcome = {
-            'Win': '🟢',
-            'Loss': '🔴',
-            'Not Touched': '⚪'
-        }.get(actual_data['Outcome'], '')
-        st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
-else:
-    # Tombol untuk menampilkan form
-    btn_key = f"btn_actual_{waktu_key}_{saham_key}"
-    form_key = f"form_actual_{waktu_key}_{saham_key}"
-    show_key = f"show_form_{waktu_key}_{saham_key}"
+                # ---- Fitur Catat Actual ----
+                waktu_key = r.get('Waktu','')
+                saham_key = r.get('Saham','')
+                actual_key = (waktu_key, saham_key)
+                actual_data = st.session_state.riwayat_actual.get(actual_key, None)
 
-    if st.button("📝 Catat Hasil", key=btn_key):
-        st.session_state[show_key] = True
-
-    # Form input (muncul jika tombol diklik)
-    if st.session_state.get(show_key, False):
-        with st.form(key=form_key):
-            actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
-            actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
-            actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
-
-            # Checkbox entry missed (sebelum outcome)
-            entry_miss = st.checkbox(
-                "🚫 Entry Tidak Tersentuh",
-                value=False,
-                help="Centang jika harga tidak pernah menyentuh zona entry (meskipun TP/ SL tersentuh)."
-            )
-
-            # Outcome otomatis jika entry missed
-            if entry_miss:
-                outcome = "Not Touched"
-                st.info("ℹ️ Entry tidak tersentuh → outcome otomatis **Not Touched**.")
-            else:
-                outcome = st.selectbox(
-                    "Outcome",
-                    options=["", "Win", "Loss", "Not Touched"],
-                    format_func=lambda x: "Pilih Outcome" if x == "" else x
-                )
-
-            submitted = st.form_submit_button("Simpan")
-            if submitted:
-                # Validasi: jika tidak entry_miss dan outcome kosong, tolak
-                if not entry_miss and outcome == "":
-                    st.error("Pilih Outcome terlebih dahulu.")
+                # Tampilkan data actual jika sudah ada
+                if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
+                    st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
+                    if actual_data.get('Entry_Miss') == 'Yes':
+                        st.caption("⚠️ Entry Tidak Tersentuh")
+                    if actual_data.get('Outcome'):
+                        warna_outcome = {
+                            'Win': '🟢',
+                            'Loss': '🔴',
+                            'Not Touched': '⚪'
+                        }.get(actual_data['Outcome'], '')
+                        st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
                 else:
-                    data = {
-                        'Actual_High': actual_high.strip(),
-                        'Actual_Low': actual_low.strip(),
-                        'Actual_Close': actual_close.strip(),
-                        'Outcome': outcome,
-                        'Entry_Miss': 'Yes' if entry_miss else ''
-                    }
-                    simpan_riwayat_actual(waktu_key, saham_key, data)
-                    st.success("Data actual tersimpan!")
-                    st.session_state[show_key] = False
-                    st.rerun()
-                if ai: st.caption(f"💡 {ai[:150]}")
+                    # Tombol untuk menampilkan form
+                    btn_key = f"btn_actual_{waktu_key}_{saham_key}"
+                    form_key = f"form_actual_{waktu_key}_{saham_key}"
+                    show_key = f"show_form_{waktu_key}_{saham_key}"
+
+                    if st.button("📝 Catat Hasil", key=btn_key):
+                        st.session_state[show_key] = True
+
+                    # Form input (muncul jika tombol diklik)
+                    if st.session_state.get(show_key, False):
+                        with st.form(key=form_key):
+                            actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
+                            actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
+                            actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
+
+                            entry_miss = st.checkbox(
+                                "🚫 Entry Tidak Tersentuh",
+                                value=False,
+                                help="Centang jika harga tidak pernah menyentuh zona entry (meskipun TP/ SL tersentuh)."
+                            )
+
+                            if entry_miss:
+                                outcome = "Not Touched"
+                                st.info("ℹ️ Entry tidak tersentuh → outcome otomatis **Not Touched**.")
+                            else:
+                                outcome = st.selectbox(
+                                    "Outcome",
+                                    options=["", "Win", "Loss", "Not Touched"],
+                                    format_func=lambda x: "Pilih Outcome" if x == "" else x
+                                )
+
+                            submitted = st.form_submit_button("Simpan")
+                            if submitted:
+                                if not entry_miss and outcome == "":
+                                    st.error("Pilih Outcome terlebih dahulu.")
+                                else:
+                                    data = {
+                                        'Actual_High': actual_high.strip(),
+                                        'Actual_Low': actual_low.strip(),
+                                        'Actual_Close': actual_close.strip(),
+                                        'Outcome': outcome,
+                                        'Entry_Miss': 'Yes' if entry_miss else ''
+                                    }
+                                    simpan_riwayat_actual(waktu_key, saham_key, data)
+                                    st.success("Data actual tersimpan!")
+                                    st.session_state[show_key] = False
+                                    st.rerun()
+
+                if ai:
+                    st.caption(f"💡 {ai[:150]}")
+
         # Informasi jumlah tampilan
         st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
                   (f" (hasil pencarian '{search_query}')" if search_query else ""))
