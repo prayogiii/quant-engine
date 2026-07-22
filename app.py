@@ -298,7 +298,24 @@ def muat_riwayat_actual():
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
-
+def hapus_riwayat_item(waktu, saham):
+    """Hapus satu entri riwayat berdasarkan Waktu dan Saham."""
+    try:
+        sheet = get_gsheet().worksheet("riwayat")
+        records = sheet.get_all_records()
+        # Filter entri yang tidak cocok
+        filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
+        filtered = filtered[:50]  # jaga maksimal 50
+        sheet.clear()
+        if filtered:
+            headers = list(filtered[0].keys())
+            sheet.insert_row(headers, 1)
+            rows = [[row.get(h, "") for h in headers] for row in filtered]
+            sheet.append_rows(rows, value_input_option='RAW')
+        st.session_state.riwayat = filtered
+    except Exception as e:
+        st.error(f"❌ Gagal menghapus riwayat: {e}")
+        
 def simpan_riwayat_actual(waktu, saham, actual_data):
     """Simpan/update data actual untuk satu entri riwayat."""
     try:
@@ -686,7 +703,12 @@ with st.sidebar:
                                     st.success("Data actual tersimpan!")
                                     st.session_state[show_key] = False
                                     st.rerun()
-
+                    # ---- Tombol Hapus Riwayat ----
+                    hapus_key = f"hapus_{waktu_key}_{saham_key}"
+                    if st.button("🗑️ Hapus Riwayat Ini", key=hapus_key):
+                        hapus_riwayat_item(waktu_key, saham_key)
+                        st.success("Riwayat dihapus.")
+                        st.rerun()
                 if ai:
                     st.caption(f"💡 {ai[:150]}")
 
