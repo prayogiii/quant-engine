@@ -1059,24 +1059,54 @@ if run_btn:
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
-            def clean_val(v,f="{:.2f}"): return "N/A" if v is None else f.format(v)
+            # --- Tabel Fundamental yang Lebih Profesional ---
+            def clean_val(v, f="{:.2f}"): 
+                return "N/A" if v is None else f.format(v)
+            
             def singkat_angka(n):
                 if n is None: return "N/A"
                 n = float(n)
                 if n >= 1e12: return f"{n/1e12:,.1f} T"
                 elif n >= 1e9: return f"{n/1e9:,.0f} M"
                 else: return f"{n:,.0f}"
+            
             mc_short = singkat_angka(mc)
-            table_html = (
-                f"<table class='fundamental-table'>"
-                f"<tr><td>Market Cap</td><td>{mc_short} IDR</td></tr>"
-                f"<tr><td>PER</td><td>{clean_val(per, '{:.2f}x')}</td></tr>"
-                f"<tr><td>PBV</td><td>{clean_val(pbv, '{:.2f}x')}</td></tr>"
-                f"<tr><td>ROE</td><td>{clean_val(roe*100 if roe else None, '{:.1f}%')}</td></tr>"
-                f"<tr><td>D/E</td><td>{clean_val(de, '{:.2f}%')}</td></tr>"
-                f"</table>"
-            )
+            
+            # Card tabel fundamental
+            table_html = f"""
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); 
+                        border-radius: 16px; padding: 20px; margin: 10px 0; 
+                        border: 1px solid #334155;">
+                <div style="font-size: 18px; font-weight: bold; color: #00ffcc; margin-bottom: 16px;">
+                    📊 Fundamental {ticker_raw}
+                </div>
+                <table style="width: 100%; border-collapse: collapse; color: #cbd5e1; font-size: 14px;">
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <td style="padding: 10px 8px; color: #8892b0; width: 40%;">Market Cap</td>
+                        <td style="padding: 10px 8px; font-weight: 600;">{mc_short} IDR</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <td style="padding: 10px 8px; color: #8892b0;">PER (Price to Earnings)</td>
+                        <td style="padding: 10px 8px; font-weight: 600;">{clean_val(per, '{:.2f}x')}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <td style="padding: 10px 8px; color: #8892b0;">PBV (Price to Book)</td>
+                        <td style="padding: 10px 8px; font-weight: 600;">{clean_val(pbv, '{:.2f}x')}</td>
+                    </tr>
+                    <tr style="border-bottom: 1px solid #334155;">
+                        <td style="padding: 10px 8px; color: #8892b0;">ROE (Return on Equity)</td>
+                        <td style="padding: 10px 8px; font-weight: 600;">{clean_val(roe*100 if roe else None, '{:.1f}%')}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px 8px; color: #8892b0;">D/E (Debt to Equity)</td>
+                        <td style="padding: 10px 8px; font-weight: 600;">{clean_val(de, '{:.2f}%')}</td>
+                    </tr>
+                </table>
+            </div>
+            """
             st.markdown(table_html, unsafe_allow_html=True)
+
+            # Interpretasi Metrik
             interpretation_items = []
             if mc:
                 if mc >= 1e13: mct = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
