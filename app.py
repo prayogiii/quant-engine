@@ -1179,6 +1179,8 @@ if run_btn:
         st.divider()
         st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
+
+    # ═══════════════════ V12 ADAPTIVE ENGINE ═══════════════════
     with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
         st.info(
             "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
@@ -1304,8 +1306,11 @@ if run_btn:
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
-        if st.session_state.get("gemini_api_key"):
-           with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
+
+    # ==================== AI INSIGHT OTOMATIS ====================
+    st.markdown("---")
+    if st.session_state.get("gemini_api_key"):
+        with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
             hasil_ai, error_ai = analisis_saham_dengan_ai({
                 "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
                 "Rezim": regime, "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
@@ -1429,4 +1434,3 @@ if ai_riwayat_btn:
             if error: st.error(error)
             elif hasil:
                 st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{bersihkan_teks_ai(hasil)}</p></div>', unsafe_allow_html=True)
-                
