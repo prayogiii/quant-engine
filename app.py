@@ -1181,7 +1181,7 @@ if run_btn:
         pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
 
         with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
-        st.info(
+            st.info(
             "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
             "Engine secara otomatis mempelajari akurasi setiap faktor teknikal berdasarkan riwayat analisis kamu. "
             "Semakin sering suatu ticker dianalisis, semakin akurat bobot yang dihasilkan."
