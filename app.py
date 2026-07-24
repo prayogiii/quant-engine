@@ -543,12 +543,22 @@ with st.sidebar:
         st.caption("Menggunakan data harian (2 tahun terakhir)")
     
     st.markdown("Masukkan kode saham IHSG untuk analisis lengkap.")
-    ticker_raw = st.text_input("🔍 Kode Saham", value="BBRI", placeholder="Contoh: BBRI, TLKM, BMRI").upper().strip()
+        ticker_raw = st.text_input("🔍 Kode Saham", value="BBRI", placeholder="Contoh: BBRI, TLKM, BMRI").upper().strip()
     if ticker_raw and not ticker_raw.endswith(".JK"):
         ticker_input = f"{ticker_raw}.JK"
     else:
         ticker_input = ticker_raw
 
+    # --- Input Harga Manual ---
+    harga_manual = st.text_input("💵 Harga Pasar Saat Ini (opsional)", placeholder="Kosongkan jika pakai harga data")
+    if harga_manual:
+        try:
+            harga_terakhir_manual = float(harga_manual.replace(",",""))
+        except:
+            st.error("Format harga salah")
+            harga_terakhir_manual = None
+    else:
+        harga_terakhir_manual = None
     col1, col2 = st.columns(2)
     with col1:
         run_btn = st.button("🚀 ANALISIS", use_container_width=True)
@@ -907,7 +917,7 @@ if run_btn:
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
-        harga_terakhir = float(df['Close'].iloc[-1])
+        harga_terakhir_asli = float(df['Close'].iloc[-1])   # untuk ATR & indikator
         returns = df['Close'].pct_change().dropna()
         if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
 
@@ -1005,7 +1015,7 @@ if run_btn:
             (df['Low'] - df['Close'].shift()).abs()
         ], axis=1).max(axis=1)
         atr14 = df['TR'].rolling(14).mean().iloc[-1]
-        atr_pct = (atr14 / harga_terakhir) * 100
+        atr_pct = (atr14 / harga_terakhir_asli) * 100
 
         delta = df['Close'].diff()
         gain = delta.where(delta > 0, 0.0)
@@ -1014,6 +1024,12 @@ if run_btn:
         avg_loss = loss.rolling(14).mean().iloc[-1]
         if avg_loss is None or avg_loss == 0: rsi14 = 100.0
         else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
+
+        # --- Override harga untuk eksekusi (sebelum TP/SL) ---
+        if harga_terakhir_manual:
+            harga_terakhir = harga_terakhir_manual
+        else:
+            harga_terakhir = harga_terakhir_asli
 
         # === MULTIPLIER TP/SL ===
         tp_mult, sl_mult = 2.0, 1.0
@@ -1025,7 +1041,6 @@ if run_btn:
         tp_pct = tp_mult * atr_pct
         sl_harga = harga_terakhir * (1 - sl_pct/100)
         tp_harga = harga_terakhir * (1 + tp_pct/100)
-
         rrr = tp_pct / sl_pct if sl_pct > 0 else 0
         if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
         elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
