@@ -543,7 +543,7 @@ with st.sidebar:
         st.caption("Menggunakan data harian (2 tahun terakhir)")
     
     st.markdown("Masukkan kode saham IHSG untuk analisis lengkap.")
-        ticker_raw = st.text_input("🔍 Kode Saham", value="BBRI", placeholder="Contoh: BBRI, TLKM, BMRI").upper().strip()
+    ticker_raw = st.text_input("🔍 Kode Saham", value="BBRI", placeholder="Contoh: BBRI, TLKM, BMRI").upper().strip(
     if ticker_raw and not ticker_raw.endswith(".JK"):
         ticker_input = f"{ticker_raw}.JK"
     else:
