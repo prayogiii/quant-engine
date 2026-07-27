@@ -608,7 +608,7 @@ with st.sidebar:
     display_riwayat = riwayat_data[start_idx:end_idx]
 
     if display_riwayat:
-        for r in display_riwayat:
+        for idx, r in enumerate(display_riwayat):
             sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else ("⚡" if "BUY" in r.get('Sinyal','') else ("⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
             conf_str = r.get('Confidence', '0%')
             try: conf_val = float(conf_str.replace('%',''))
