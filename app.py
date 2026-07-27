@@ -667,9 +667,9 @@ with st.sidebar:
                         st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
                 else:
                     # Tombol untuk menampilkan form
-                    btn_key = f"btn_actual_{waktu_key}_{saham_key}"
-                    form_key = f"form_actual_{waktu_key}_{saham_key}"
-                    show_key = f"show_form_{waktu_key}_{saham_key}"
+                    btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}"
+                    form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}"
+                    show_key = f"show_form_{idx}_{waktu_key}_{saham_key}"
 
                     if st.button("📝 Catat Hasil", key=btn_key):
                         st.session_state[show_key] = True
@@ -697,7 +697,7 @@ with st.sidebar:
                                     format_func=lambda x: "Pilih Outcome" if x == "" else x
                                 )
 
-                            submitted = st.form_submit_button("Simpan")
+                            submitted = st.form_submit_button("Simpan", key=f"submit_{form_key}")
                             if submitted:
                                 if not entry_miss and outcome == "":
                                     st.error("Pilih Outcome terlebih dahulu.")
@@ -714,7 +714,7 @@ with st.sidebar:
                                     st.session_state[show_key] = False
                                     st.rerun()
                     # ---- Tombol Hapus Riwayat ----
-                    hapus_key = f"hapus_{waktu_key}_{saham_key}"
+                    hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}"
                     if st.button("🗑️ Hapus Riwayat Ini", key=hapus_key):
                         hapus_riwayat_item(waktu_key, saham_key)
                         st.success("Riwayat dihapus.")
