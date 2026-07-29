@@ -1329,8 +1329,8 @@ if run_btn:
         "Confidence": f"{confidence:.0%}",
         "Coppock": coppock_status,
         "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
-        "TP_Range": f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
-        "SL_Harga": f"Rp {sl_harga:,.0f}",
+        "TP_Range": f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
+        "SL_Harga": f"Rp {sl_harga_f:,.0f}",
         "Likuiditas": likuiditas_str,
         "RSI": f"{rsi14:.1f}",
         "RSI_Status": rsi_status,
@@ -1355,6 +1355,9 @@ if run_btn:
     est_besok_f = fraksi_bei(est_besok)
     low_est_f = fraksi_bei(low_est)
     up_est_f = fraksi_bei(up_est)
+    tp_low_f = fraksi_bei(tp_low)
+    tp_high_f = fraksi_bei(tp_high)
+    sl_harga_f = fraksi_bei(sl_harga)
     col2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."),
                 f"50% range: Rp {low_est_f:,.0f} - {up_est_f:,.0f}".replace(",","."))
     col3.metric(prob_label, f"{prob_bull:.1f}%")
@@ -1395,7 +1398,7 @@ if run_btn:
         st.markdown(f'''
             <div class="summary-card">
                 <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
-                <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)</div>
+                <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga_f:,.0f} (-{sl_pct:.1f}%)</div>
                 <div class="summary-item">🎯 <b>Take Profit Range:</b> {ringkasan['TP_Range']}<br>
                     <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
                 <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
@@ -1508,9 +1511,9 @@ if run_btn:
         entry_zone_f = f"Rp {entry_low_f:,.0f} - {entry_high_f:,.0f}"
         
         t3.metric("Entry Zone", entry_zone_f)
-        t4.metric("TP Range", f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
+        t4.metric("TP Range", f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
           f"+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%")
-        t5.metric("Stop Loss", f"Rp {sl_harga:,.0f}", f"-{sl_pct:.1f}%")
+        t5.metric("Stop Loss", f"Rp {sl_harga_f:,.0f}", f"-{sl_pct:.1f}%")
         st.markdown(f"**Hasil Backtest ({backtest_window} Bar):**"); b1,b2,b3,b4,b5,b6=st.columns(6)
         b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
         b3.metric("Avg Return/Trade",f"{avg_bt:.2%}" if trades_bt else "N/A"); b4.metric("Max DD Strat",f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
