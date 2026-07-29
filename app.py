@@ -918,6 +918,8 @@ if run_btn:
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
         harga_terakhir_asli = float(df['Close'].iloc[-1])   # untuk ATR & indikator
+        # Gunakan harga manual jika diisi, jika tidak pakai harga penutupan terakhir
+        harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
         returns = df['Close'].pct_change().dropna()
         if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
 
