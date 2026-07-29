@@ -1032,11 +1032,11 @@ if run_btn:
         harga_terakhir = harga_terakhir_asli
     
     # ============ ENTRY ZONE ============
-    # Tentukan entry_low (support utama) dengan S1 atau ATR
-    if s1 >= harga_terakhir * 0.98:  # S1 sangat dekat, gunakan sebagai entry_low
+    # Gunakan S1 jika sangat dekat dengan harga (<= 2% di bawah), jika tidak pakai ATR
+    if s1 >= harga_terakhir * 0.98:  
         entry_low = s1
     else:
-        entry_low = harga_terakhir * (1 - atr_pct/100)   # fallback ATR
+        entry_low = harga_terakhir * (1 - atr_pct/100)  
     
     # Entry high: sedikit di bawah harga (untuk order limit)
     if "STRONG BUY" in signal:
