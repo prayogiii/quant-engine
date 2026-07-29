@@ -1026,139 +1026,139 @@ if run_btn:
     else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
     
            # ============ PIVOT (ADAPTIF) ============
-        if is_daytrade:
-            today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
-            if not df_daily.empty:
-                df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
-                if not df_daily_filtered.empty:
-                    prev_day = df_daily_filtered.iloc[-1]
-                    hi_daily = float(prev_day['High'])
-                    lo_daily = float(prev_day['Low'])
-                    cl_daily = float(prev_day['Close'])
-                else:
-                    prev_day = None
-                    for i in range(1, min(len(df_daily), 6)):
-                        row = df_daily.iloc[-i]
-                        h_val = float(row['High'])
-                        l_val = float(row['Low'])
-                        c_val = float(row['Close'])
-                        if h_val != l_val and h_val > 0 and l_val > 0:
-                            prev_day = row
-                            hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
-                            break
-                    if prev_day is None:
-                        last = df_daily.iloc[-1]
-                        hi_daily = float(last['High'])
-                        lo_daily = float(last['Low'])
-                        cl_daily = float(last['Close'])
+    if is_daytrade:
+        today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
+        if not df_daily.empty:
+            df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
+            if not df_daily_filtered.empty:
+                prev_day = df_daily_filtered.iloc[-1]
+                hi_daily = float(prev_day['High'])
+                lo_daily = float(prev_day['Low'])
+                cl_daily = float(prev_day['Close'])
             else:
-                hi_daily = float(df['High'].iloc[-1])
-                lo_daily = float(df['Low'].iloc[-1])
-                cl_daily = float(df['Close'].iloc[-1])
-
-            if hi_daily != lo_daily:
-                pp = (hi_daily + lo_daily + cl_daily) / 3
-                r1 = 2 * pp - lo_daily
-                s1 = 2 * pp - hi_daily
-                r2 = pp + (hi_daily - lo_daily)
-                s2 = pp - (hi_daily - lo_daily)
-            else:
-                pp = r1 = s1 = r2 = s2 = cl_daily
+                prev_day = None
+                for i in range(1, min(len(df_daily), 6)):
+                    row = df_daily.iloc[-i]
+                    h_val = float(row['High'])
+                    l_val = float(row['Low'])
+                    c_val = float(row['Close'])
+                    if h_val != l_val and h_val > 0 and l_val > 0:
+                        prev_day = row
+                        hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
+                        break
+                if prev_day is None:
+                    last = df_daily.iloc[-1]
+                    hi_daily = float(last['High'])
+                    lo_daily = float(last['Low'])
+                    cl_daily = float(last['Close'])
         else:
-            hi = lo = cl = None
-            for i in range(1, min(6, len(df))):
-                row = df.iloc[-i]
-                h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
-                if h_val != l_val and h_val > 0 and l_val > 0:
-                    hi, lo, cl = h_val, l_val, c_val
-                    break
-            if hi is None:
-                hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
-            if hi == lo:
-                pp = r1 = s1 = r2 = s2 = cl
-            else:
-                pp = (hi + lo + cl) / 3
-                r1 = 2 * pp - lo; s1 = 2 * pp - hi
-                r2 = pp + (hi - lo); s2 = pp - (hi - lo)
+            hi_daily = float(df['High'].iloc[-1])
+            lo_daily = float(df['Low'].iloc[-1])
+            cl_daily = float(df['Close'].iloc[-1])
 
-        # ============ ENTRY ZONE (ADAPTIF) ============
-        if s1 >= harga_terakhir * 0.98:
-            entry_low = s1
+        if hi_daily != lo_daily:
+            pp = (hi_daily + lo_daily + cl_daily) / 3
+            r1 = 2 * pp - lo_daily
+            s1 = 2 * pp - hi_daily
+            r2 = pp + (hi_daily - lo_daily)
+            s2 = pp - (hi_daily - lo_daily)
         else:
-            entry_low = harga_terakhir * (1 - atr_pct/100)
-        if "STRONG BUY" in signal:
-            entry_high = harga_terakhir
+            pp = r1 = s1 = r2 = s2 = cl_daily
+    else:
+        hi = lo = cl = None
+        for i in range(1, min(6, len(df))):
+            row = df.iloc[-i]
+            h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
+            if h_val != l_val and h_val > 0 and l_val > 0:
+                hi, lo, cl = h_val, l_val, c_val
+                break
+        if hi is None:
+            hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
+        if hi == lo:
+            pp = r1 = s1 = r2 = s2 = cl
         else:
-            entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
-        if entry_low > entry_high:
-            entry_low, entry_high = entry_high, entry_low
-        min_entry_width = 0.5 * atr14_val
-        if (entry_high - entry_low) < min_entry_width:
-            entry_high = entry_low + min_entry_width
-        entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
+            pp = (hi + lo + cl) / 3
+            r1 = 2 * pp - lo; s1 = 2 * pp - hi
+            r2 = pp + (hi - lo); s2 = pp - (hi - lo)
 
-        # ============ MULTIPLIER SL & TP ============
-        sl_mult = 1.0
-        if adx > 30 and 30 < rsi14 < 70:
-            sl_mult = 0.75
-        elif adx < 20:
-            sl_mult = 1.25
-        if rsi14 > 70 or rsi14 < 30:
-            sl_mult = 1.5
-        tp_mult_low = 1.5
-        tp_mult_high = 2.5
-        if adx > 30 and 30 < rsi14 < 70:
-            tp_mult_low, tp_mult_high = 2.0, 3.0
-        elif adx < 20:
-            tp_mult_low, tp_mult_high = 1.2, 1.8
+    # ============ ENTRY ZONE (ADAPTIF) ============
+    if s1 >= harga_terakhir * 0.98:
+        entry_low = s1
+    else:
+        entry_low = harga_terakhir * (1 - atr_pct/100)
+    if "STRONG BUY" in signal:
+        entry_high = harga_terakhir
+    else:
+        entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
+    if entry_low > entry_high:
+        entry_low, entry_high = entry_high, entry_low
+    min_entry_width = 0.5 * atr14_val
+    if (entry_high - entry_low) < min_entry_width:
+        entry_high = entry_low + min_entry_width
+    entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
 
-        # ============ STOP LOSS (dari entry_low) ============
-        sl_harga = entry_low - sl_mult * atr14_val
-        if sl_harga <= 0:
-            sl_harga = harga_terakhir * 0.95
-        sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
+    # ============ MULTIPLIER SL & TP ============
+    sl_mult = 1.0
+    if adx > 30 and 30 < rsi14 < 70:
+        sl_mult = 0.75
+    elif adx < 20:
+        sl_mult = 1.25
+    if rsi14 > 70 or rsi14 < 30:
+        sl_mult = 1.5
+    tp_mult_low = 1.5
+    tp_mult_high = 2.5
+    if adx > 30 and 30 < rsi14 < 70:
+        tp_mult_low, tp_mult_high = 2.0, 3.0
+    elif adx < 20:
+        tp_mult_low, tp_mult_high = 1.2, 1.8
 
-        # ============ TAKE PROFIT RANGE ============
-        if r1 > harga_terakhir:
-            tp_low = r1
+    # ============ STOP LOSS (dari entry_low) ============
+    sl_harga = entry_low - sl_mult * atr14_val
+    if sl_harga <= 0:
+        sl_harga = harga_terakhir * 0.95
+    sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
+
+     # ============ TAKE PROFIT RANGE ============
+    if r1 > harga_terakhir:
+        tp_low = r1
+    else:
+        tp_low = harga_terakhir + tp_mult_low * atr14_val
+    if r2 > harga_terakhir:
+        tp_high = r2
+    else:
+        tp_high = harga_terakhir + tp_mult_high * atr14_val
+    if tp_low > tp_high:
+        tp_low, tp_high = tp_high, tp_low
+    tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
+    tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
+
+    # ============ RRR ============
+    risk = harga_terakhir - sl_harga
+    reward = tp_low - harga_terakhir
+    rrr = reward / risk if risk > 0 else 0
+    if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+    elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
+    elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
+    else: rrr_status = "Buruk (< 1.0) 🔴"
+
+    # Breakout (adaptif)
+    if is_daytrade:
+        bars_per_day = bars_per_day_map.get(actual_interval, 54)
+        if len(df) >= bars_per_day:
+            res20 = float(df['High'].iloc[-bars_per_day:-1].max())
+            breakout_label = f"Breakout Sesi Sebelumnya ({bars_per_day} bar)"
         else:
-            tp_low = harga_terakhir + tp_mult_low * atr14_val
-        if r2 > harga_terakhir:
-            tp_high = r2
+            res20 = float(df['High'].max())
+            breakout_label = "Breakout N-Bar"
+    else:
+        if len(df) >= 21:
+            res20 = float(df['High'].iloc[-21:-1].max())
         else:
-            tp_high = harga_terakhir + tp_mult_high * atr14_val
-        if tp_low > tp_high:
-            tp_low, tp_high = tp_high, tp_low
-        tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
-        tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
+            res20 = float(df['High'].max())
+        breakout_label = "Breakout 20 Hari"
+    breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
-        # ============ RRR ============
-        risk = harga_terakhir - sl_harga
-        reward = tp_low - harga_terakhir
-        rrr = reward / risk if risk > 0 else 0
-        if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
-        elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
-        elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
-        else: rrr_status = "Buruk (< 1.0) 🔴"
-
-        # Breakout (adaptif)
-        if is_daytrade:
-            bars_per_day = bars_per_day_map.get(actual_interval, 54)
-            if len(df) >= bars_per_day:
-                res20 = float(df['High'].iloc[-bars_per_day:-1].max())
-                breakout_label = f"Breakout Sesi Sebelumnya ({bars_per_day} bar)"
-            else:
-                res20 = float(df['High'].max())
-                breakout_label = "Breakout N-Bar"
-        else:
-            if len(df) >= 21:
-                res20 = float(df['High'].iloc[-21:-1].max())
-            else:
-                res20 = float(df['High'].max())
-            breakout_label = "Breakout 20 Hari"
-        breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
-
-        # ============ SINYAL ============
+    # ============ SINYAL ============
         def generate_signals_vectorized(dataframe, mom_th):
             score = pd.Series(0, index=dataframe.index)
             is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
