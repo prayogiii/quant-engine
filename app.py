@@ -1030,81 +1030,84 @@ if run_btn:
         harga_terakhir = harga_terakhir_manual
     else:
         harga_terakhir = harga_terakhir_asli
-        # ============ ENTRY ZONE ============
-    # Gunakan S1 jika sangat dekat dengan harga (<= 2% di bawah), jika tidak pakai ATR
-    if s1 >= harga_terakhir * 0.98:
-        entry_low = s1
-    else:
-        entry_low = harga_terakhir * (1 - atr_pct/100)
-    
-    # Entry high sedikit di bawah harga (untuk limit order)
-    if "STRONG BUY" in signal:
-        entry_high = harga_terakhir
-    else:
-        entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
-    
-    # Pastikan entry_low < entry_high
-    if entry_low > entry_high:
-        entry_low, entry_high = entry_high, entry_low
-    
-    # Lebar minimal = 0.5 x ATR (rupiah)
-    min_entry_width = 0.5 * atr14_val
-    if (entry_high - entry_low) < min_entry_width:
-        entry_high = entry_low + min_entry_width
-    
-    entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
-    
-    # ============ MULTIPLIER TP/SL (khusus untuk menghitung besaran) ============
-    # Multiplier SL: berapa kali ATR di bawah entry_low
-    sl_mult = 1.0
-    if adx > 30 and 30 < rsi14 < 70:
-        sl_mult = 0.75       # tren kuat, SL lebih ketat
-    elif adx < 20:
-        sl_mult = 1.25       # pasar sideways, SL lebih longgar
-    if rsi14 > 70 or rsi14 < 30:
-        sl_mult = 1.5        # overbought/oversold, SL perlu lebar
-    
-    # Multiplier TP: untuk TP_low dan TP_high (jika pivot tidak valid)
-    tp_mult_low = 1.5
-    tp_mult_high = 2.5
-    if adx > 30 and 30 < rsi14 < 70:
-        tp_mult_low, tp_mult_high = 2.0, 3.0
-    elif adx < 20:
-        tp_mult_low, tp_mult_high = 1.2, 1.8
-    
-    # ============ STOP LOSS ============
-    sl_harga = entry_low - sl_mult * atr14_val     # SL dalam rupiah, pasti di bawah entry_low
-    if sl_harga <= 0:                              # fallback kalau terlalu rendah
-        sl_harga = harga_terakhir * 0.95
-    sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100   # persentase SL dari harga sekarang
-    
-    # ============ TAKE PROFIT RANGE ============
-    # Gunakan pivot R1/R2 jika di atas harga, jika tidak fallback ke ATR
-    if r1 > harga_terakhir:
-        tp_low = r1
-    else:
-        tp_low = harga_terakhir + tp_mult_low * atr14_val
-    
-    if r2 > harga_terakhir:
-        tp_high = r2
-    else:
-        tp_high = harga_terakhir + tp_mult_high * atr14_val
-    
-    # Pastikan tp_low < tp_high
-    if tp_low > tp_high:
-        tp_low, tp_high = tp_high, tp_low
-    
-    tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
-    tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
-    
-    # ============ RRR (berdasarkan TP minimal) ============
-    risk = harga_terakhir - sl_harga
-    reward = tp_low - harga_terakhir
-    rrr = reward / risk if risk > 0 else 0
-    if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
-    elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
-    elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
-    else: rrr_status = "Buruk (< 1.0) 🔴"
+       # ============ ENTRY ZONE ============
+# Gunakan S1 jika sangat dekat dengan harga (<= 2% di bawah), jika tidak pakai ATR
+if s1 >= harga_terakhir * 0.98:
+    entry_low = s1
+else:
+    entry_low = harga_terakhir * (1 - atr_pct/100)
+
+# Entry high sedikit di bawah harga (untuk limit order)
+if "STRONG BUY" in signal:
+    entry_high = harga_terakhir
+else:
+    entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
+
+# Pastikan entry_low < entry_high
+if entry_low > entry_high:
+    entry_low, entry_high = entry_high, entry_low
+
+# Lebar minimal = 0.5 x ATR (rupiah)
+min_entry_width = 0.5 * atr14_val
+if (entry_high - entry_low) < min_entry_width:
+    entry_high = entry_low + min_entry_width
+
+entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
+
+# ============ MULTIPLIER SL & TP ============
+sl_mult = 1.0
+if adx > 30 and 30 < rsi14 < 70:
+    sl_mult = 0.75        # tren kuat, SL lebih ketat
+elif adx < 20:
+    sl_mult = 1.25        # pasar sideways, SL lebih longgar
+if rsi14 > 70 or rsi14 < 30:
+    sl_mult = 1.5         # overbought/oversold, SL lebih lebar
+
+tp_mult_low = 1.5
+tp_mult_high = 2.5
+if adx > 30 and 30 < rsi14 < 70:
+    tp_mult_low, tp_mult_high = 2.0, 3.0
+elif adx < 20:
+    tp_mult_low, tp_mult_high = 1.2, 1.8
+
+# ============ STOP LOSS (dari entry_low) ============
+sl_harga = entry_low - sl_mult * atr14_val
+if sl_harga <= 0:
+    sl_harga = harga_terakhir * 0.95   # fallback kalau terlalu rendah
+sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
+
+# ============ TAKE PROFIT RANGE ============
+# Gunakan R1 jika di atas harga, jika tidak fallback ke ATR
+if r1 > harga_terakhir:
+    tp_low = r1
+else:
+    tp_low = harga_terakhir + tp_mult_low * atr14_val
+
+# Gunakan R2 jika di atas harga
+if r2 > harga_terakhir:
+    tp_high = r2
+else:
+    tp_high = harga_terakhir + tp_mult_high * atr14_val
+
+# Pastikan tp_low < tp_high
+if tp_low > tp_high:
+    tp_low, tp_high = tp_high, tp_low
+
+tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
+tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
+
+# ============ RRR (menggunakan target terendah) ============
+risk = harga_terakhir - sl_harga
+reward = tp_low - harga_terakhir
+rrr = reward / risk if risk > 0 else 0
+if rrr >= 2.0:
+    rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+elif rrr >= 1.5:
+    rrr_status = "Baik (1.5 - 2.0) 🟢"
+elif rrr >= 1.0:
+    rrr_status = "Cukup (1.0 - 1.5) 🟡"
+else:
+    rrr_status = "Buruk (< 1.0) 🔴"
         # ============ PIVOT (ADAPTIF) ============
     if is_daytrade:
         today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
