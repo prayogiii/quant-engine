@@ -1026,8 +1026,8 @@ if run_btn:
     avg_loss = loss.rolling(14).mean().iloc[-1]
     if avg_loss is None or avg_loss == 0: rsi14 = 100.0
     else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
-
-    # ============ PIVOT (ADAPTIF) ============
+    
+           # ============ PIVOT (ADAPTIF) ============
     if is_daytrade:
         today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
         if not df_daily.empty:
@@ -1082,6 +1082,21 @@ if run_btn:
             pp = (hi + lo + cl) / 3
             r1 = 2 * pp - lo; s1 = 2 * pp - hi
             r2 = pp + (hi - lo); s2 = pp - (hi - lo)
+
+    # ============ SINYAL ============
+    def generate_signals_vectorized(dataframe, mom_th):
+        score = pd.Series(0, index=dataframe.index)
+        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
+        score += is_uptrend.astype(int)*2
+        score += (dataframe['Mom5D']>mom_th).astype(int)
+        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
+        sig = pd.Series("🚨 AVOID", index=dataframe.index)
+        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
+        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
+        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
+        return sig
+    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
+    signal = df['Signal'].iloc[-1]
 
     # ============ ENTRY ZONE (ADAPTIF) ============
     if s1 >= harga_terakhir * 0.98:
@@ -1160,20 +1175,6 @@ if run_btn:
         breakout_label = "Breakout 20 Hari"
     breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
-    # ============ SINYAL ============
-    def generate_signals_vectorized(dataframe, mom_th):
-        score = pd.Series(0, index=dataframe.index)
-        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
-        score += is_uptrend.astype(int)*2
-        score += (dataframe['Mom5D']>mom_th).astype(int)
-        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
-        sig = pd.Series("🚨 AVOID", index=dataframe.index)
-        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
-        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
-        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
-        return sig
-    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
-    signal = df['Signal'].iloc[-1]
 
     # ============ BACKTEST (ADAPTIF) ============
     if is_daytrade:
@@ -1219,130 +1220,130 @@ if run_btn:
             "Interpretasikan Win Rate, Sharpe, dan metrik lainnya dengan sangat hati‑hati."
             )
 
-    # ============ KELLY ============
-    roll_max_th = df_thresh['Close'].cummax()
-    drawdown_th = (df_thresh['Close']-roll_max_th)/roll_max_th
-    max_dd = float(drawdown_th.min()*100)
-    max_dd_30 = float(drawdown_th.tail(30).min()*100) if len(drawdown_th)>=30 else max_dd
-    if trades_bt>=2: win_r,avg_g,avg_l = win_bt, np.mean(profit_trades) if profit_trades else 0.01, abs(np.mean(loss_trades)) if loss_trades else 0.01
-    else:
-        win_r = len(returns_thresh[returns_thresh>0])/len(returns_thresh)
-        avg_g = returns_thresh[returns_thresh>0].mean() if win_r>0 else 0.01
-        avg_l = abs(returns_thresh[returns_thresh<0].mean()) if len(returns_thresh[returns_thresh<0]) else 0.01
-    wl = avg_g/avg_l if avg_l else 1
-    kelly_raw = win_r - (1-win_r)/wl
-    ret_skew = float(skew(returns_thresh)); ret_kurt = float(kurtosis(returns_thresh, fisher=True))
-    kurt_penalty = 0.5 if ret_kurt>3 else 1.0
-    kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
+        # ============ KELLY ============
+        roll_max_th = df_thresh['Close'].cummax()
+        drawdown_th = (df_thresh['Close']-roll_max_th)/roll_max_th
+        max_dd = float(drawdown_th.min()*100)
+        max_dd_30 = float(drawdown_th.tail(30).min()*100) if len(drawdown_th)>=30 else max_dd
+        if trades_bt>=2: win_r,avg_g,avg_l = win_bt, np.mean(profit_trades) if profit_trades else 0.01, abs(np.mean(loss_trades)) if loss_trades else 0.01
+        else:
+            win_r = len(returns_thresh[returns_thresh>0])/len(returns_thresh)
+            avg_g = returns_thresh[returns_thresh>0].mean() if win_r>0 else 0.01
+            avg_l = abs(returns_thresh[returns_thresh<0].mean()) if len(returns_thresh[returns_thresh<0]) else 0.01
+        wl = avg_g/avg_l if avg_l else 1
+        kelly_raw = win_r - (1-win_r)/wl
+        ret_skew = float(skew(returns_thresh)); ret_kurt = float(kurtosis(returns_thresh, fisher=True))
+        kurt_penalty = 0.5 if ret_kurt>3 else 1.0
+        kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
 
-    # ============ MONTE CARLO (ADAPTIF) ============
-    if is_daytrade:
-        n_sim, n_steps = 2000, 30
-    else:
-        n_sim, n_days = 2000, 30
-        n_steps = n_days
-    latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
-    scale_corrected = latest_vol/np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
-    theta_ou = estimate_theta_ou(df['Close'])
-    locked_log_mean20 = np.log(df['Close']).tail(20).mean()
-    paths = np.zeros((n_steps,n_sim)); current_log = np.ones((1,n_sim))*np.log(harga_terakhir)
-    for step in range(n_steps):
-        inov = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
-        next_log = current_log[-1] + theta_ou*(locked_log_mean20-current_log[-1]) + inov
-        current_log = np.vstack([current_log, next_log]); paths[step] = np.exp(next_log)
-    mu_ou = theta_ou*(locked_log_mean20-np.log(harga_terakhir))
-    est_besok = float(np.exp(np.log(harga_terakhir)+mu_ou))
-    sim_h1 = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=2000)
-    prices_besok = harga_terakhir*np.exp(mu_ou+sim_h1)
-    low_est,up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
-    hit_tp = (np.any(paths>=r1,axis=0).sum()/n_sim)*100
-    hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
-    prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
+        # ============ MONTE CARLO (ADAPTIF) ============
+        if is_daytrade:
+            n_sim, n_steps = 2000, 30
+        else:
+            n_sim, n_days = 2000, 30
+            n_steps = n_days
+        latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
+        scale_corrected = latest_vol/np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
+        theta_ou = estimate_theta_ou(df['Close'])
+        locked_log_mean20 = np.log(df['Close']).tail(20).mean()
+        paths = np.zeros((n_steps,n_sim)); current_log = np.ones((1,n_sim))*np.log(harga_terakhir)
+        for step in range(n_steps):
+            inov = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
+            next_log = current_log[-1] + theta_ou*(locked_log_mean20-current_log[-1]) + inov
+            current_log = np.vstack([current_log, next_log]); paths[step] = np.exp(next_log)
+        mu_ou = theta_ou*(locked_log_mean20-np.log(harga_terakhir))
+        est_besok = float(np.exp(np.log(harga_terakhir)+mu_ou))
+        sim_h1 = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=2000)
+        prices_besok = harga_terakhir*np.exp(mu_ou+sim_h1)
+        low_est,up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
+        hit_tp = (np.any(paths>=r1,axis=0).sum()/n_sim)*100
+        hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
+        prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
 
-    if is_daytrade:
-        estimasi_label = "Estimasi Sesi Berikutnya"
-        prob_label = "Prob Naik Sesi Berikutnya"
-    else:
-        estimasi_label = "Estimasi Besok"
-        prob_label = "Prob Naik Besok"
+        if is_daytrade:
+            estimasi_label = "Estimasi Sesi Berikutnya"
+            prob_label = "Prob Naik Sesi Berikutnya"
+        else:
+            estimasi_label = "Estimasi Besok"
+            prob_label = "Prob Naik Besok"
 
-    # ============ METRIK TAMBAHAN UNTUK RIWAYAT ============
-    if "STRONG BUY" in signal: signal_score = 0.7 + (prob_bull / 200)
-    elif "BUY" in signal: signal_score = 0.4 + (prob_bull / 200)
-    elif "HOLD" in signal: signal_score = 0.2 + (prob_bull / 300)
-    else: signal_score = max(0, (prob_bull - 30) / 100)
-    signal_score = min(1.0, max(0.0, signal_score))
-    confidence = min(0.99, 0.5 + (signal_score * 0.5) + (win_bt - 0.5) * 0.1)
-    if confidence is None or np.isnan(confidence): confidence = 0.5
-    
-    trend_consistency = np.mean([1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0 for i in range(1, 11)]) * 100
-    if np.isnan(trend_consistency): trend_consistency = 50.0
-    
-    avg_vol_5 = df['Volume'].iloc[-5:].mean()
-    avg_vol_20 = df['Volume'].iloc[-20:].mean()
-    if avg_vol_20 > 0: vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
-    else: vol_surge_pct = 0.0
-    
-    avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
-    if np.isnan(avg_value): avg_value = 0.0
-    if avg_value >= 1e9: likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
-    elif avg_value >= 1e6: likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
-    elif avg_value >= 1e3: likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
-    else: likuiditas_str = f"Rp {avg_value:,.0f}"
+        # ============ METRIK TAMBAHAN UNTUK RIWAYAT ============
+        if "STRONG BUY" in signal: signal_score = 0.7 + (prob_bull / 200)
+        elif "BUY" in signal: signal_score = 0.4 + (prob_bull / 200)
+        elif "HOLD" in signal: signal_score = 0.2 + (prob_bull / 300)
+        else: signal_score = max(0, (prob_bull - 30) / 100)
+        signal_score = min(1.0, max(0.0, signal_score))
+        confidence = min(0.99, 0.5 + (signal_score * 0.5) + (win_bt - 0.5) * 0.1)
+        if confidence is None or np.isnan(confidence): confidence = 0.5
         
-    if rsi14 > 70: rsi_status = "Overbought"
-    elif rsi14 < 30: rsi_status = "Oversold"
-    else: rsi_status = "Normal"
-    
-    zscore_val = df['ZScore'].iloc[-1]
-    if pd.isna(zscore_val): zscore_val = 0.0
-    if zscore_val > 2: zs_status = "Overbought"
-    elif zscore_val < -2: zs_status = "Oversold"
-    else: zs_status = "Normal"
-    
-    if vol_surge_pct > 50: vs_status = "Tinggi"
-    elif vol_surge_pct < -30: vs_status = "Rendah"
-    else: vs_status = "Normal"
-    
-    coppock_val, coppock_prev = coppock_curve(df['Close'].values)
-    coppock_rising = coppock_val > coppock_prev
-    coppock_turning_up = coppock_rising and coppock_prev <= 0
-    if coppock_turning_up: coppock_status = "Turning Up"
-    elif coppock_rising: coppock_status = "Rising"
-    else: coppock_status = "Falling"
+        trend_consistency = np.mean([1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0 for i in range(1, 11)]) * 100
+        if np.isnan(trend_consistency): trend_consistency = 50.0
+        
+        avg_vol_5 = df['Volume'].iloc[-5:].mean()
+        avg_vol_20 = df['Volume'].iloc[-20:].mean()
+        if avg_vol_20 > 0: vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
+        else: vol_surge_pct = 0.0
+        
+        avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
+        if np.isnan(avg_value): avg_value = 0.0
+        if avg_value >= 1e9: likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
+        elif avg_value >= 1e6: likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
+        elif avg_value >= 1e3: likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
+        else: likuiditas_str = f"Rp {avg_value:,.0f}"
+            
+        if rsi14 > 70: rsi_status = "Overbought"
+        elif rsi14 < 30: rsi_status = "Oversold"
+        else: rsi_status = "Normal"
+        
+        zscore_val = df['ZScore'].iloc[-1]
+        if pd.isna(zscore_val): zscore_val = 0.0
+        if zscore_val > 2: zs_status = "Overbought"
+        elif zscore_val < -2: zs_status = "Oversold"
+        else: zs_status = "Normal"
+        
+        if vol_surge_pct > 50: vs_status = "Tinggi"
+        elif vol_surge_pct < -30: vs_status = "Rendah"
+        else: vs_status = "Normal"
+        
+        coppock_val, coppock_prev = coppock_curve(df['Close'].values)
+        coppock_rising = coppock_val > coppock_prev
+        coppock_turning_up = coppock_rising and coppock_prev <= 0
+        if coppock_turning_up: coppock_status = "Turning Up"
+        elif coppock_rising: coppock_status = "Rising"
+        else: coppock_status = "Falling"
 
-    ringkasan = {
-        "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
-        "Saham": ticker_raw,
-        "Harga": f"{harga_terakhir:,.0f}",
-        "Sinyal": signal,
-        "Estimasi": f"{est_besok:,.0f}",
-        "Prob Naik": f"{prob_bull:.1f}%",
-        "RRR": f"{rrr:.2f}",
-        "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
-        "Rezim": regime,
-        "TP%": f"{tp_pct_low:.1f}% - {tp_pct_high:.1f}%",
-        "SL%": f"{sl_pct:.1f}%",
-        "AI_Insight": "",
-        "Score": f"{signal_score:.3f}",
-        "Confidence": f"{confidence:.0%}",
-        "Coppock": coppock_status,
-        "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
-        "TP_Range": f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
-        "SL_Harga": f"Rp {sl_harga:,.0f}",
-        "Likuiditas": likuiditas_str,
-        "RSI": f"{rsi14:.1f}",
-        "RSI_Status": rsi_status,
-        "Vol_Surge": f"{vol_surge_pct:+.0f}%",
-        "VS_Status": vs_status,
-        "ZScore": f"{zscore_val:.2f}",
-        "ZS_Status": zs_status,
-        "Trend_Consistency": f"{trend_consistency:.0f}%",
-        "Beta": f"{beta_ihsg:.2f}",
-        "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
-        "Entry_Zone": entry_zone,
-        "Gaya": "DT" if is_daytrade else "SW"
-    }
+        ringkasan = {
+            "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
+            "Saham": ticker_raw,
+            "Harga": f"{harga_terakhir:,.0f}",
+            "Sinyal": signal,
+            "Estimasi": f"{est_besok:,.0f}",
+            "Prob Naik": f"{prob_bull:.1f}%",
+            "RRR": f"{rrr:.2f}",
+            "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
+            "Rezim": regime,
+            "TP%": f"{tp_pct_low:.1f}% - {tp_pct_high:.1f}%",
+            "SL%": f"{sl_pct:.1f}%",
+            "AI_Insight": "",
+            "Score": f"{signal_score:.3f}",
+            "Confidence": f"{confidence:.0%}",
+            "Coppock": coppock_status,
+            "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
+            "TP_Range": f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
+            "SL_Harga": f"Rp {sl_harga:,.0f}",
+            "Likuiditas": likuiditas_str,
+            "RSI": f"{rsi14:.1f}",
+            "RSI_Status": rsi_status,
+            "Vol_Surge": f"{vol_surge_pct:+.0f}%",
+            "VS_Status": vs_status,
+            "ZScore": f"{zscore_val:.2f}",
+            "ZS_Status": zs_status,
+            "Trend_Consistency": f"{trend_consistency:.0f}%",
+            "Beta": f"{beta_ihsg:.2f}",
+            "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
+            "Entry_Zone": entry_zone,
+            "Gaya": "DT" if is_daytrade else "SW"
+        }
 
     # ==================== TAMPILAN UTAMA ====================
     st.title("📊 Quant & Risk Engine Pro")
@@ -1382,7 +1383,7 @@ if run_btn:
         at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
     elif "BUY" in signal:
         ac,ai = "#f59e0b","🟡"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP bertahap {ringkasan['TP_Range']}."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP {tp_harga:,.0f}."
     elif "HOLD" in signal:
         ac,ai = "#3b82f6","🔵"
         at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
@@ -1958,3 +1959,4 @@ if ai_riwayat_btn:
             elif hasil:
                 hasil_bersih = bersihkan_teks_ai(hasil)
                 st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{hasil_bersih}</p></div>', unsafe_allow_html=True)
+                
