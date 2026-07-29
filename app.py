@@ -1108,8 +1108,8 @@ elif rrr >= 1.0:
     rrr_status = "Cukup (1.0 - 1.5) 🟡"
 else:
     rrr_status = "Buruk (< 1.0) 🔴"
-         # ============ PIVOT (ADAPTIF) ============
-    if is_daytrade:
+        # ============ PIVOT (ADAPTIF) ============
+        if is_daytrade:
             today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
             if not df_daily.empty:
                 df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
@@ -1240,6 +1240,7 @@ else:
                 res20 = float(df['High'].max())
             breakout_label = "Breakout 20 Hari"
         breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
+
         # ============ SINYAL ============
         def generate_signals_vectorized(dataframe, mom_th):
             score = pd.Series(0, index=dataframe.index)
@@ -1254,7 +1255,6 @@ else:
             return sig
         df['Signal'] = generate_signals_vectorized(df, mom_median_th)
         signal = df['Signal'].iloc[-1]
-
         # ============ BACKTEST (ADAPTIF) ============
         if is_daytrade:
             backtest_window = min(500, len(df))
@@ -1585,9 +1585,6 @@ else:
         entry_low_f = fraksi_bei(entry_low)
         entry_high_f = fraksi_bei(entry_high)
         entry_zone_f = f"Rp {entry_low_f:,.0f} - {entry_high_f:,.0f}"
-        
-        tp_harga_f = fraksi_bei(tp_harga)
-        sl_harga_f = fraksi_bei(sl_harga)
         
         t3.metric("Entry Zone", entry_zone_f)
         t4.metric("TP Range", f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
