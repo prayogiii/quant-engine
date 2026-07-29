@@ -1162,6 +1162,65 @@ else:
                 pp = (hi + lo + cl) / 3
                 r1 = 2 * pp - lo; s1 = 2 * pp - hi
                 r2 = pp + (hi - lo); s2 = pp - (hi - lo)
+                    # ============ ENTRY ZONE (ADAPTIF) ============
+        if s1 >= harga_terakhir * 0.98:
+            entry_low = s1
+        else:
+            entry_low = harga_terakhir * (1 - atr_pct/100)
+        if "STRONG BUY" in signal:
+            entry_high = harga_terakhir
+        else:
+            entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
+        if entry_low > entry_high:
+            entry_low, entry_high = entry_high, entry_low
+        min_entry_width = 0.5 * atr14_val
+        if (entry_high - entry_low) < min_entry_width:
+            entry_high = entry_low + min_entry_width
+        entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
+
+        # ============ MULTIPLIER SL & TP ============
+        sl_mult = 1.0
+        if adx > 30 and 30 < rsi14 < 70:
+            sl_mult = 0.75
+        elif adx < 20:
+            sl_mult = 1.25
+        if rsi14 > 70 or rsi14 < 30:
+            sl_mult = 1.5
+        tp_mult_low = 1.5
+        tp_mult_high = 2.5
+        if adx > 30 and 30 < rsi14 < 70:
+            tp_mult_low, tp_mult_high = 2.0, 3.0
+        elif adx < 20:
+            tp_mult_low, tp_mult_high = 1.2, 1.8
+
+        # ============ STOP LOSS (dari entry_low) ============
+        sl_harga = entry_low - sl_mult * atr14_val
+        if sl_harga <= 0:
+            sl_harga = harga_terakhir * 0.95
+        sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
+
+        # ============ TAKE PROFIT RANGE ============
+        if r1 > harga_terakhir:
+            tp_low = r1
+        else:
+            tp_low = harga_terakhir + tp_mult_low * atr14_val
+        if r2 > harga_terakhir:
+            tp_high = r2
+        else:
+            tp_high = harga_terakhir + tp_mult_high * atr14_val
+        if tp_low > tp_high:
+            tp_low, tp_high = tp_high, tp_low
+        tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
+        tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
+
+        # ============ RRR ============
+        risk = harga_terakhir - sl_harga
+        reward = tp_low - harga_terakhir
+        rrr = reward / risk if risk > 0 else 0
+        if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+        elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
+        elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
+        else: rrr_status = "Buruk (< 1.0) 🔴"
 
         # Breakout (adaptif)
         if is_daytrade:
@@ -1194,13 +1253,6 @@ else:
             return sig
         df['Signal'] = generate_signals_vectorized(df, mom_median_th)
         signal = df['Signal'].iloc[-1]
-
-        # ============ ENTRY ZONE ADAPTIF ============
-        if s1 >= harga_terakhir * 0.95: entry_low = s1
-        else: entry_low = harga_terakhir * (1 - atr_pct/100)
-        if "STRONG BUY" in signal: entry_high = harga_terakhir
-        else: entry_high = harga_terakhir * (1 - 0.5 * atr_pct/100)
-        entry_zone = f"Rp {entry_low:,.0f} - {entry_high:,.0f}"
 
         # ============ BACKTEST (ADAPTIF) ============
         if is_daytrade:
