@@ -1414,18 +1414,18 @@ if run_btn:
         at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
     col1,col2 = st.columns([1,1])
     with col1:
-    st.markdown(f'''
-        <div class="summary-card">
-            <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
-            <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)</div>
-            <div class="summary-item">🎯 <b>Take Profit Range:</b> {ringkasan['TP_Range']}<br>
-                <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
-            <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
-            <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
-            <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
-            <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
-        </div>
-    ''', unsafe_allow_html=True)
+        st.markdown(f'''
+            <div class="summary-card">
+                <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
+                <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)</div>
+                <div class="summary-item">🎯 <b>Take Profit Range:</b> {ringkasan['TP_Range']}<br>
+                    <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
+                <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
+                <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
+                <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
+                <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
+            </div>
+        ''', unsafe_allow_html=True)
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
