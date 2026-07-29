@@ -66,6 +66,14 @@ def fraksi_bei(harga):
         fraksi = 25
     return round(harga / fraksi) * fraksi
 
+def fraksi_step(harga):
+    """Mengembalikan nilai kelipatan 1 fraksi BEI."""
+    if harga < 200: return 1
+    elif harga < 500: return 2
+    elif harga < 2000: return 5
+    elif harga < 5000: return 10
+    else: return 25
+
 # ====================== GOOGLE SHEETS FUNCTIONS ======================
 def get_gsheet():
     """Mengembalikan objek spreadsheet berdasarkan secrets."""
@@ -1130,9 +1138,25 @@ if run_btn:
         tp_mult_low, tp_mult_high = 1.2, 1.8
 
     # ============ STOP LOSS (dari entry_low) ============
-    sl_harga = entry_low - sl_mult * atr14_val
+    if is_daytrade:
+        # Intraday Day Trade: ATR 5m sangat kecil, gunakan Pivot Support 2 (S2) jika valid, 
+        # atau gunakan buffer minimum (minimal 1.5% atau 3x 5m ATR) agar tidak melekat pada fraksi entry.
+        min_sl_dist = max(3.0 * atr14_val, harga_terakhir * 0.015, 2 * fraksi_step(harga_terakhir))
+        if s2 < entry_low and (entry_low - s2) >= min_sl_dist:
+            sl_harga = s2
+        else:
+            sl_harga = entry_low - min_sl_dist
+    else:
+        # Swing Trade: Gunakan multiplier ATR harian
+        sl_harga = entry_low - sl_mult * atr14_val
+
+    # Pastikan SL dibulatkan ke fraksi BEI & minimal 1-2 fraksi di bawah entry_low
+    sl_harga = fraksi_bei(sl_harga)
+    step = fraksi_step(entry_low)
+    if sl_harga >= entry_low:
+        sl_harga = fraksi_bei(entry_low - 2 * step)
     if sl_harga <= 0:
-        sl_harga = harga_terakhir * 0.95
+        sl_harga = fraksi_bei(harga_terakhir * 0.95)
     sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
 
      # ============ TAKE PROFIT RANGE ============
@@ -1381,13 +1405,13 @@ if run_btn:
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
     if rrr < 1.0 and ("BUY" in signal):
         ac,ai = "#ef4444","⚠️"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP bertahap {ringkasan['TP_Range']}."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
     elif "STRONG BUY" in signal:
         ac,ai = "#10b981","🟢"
-        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
+        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
     elif "BUY" in signal:
         ac,ai = "#f59e0b","🟡"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP {tp_harga:,.0f}."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
     elif "HOLD" in signal:
         ac,ai = "#3b82f6","🔵"
         at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
