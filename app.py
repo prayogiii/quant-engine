@@ -639,10 +639,14 @@ with st.sidebar:
                 c1, c2 = st.columns(2)
                 tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
                 sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
+                tp_val = r.get('TP_Harga') or r.get('TP_Range', '?')
+                tp_display = str(tp_val) if str(tp_val).startswith('Rp') else f"Rp {tp_val}"
+                sl_val = r.get('SL_Harga', '?')
+                sl_display = str(sl_val) if str(sl_val).startswith('Rp') else f"Rp {sl_val}"
                 with c1:
-                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('TP_Harga','?')}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{tp_display}</div></div>""", unsafe_allow_html=True)
                 with c2:
-                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">Rp {r.get('SL_Harga','?')}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div></div>""", unsafe_allow_html=True)
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
@@ -1360,8 +1364,9 @@ if run_btn:
         "Confidence": f"{confidence:.0%}",
         "Coppock": coppock_status,
         "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
+        "TP_Harga": f"{tp_low_f:,.0f} - {tp_high_f:,.0f}",
         "TP_Range": f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
-        "SL_Harga": f"Rp {sl_harga_f:,.0f}",
+        "SL_Harga": f"{sl_harga_f:,.0f}",
         "Likuiditas": likuiditas_str,
         "RSI": f"{rsi14:.1f}",
         "RSI_Status": rsi_status,
