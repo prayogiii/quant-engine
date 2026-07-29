@@ -1008,45 +1008,102 @@ if run_btn:
             else: beta_ihsg = 1.0
         except: beta_ihsg = 1.0
 
-        # ============ ATR & RSI ============
-        df['TR'] = pd.concat([
-            df['High'] - df['Low'],
-            (df['High'] - df['Close'].shift()).abs(),
-            (df['Low'] - df['Close'].shift()).abs()
-        ], axis=1).max(axis=1)
-        atr14 = df['TR'].rolling(14).mean().iloc[-1]
-        atr_pct = (atr14 / harga_terakhir_asli) * 100
-
-        delta = df['Close'].diff()
-        gain = delta.where(delta > 0, 0.0)
-        loss = -delta.where(delta < 0, 0.0)
-        avg_gain = gain.rolling(14).mean().iloc[-1]
-        avg_loss = loss.rolling(14).mean().iloc[-1]
-        if avg_loss is None or avg_loss == 0: rsi14 = 100.0
-        else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
-
-        # --- Override harga untuk eksekusi (sebelum TP/SL) ---
-        if harga_terakhir_manual:
-            harga_terakhir = harga_terakhir_manual
-        else:
-            harga_terakhir = harga_terakhir_asli
-
-        # === MULTIPLIER TP/SL ===
-        tp_mult, sl_mult = 2.0, 1.0
-        if adx > 30 and 30 < rsi14 < 70: tp_mult, sl_mult = 2.5, 1.0
-        elif adx < 20: tp_mult, sl_mult = 1.5, 0.75
-        if rsi14 > 70 or rsi14 < 30: tp_mult = min(tp_mult, 1.5)
-
-        sl_pct = sl_mult * atr_pct
-        tp_pct = tp_mult * atr_pct
-        sl_harga = harga_terakhir * (1 - sl_pct/100)
-        tp_harga = harga_terakhir * (1 + tp_pct/100)
-        rrr = tp_pct / sl_pct if sl_pct > 0 else 0
-        if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
-        elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
-        elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
-        else: rrr_status = "Buruk (< 1.0) 🔴"
-
+    # ============ ATR & RSI ============
+    df['TR'] = pd.concat([
+        df['High'] - df['Low'],
+        (df['High'] - df['Close'].shift()).abs(),
+        (df['Low'] - df['Close'].shift()).abs()
+    ], axis=1).max(axis=1)
+    atr14_val = df['TR'].rolling(14).mean().iloc[-1]      # ATR dalam rupiah
+    atr_pct = (atr14_val / harga_terakhir_asli) * 100       # ATR dalam persen
+    
+    delta = df['Close'].diff()
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    avg_gain = gain.rolling(14).mean().iloc[-1]
+    avg_loss = loss.rolling(14).mean().iloc[-1]
+    if avg_loss is None or avg_loss == 0: rsi14 = 100.0
+    else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
+    
+    # --- Override harga untuk eksekusi ---
+    if harga_terakhir_manual:
+        harga_terakhir = harga_terakhir_manual
+    else:
+        harga_terakhir = harga_terakhir_asli
+    
+    # ============ ENTRY ZONE ============
+    # Tentukan entry_low (support utama) dengan S1 atau ATR
+    if s1 >= harga_terakhir * 0.98:          # S1 sangat dekat, gunakan sebagai entry_low
+        entry_low = s1
+    else:
+        entry_low = harga_terakhir * (1 - atr_pct/100)   # fallback ATR
+    
+    # Entry high: sedikit di bawah harga (untuk order limit)
+    if "STRONG BUY" in signal:
+        entry_high = harga_terakhir
+    else:
+        entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
+    
+    # Validasi: pastikan entry_low < entry_high, jika tidak tukar dan beri lebar minimal
+    if entry_low > entry_high:
+        entry_low, entry_high = entry_high, entry_low
+    min_entry_width = 0.5 * atr14_val
+    if (entry_high - entry_low) < min_entry_width:
+        entry_high = entry_low + min_entry_width
+    
+    entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
+    
+    # ============ MULTIPLIER TP/SL (khusus untuk menghitung besaran) ============
+    # Multiplier SL: berapa kali ATR di bawah entry_low
+    sl_mult = 1.0
+    if adx > 30 and 30 < rsi14 < 70:
+        sl_mult = 0.75       # tren kuat, SL lebih ketat
+    elif adx < 20:
+        sl_mult = 1.25       # pasar sideways, SL lebih longgar
+    if rsi14 > 70 or rsi14 < 30:
+        sl_mult = 1.5        # overbought/oversold, SL perlu lebar
+    
+    # Multiplier TP: untuk TP_low dan TP_high (jika pivot tidak valid)
+    tp_mult_low = 1.5
+    tp_mult_high = 2.5
+    if adx > 30 and 30 < rsi14 < 70:
+        tp_mult_low, tp_mult_high = 2.0, 3.0
+    elif adx < 20:
+        tp_mult_low, tp_mult_high = 1.2, 1.8
+    
+    # ============ STOP LOSS ============
+    sl_harga = entry_low - sl_mult * atr14_val     # SL dalam rupiah, pasti di bawah entry_low
+    if sl_harga <= 0:                              # fallback kalau terlalu rendah
+        sl_harga = harga_terakhir * 0.95
+    sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100   # persentase SL dari harga sekarang
+    
+    # ============ TAKE PROFIT RANGE ============
+    # Gunakan pivot R1/R2 jika di atas harga, jika tidak fallback ke ATR
+    if r1 > harga_terakhir:
+        tp_low = r1
+    else:
+        tp_low = harga_terakhir + tp_mult_low * atr14_val
+    
+    if r2 > harga_terakhir:
+        tp_high = r2
+    else:
+        tp_high = harga_terakhir + tp_mult_high * atr14_val
+    
+    # Pastikan tp_low < tp_high
+    if tp_low > tp_high:
+        tp_low, tp_high = tp_high, tp_low
+    
+    tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
+    tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
+    
+    # ============ RRR (berdasarkan TP minimal) ============
+    risk = harga_terakhir - sl_harga
+    reward = tp_low - harga_terakhir
+    rrr = reward / risk if risk > 0 else 0
+    if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+    elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
+    elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
+    else: rrr_status = "Buruk (< 1.0) 🔴"
         # ============ PIVOT (ADAPTIF) ============
         if is_daytrade:
             today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
@@ -1287,15 +1344,15 @@ if run_btn:
             "RRR": f"{rrr:.2f}",
             "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
             "Rezim": regime,
-            "TP%": f"{tp_pct:.1f}",
-            "SL%": f"{sl_pct:.1f}",
+            "TP%": f"{tp_pct_low:.1f}% - {tp_pct_high:.1f}%",
+            "SL%": f"{sl_pct:.1f}%",
             "AI_Insight": "",
             "Score": f"{signal_score:.3f}",
             "Confidence": f"{confidence:.0%}",
             "Coppock": coppock_status,
             "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
-            "TP_Harga": f"{tp_harga:,.0f}",
-            "SL_Harga": f"{sl_harga:,.0f}",
+            "TP_Range": f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
+            "SL_Harga": f"Rp {sl_harga:,.0f}",
             "Likuiditas": likuiditas_str,
             "RSI": f"{rsi14:.1f}",
             "RSI_Status": rsi_status,
@@ -1342,10 +1399,10 @@ if run_btn:
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
     if rrr < 1.0 and ("BUY" in signal):
         ac,ai = "#ef4444","⚠️"
-        at = f"• <b>KONDISI:</b> Sinyal {signal} tapi <b>RRR Buruk ({rrr:.2f})</b><br>• <b>REKOMENDASI:</b> WAIT & SEE<br>• <b>LANGKAH:</b> Tunda entry, tunggu setup lebih baik."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP bertahap {ringkasan['TP_Range']}."
     elif "STRONG BUY" in signal:
         ac,ai = "#10b981","🟢"
-        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry zone {entry_zone}, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP {tp_harga:,.0f} (+{tp_pct:.1f}%)."
+        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
     elif "BUY" in signal:
         ac,ai = "#f59e0b","🟡"
         at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga:,.0f}, TP {tp_harga:,.0f}."
@@ -1357,17 +1414,18 @@ if run_btn:
         at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
     col1,col2 = st.columns([1,1])
     with col1:
-        st.markdown(f'''
-            <div class="summary-card">
-                <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
-                <div class="summary-item">🛡️ <b>Stop Loss:</b> -{sl_pct:.1f}% (Rp {sl_harga:,.0f})</div>
-                <div class="summary-item">🎯 <b>Take Profit:</b> +{tp_pct:.1f}% (Rp {tp_harga:,.0f})</div>
-                <div class="summary-item">⚖️ <b>Risk:Reward:</b> 1 : {rrr:.2f} ({rrr_status})</div>
-                <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
-                <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
-                <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
-            </div>
-        ''', unsafe_allow_html=True)
+    st.markdown(f'''
+        <div class="summary-card">
+            <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
+            <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga:,.0f} (-{sl_pct:.1f}%)</div>
+            <div class="summary-item">🎯 <b>Take Profit Range:</b> {ringkasan['TP_Range']}<br>
+                <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
+            <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
+            <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
+            <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
+            <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
+        </div>
+    ''', unsafe_allow_html=True)
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
@@ -1475,8 +1533,9 @@ if run_btn:
         sl_harga_f = fraksi_bei(sl_harga)
         
         t3.metric("Entry Zone", entry_zone_f)
-        t4.metric("Take Profit", f"Rp {tp_harga_f:,.0f} (+{tp_pct:.1f}%)".replace(",","."), "Target Profit")
-        t5.metric("Stop Loss", f"Rp {sl_harga_f:,.0f} (-{sl_pct:.1f}%)".replace(",","."), "Stop Loss")
+        t4.metric("TP Range", f"Rp {tp_low:,.0f} - Rp {tp_high:,.0f}",
+          f"+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%")
+        t5.metric("Stop Loss", f"Rp {sl_harga:,.0f}", f"-{sl_pct:.1f}%")
         st.markdown(f"**Hasil Backtest ({backtest_window} Bar):**"); b1,b2,b3,b4,b5,b6=st.columns(6)
         b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
         b3.metric("Avg Return/Trade",f"{avg_bt:.2%}" if trades_bt else "N/A"); b4.metric("Max DD Strat",f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
