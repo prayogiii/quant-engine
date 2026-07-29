@@ -1108,19 +1108,19 @@ elif rrr >= 1.0:
     rrr_status = "Cukup (1.0 - 1.5) 🟡"
 else:
     rrr_status = "Buruk (< 1.0) 🔴"
-        # ============ PIVOT (ADAPTIF) ============
-    if is_daytrade:
-        today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
-        if not df_daily.empty:
-            df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
-            if not df_daily_filtered.empty:
-                prev_day = df_daily_filtered.iloc[-1]
-                hi_daily = float(prev_day['High'])
-                lo_daily = float(prev_day['Low'])
-                cl_daily = float(prev_day['Close'])
-            else:
-                prev_day = None
-                for i in range(1, min(len(df_daily), 6)):
+                # ============ PIVOT (ADAPTIF) ============
+        if is_daytrade:
+            today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
+            if not df_daily.empty:
+                df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
+                if not df_daily_filtered.empty:
+                    prev_day = df_daily_filtered.iloc[-1]
+                    hi_daily = float(prev_day['High'])
+                    lo_daily = float(prev_day['Low'])
+                    cl_daily = float(prev_day['Close'])
+                else:
+                    prev_day = None
+                    for i in range(1, min(len(df_daily), 6)):
                         row = df_daily.iloc[-i]
                         h_val = float(row['High'])
                         l_val = float(row['Low'])
@@ -1129,7 +1129,7 @@ else:
                             prev_day = row
                             hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
                             break
-            if prev_day is None:
+                    if prev_day is None:
                         last = df_daily.iloc[-1]
                         hi_daily = float(last['High'])
                         lo_daily = float(last['Low'])
@@ -1157,12 +1157,14 @@ else:
                     break
             if hi is None:
                 hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
-            if hi == lo: pp = r1 = s1 = r2 = s2 = cl
+            if hi == lo:
+                pp = r1 = s1 = r2 = s2 = cl
             else:
                 pp = (hi + lo + cl) / 3
                 r1 = 2 * pp - lo; s1 = 2 * pp - hi
                 r2 = pp + (hi - lo); s2 = pp - (hi - lo)
-                    # ============ ENTRY ZONE (ADAPTIF) ============
+
+        # ============ ENTRY ZONE (ADAPTIF) ============
         if s1 >= harga_terakhir * 0.98:
             entry_low = s1
         else:
@@ -1238,7 +1240,6 @@ else:
                 res20 = float(df['High'].max())
             breakout_label = "Breakout 20 Hari"
         breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
-
         # ============ SINYAL ============
         def generate_signals_vectorized(dataframe, mom_th):
             score = pd.Series(0, index=dataframe.index)
