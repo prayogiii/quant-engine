@@ -1173,47 +1173,47 @@ if run_btn:
     df['Signal'] = generate_signals_vectorized(df, mom_median_th)
     signal = df['Signal'].iloc[-1]
     # ============ BACKTEST (ADAPTIF) ============
+    if is_daytrade:
+        backtest_window = min(500, len(df))
+    else:
+        backtest_window = 126
+    df_back = df.iloc[-backtest_window:].copy()
+    trades, daily_returns = [], []
+    in_position, entry_price = False, 0.0
+    for i in range(len(df_back)):
+        curr_sig = df_back['Signal'].iloc[i]
+        curr_close = float(df_back['Close'].iloc[i])
+        prev_close = float(df_back['Close'].iloc[i-1]) if i>0 else curr_close
+        if in_position:
+            daily_returns.append((curr_close-prev_close)/prev_close if prev_close else 0)
+            if "AVOID" in curr_sig or i==len(df_back)-1:
+                trades.append((curr_close-entry_price)/entry_price); in_position=False
+        else:
+            daily_returns.append(0.0)
+            if "BUY" in curr_sig: in_position, entry_price = True, curr_close
+    if trades:
+        win_bt = sum(1 for r in trades if r>0)/len(trades)
+        loss_trades = [r for r in trades if r<0]; profit_trades = [r for r in trades if r>0]
+        pf_bt = abs(sum(profit_trades)/sum(loss_trades)) if loss_trades else np.inf
+        avg_bt = np.mean(trades)
+        equity = np.cumprod([1+r for r in trades])
+        max_dd_bt = float(np.min(equity/np.maximum.accumulate(equity)-1)*100) if len(equity) else 0
+        daily_ret = np.array(daily_returns)
         if is_daytrade:
-            backtest_window = min(500, len(df))
+            bars_per_day = bars_per_day_map.get(actual_interval, 54)
+            annual_factor = np.sqrt(bars_per_day * 252)
         else:
-            backtest_window = 126
-        df_back = df.iloc[-backtest_window:].copy()
-        trades, daily_returns = [], []
-        in_position, entry_price = False, 0.0
-        for i in range(len(df_back)):
-            curr_sig = df_back['Signal'].iloc[i]
-            curr_close = float(df_back['Close'].iloc[i])
-            prev_close = float(df_back['Close'].iloc[i-1]) if i>0 else curr_close
-            if in_position:
-                daily_returns.append((curr_close-prev_close)/prev_close if prev_close else 0)
-                if "AVOID" in curr_sig or i==len(df_back)-1:
-                    trades.append((curr_close-entry_price)/entry_price); in_position=False
-            else:
-                daily_returns.append(0.0)
-                if "BUY" in curr_sig: in_position, entry_price = True, curr_close
-        if trades:
-            win_bt = sum(1 for r in trades if r>0)/len(trades)
-            loss_trades = [r for r in trades if r<0]; profit_trades = [r for r in trades if r>0]
-            pf_bt = abs(sum(profit_trades)/sum(loss_trades)) if loss_trades else np.inf
-            avg_bt = np.mean(trades)
-            equity = np.cumprod([1+r for r in trades])
-            max_dd_bt = float(np.min(equity/np.maximum.accumulate(equity)-1)*100) if len(equity) else 0
-            daily_ret = np.array(daily_returns)
-            if is_daytrade:
-                bars_per_day = bars_per_day_map.get(actual_interval, 54)
-                annual_factor = np.sqrt(bars_per_day * 252)
-            else:
-                annual_factor = np.sqrt(252)
-            sharpe_bt = (daily_ret.mean()/daily_ret.std())*annual_factor if daily_ret.std() else 0
-            trades_bt = len(trades)
-        else:
-            win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
+            annual_factor = np.sqrt(252)
+        sharpe_bt = (daily_ret.mean()/daily_ret.std())*annual_factor if daily_ret.std() else 0
+        trades_bt = len(trades)
+    else:
+        win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
 
-        if is_daytrade and trades_bt < 15:
-            st.warning(
-                f"⚠️ Backtest hanya menghasilkan **{trades_bt}** sinyal trading dalam {backtest_window} bar. "
-                "Jumlah ini terlalu sedikit untuk backtest yang andal di mode Day Trade. "
-                "Interpretasikan Win Rate, Sharpe, dan metrik lainnya dengan sangat hati‑hati."
+    if is_daytrade and trades_bt < 15:
+        st.warning(
+            f"⚠️ Backtest hanya menghasilkan **{trades_bt}** sinyal trading dalam {backtest_window} bar. "
+            "Jumlah ini terlalu sedikit untuk backtest yang andal di mode Day Trade. "
+            "Interpretasikan Win Rate, Sharpe, dan metrik lainnya dengan sangat hati‑hati."
             )
 
         # ============ KELLY ============
