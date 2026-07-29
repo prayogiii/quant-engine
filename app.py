@@ -1312,6 +1312,13 @@ if run_btn:
     elif coppock_rising: coppock_status = "Rising"
     else: coppock_status = "Falling"
 
+    est_besok_f = fraksi_bei(est_besok)
+    low_est_f = fraksi_bei(low_est)
+    up_est_f = fraksi_bei(up_est)
+    tp_low_f = fraksi_bei(tp_low)
+    tp_high_f = fraksi_bei(tp_high)
+    sl_harga_f = fraksi_bei(sl_harga)
+
     ringkasan = {
         "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
         "Saham": ticker_raw,
@@ -1352,12 +1359,6 @@ if run_btn:
 
     col1,col2,col3 = st.columns(3)
     col1.metric("Sinyal Eksekusi", signal)
-    est_besok_f = fraksi_bei(est_besok)
-    low_est_f = fraksi_bei(low_est)
-    up_est_f = fraksi_bei(up_est)
-    tp_low_f = fraksi_bei(tp_low)
-    tp_high_f = fraksi_bei(tp_high)
-    sl_harga_f = fraksi_bei(sl_harga)
     col2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."),
                 f"50% range: Rp {low_est_f:,.0f} - {up_est_f:,.0f}".replace(",","."))
     col3.metric(prob_label, f"{prob_bull:.1f}%")
