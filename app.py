@@ -1108,7 +1108,7 @@ elif rrr >= 1.0:
     rrr_status = "Cukup (1.0 - 1.5) 🟡"
 else:
     rrr_status = "Buruk (< 1.0) 🔴"
-        # ============ PIVOT (ADAPTIF) ============
+# ============ PIVOT (ADAPTIF) ============
         if is_daytrade:
             today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
             if not df_daily.empty:
