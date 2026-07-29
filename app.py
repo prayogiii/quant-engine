@@ -1720,7 +1720,7 @@ else:
     simpan_riwayat(ringkasan)
 
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
-else:
+    else:
     st.title("📊 Quant & Risk Engine Pro")
     st.markdown("""
     ## Selamat Datang di Dashboard Analisis Saham IHSG
