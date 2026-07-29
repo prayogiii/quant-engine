@@ -1030,23 +1030,24 @@ if run_btn:
         harga_terakhir = harga_terakhir_manual
     else:
         harga_terakhir = harga_terakhir_asli
-    
-    # ============ ENTRY ZONE ============
+        # ============ ENTRY ZONE ============
     # Gunakan S1 jika sangat dekat dengan harga (<= 2% di bawah), jika tidak pakai ATR
-    if s1 >= harga_terakhir * 0.98:  
+    if s1 >= harga_terakhir * 0.98:
         entry_low = s1
     else:
-        entry_low = harga_terakhir * (1 - atr_pct/100)  
+        entry_low = harga_terakhir * (1 - atr_pct/100)
     
-    # Entry high: sedikit di bawah harga (untuk order limit)
+    # Entry high sedikit di bawah harga (untuk limit order)
     if "STRONG BUY" in signal:
         entry_high = harga_terakhir
     else:
         entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
     
-    # Validasi: pastikan entry_low < entry_high, jika tidak tukar dan beri lebar minimal
+    # Pastikan entry_low < entry_high
     if entry_low > entry_high:
         entry_low, entry_high = entry_high, entry_low
+    
+    # Lebar minimal = 0.5 x ATR (rupiah)
     min_entry_width = 0.5 * atr14_val
     if (entry_high - entry_low) < min_entry_width:
         entry_high = entry_low + min_entry_width
