@@ -1143,9 +1143,9 @@ if run_btn:
 
     # ============ STOP LOSS (dari entry_low) ============
     if is_daytrade:
-        # Intraday Day Trade: ATR 5m sangat kecil, gunakan Pivot Support 2 (S2) jika valid, 
-        # atau gunakan buffer minimum (minimal 1.5% atau 3x 5m ATR) agar tidak melekat pada fraksi entry.
-        min_sl_dist = max(3.0 * atr14_val, harga_terakhir * 0.015, 2 * fraksi_step(harga_terakhir))
+        # Intraday Day Trade: ATR 5m dikombinasikan dengan sl_mult (ADX & RSI), Pivot Support 2 (S2), 
+        # serta batas minimum (1.5% * sl_mult / 2 fraksi BEI) agar leluasa dari noise intraday.
+        min_sl_dist = max(3.0 * atr14_val * sl_mult, harga_terakhir * 0.015 * sl_mult, 2 * fraksi_step(harga_terakhir))
         if s2 < entry_low and (entry_low - s2) >= min_sl_dist:
             sl_harga = s2
         else:
