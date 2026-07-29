@@ -51,6 +51,15 @@ SOFTMAX_TEMP  = 2.5
 AI_SIGNAL_CAP = 0.30
 MC_PESSIMISM  = 0.82
 
+# ============ SMART KEYWORDS (Android‑like) ============
+SMART_KEYWORDS = [
+    "fed", "fomc", "rate", "inflation", "perang", "war", "konflik", "conflict",
+    "bi rate", "interest", "msci", "ftse", "trump", "election", "ihsg",
+    "rups", "dividen", "dividend", "laba", "profit", "lk", "report", "buyback",
+    "emas", "gold", "xau", "minyak", "oil", "crude", "coal", "nikel", "nickel",
+    "bond", "yield", "rupiah", "ekspor", "impor", "china", "nikkei", "dow jones", "nasdaq", "akuisisi"
+]
+
 # ====================== FRAKSI HARGA BEI ======================
 def fraksi_bei(harga):
     """Membulatkan harga ke kelipatan fraksi sesuai aturan BEI."""
@@ -306,14 +315,14 @@ def muat_riwayat_actual():
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
+
 def hapus_riwayat_item(waktu, saham):
     """Hapus satu entri riwayat berdasarkan Waktu dan Saham."""
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        # Filter entri yang tidak cocok
         filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
-        filtered = filtered[:50]  # jaga maksimal 50
+        filtered = filtered[:50]
         sheet.clear()
         if filtered:
             headers = list(filtered[0].keys())
@@ -323,14 +332,13 @@ def hapus_riwayat_item(waktu, saham):
         st.session_state.riwayat = filtered
     except Exception as e:
         st.error(f"❌ Gagal menghapus riwayat: {e}")
-        
+
 def simpan_riwayat_actual(waktu, saham, actual_data):
     """Simpan/update data actual untuk satu entri riwayat."""
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
         headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome']
-        # Cari apakah sudah ada
         row_index = None
         for i, row in enumerate(records):
             if row.get('Waktu') == waktu and row.get('Saham') == saham:
@@ -347,9 +355,7 @@ def simpan_riwayat_actual(waktu, saham, actual_data):
             if not records:
                 sheet.insert_row(headers, 1)
             sheet.append_row(new_row, value_input_option='RAW')
-        # Refresh session state
         st.session_state.riwayat_actual = muat_riwayat_actual()
-        # === INTEGRASI KE V12 ENGINE ===
         integrate_actual_to_v12(waktu, saham, actual_data)
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
@@ -360,15 +366,12 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
         ticker = saham
         last_pred = load_v12_predictions(ticker)
         if not last_pred:
-            return  # Tidak ada prediksi sebelumnya, tidak bisa dibandingkan
-
+            return
         factor_signals = {}
         for k in FACTOR_KEYS:
             key = f'sig_{k}'
             if key in last_pred:
                 factor_signals[k] = float(last_pred[key])
-
-        # Konversi outcome ke actual_return (-1..1)
         outcome = actual_data.get('Outcome', '')
         if outcome == 'Win':
             actual_return = 1.0
@@ -376,8 +379,6 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
             actual_return = -1.0
         else:
             actual_return = 0.0
-
-        # Jika ada Actual_Close, hitung return lebih presisi
         if actual_data.get('Actual_Close'):
             try:
                 actual_close = float(actual_data['Actual_Close'])
@@ -387,9 +388,7 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
                     actual_return = max(-1.0, min(1.0, actual_return))
             except:
                 pass
-
         update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
-
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 
@@ -483,6 +482,149 @@ def bersihkan_teks_ai(teks):
     teks = re.sub(r'\*', '', teks)
     teks = teks.replace('\n', '<br>')
     return teks
+
+# ==========================================
+# FUNGSI BERITA ENHANCED (Android‑like)
+# ==========================================
+
+def get_google_news_rss(query_str, num=5):
+    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
+    try:
+        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
+        feed = feedparser.parse(url)
+        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
+        return news, None
+    except Exception as e: return [], str(e)
+
+def get_yahoo_rss(ticker_raw, num=5):
+    """Ambil berita dari Yahoo Finance RSS untuk ticker .JK (seperti Android)."""
+    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
+    try:
+        url = f"https://finance.yahoo.com/rss/headline?s={ticker_raw}.JK"
+        feed = feedparser.parse(url)
+        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Yahoo Finance'} for e in feed.entries[:num]]
+        return news, None
+    except Exception as e: return [], str(e)
+
+def get_google_news_enhanced(ticker_raw, max_per_query=3, total_max=20):
+    """Multi‑query Google News seperti di Android."""
+    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
+    all_news = []
+    queries = [
+        f"{ticker_raw} site:cnbcindonesia.com",
+        f"{ticker_raw} site:bloomberg.com",
+        f"{ticker_raw} site:reuters.com",
+        ticker_raw,
+    ]
+    macro_queries = [
+        "IHSG Hari Ini",
+        "The Fed BI Rate Rupiah",
+        "Oil",
+        "Gold",
+        "Nickel",
+        "Perang",
+        "akuisisi"
+    ]
+    queries.extend(macro_queries)
+    for q in queries:
+        try:
+            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(q)}&hl=id&gl=ID&ceid=ID:id"
+            feed = feedparser.parse(url)
+            for entry in feed.entries[:max_per_query]:
+                title = entry.get('title','').strip()
+                summary = re.sub('<[^<]+?>','',entry.get('summary',''))
+                all_news.append({
+                    'title': title,
+                    'summary': summary,
+                    'source': 'Google News'
+                })
+        except:
+            continue
+        if len(all_news) >= total_max:
+            break
+    # Hapus duplikat
+    seen = set()
+    unique = []
+    for n in all_news:
+        if n['title'] not in seen:
+            seen.add(n['title'])
+            unique.append(n)
+    return unique[:total_max], None
+
+def filter_and_score_news(news_items, ticker_raw):
+    """Score & filter berita berdasarkan SMART_KEYWORDS (Android behavior)."""
+    if not news_items:
+        return [], 0
+    max_kw = len(SMART_KEYWORDS)
+    scored = []
+    for item in news_items:
+        text = f"{item['title']} {item['summary']}".lower()
+        keyword_count = sum(1 for kw in SMART_KEYWORDS if kw.lower() in text)
+        kw_score = keyword_count / max_kw
+        age_score = 1.0  # asumsikan berita < 8 jam
+        score = 0.70 * age_score + 0.30 * kw_score
+        scored.append((score, item))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    # Hanya yang memiliki setidaknya 1 keyword atau skor > 0
+    filtered = [item for score, item in scored if score > 0.0]
+    if not filtered:
+        filtered = [item for _, item in scored[:5]]  # fallback 5 teratas
+    return filtered, len(filtered)
+
+def get_yahoo_search_news(query_str, num=5):
+    try:
+        items = yf.Search(query_str).news or []
+        news = []
+        for item in items[:num]:
+            inner = item.get('content') or item
+            title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
+            summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
+            if title: news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
+        return news, None
+    except: return [], "Yahoo Search gagal"
+
+def analyze_sentiment_weighted(news_items, translator):
+    if not SENTIMENT_AVAILABLE or not news_items: return 0.0
+    analyzer = SentimentIntensityAnalyzer()
+    total_w, w_sum = 0, 0
+    for i, item in enumerate(news_items):
+        text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
+        if any(ord(c)>127 for c in text) and translator:
+            try: text = translator.translate(text)
+            except: pass
+        score = analyzer.polarity_scores(text)['compound']
+        weight = 1/(i+1)
+        w_sum += score*weight; total_w += weight
+    return w_sum/total_w if total_w>0 else 0.0
+
+# (Fungsi estimate_theta_ou, REGIME_INFO, dsb. tetap seperti sebelumnya)
+
+def estimate_theta_ou(close_series):
+    log_price = np.log(close_series.dropna())
+    log_lag = log_price.shift(1).dropna()
+    diff = log_price.diff().dropna()
+    common_idx = diff.index.intersection(log_lag.index)
+    if len(common_idx)<20: return 0.05
+    y = diff.loc[common_idx].values
+    X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
+    coeff = np.linalg.lstsq(X, y, rcond=None)[0]
+    theta = -coeff[1] if coeff[1]<0 else 0.05
+    return theta
+
+REGIME_INFO = {
+    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi.",
+    "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
+    "Panic Sell 🚨": "Penurunan tajam, sering oversold.",
+    "Bearish 🔻": "Tren turun terkendali.",
+    "Early Recovery 🔄": "Harga di atas EMA20 tapi EMA20 < EMA50.",
+    "Distribution 📉": "Harga di bawah EMA20, EMA20 > EMA50.",
+    "Konsolidasi Tren ↔️": "Trending namun harga bolak-balik di EMA.",
+    "Bullish Accumulation 🏗️": "Sideways dengan harga > EMA.",
+    "Bearish Accumulation 🧊": "Sideways di bawah EMA.",
+    "Sideways Bias Naik ↗️": "Sideways cenderung naik.",
+    "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
+    "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
+}
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
@@ -665,7 +807,6 @@ with st.sidebar:
                 actual_key = (waktu_key, saham_key)
                 actual_data = st.session_state.riwayat_actual.get(actual_key, None)
 
-                # Tampilkan data actual jika sudah ada
                 if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
                     st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
                     if actual_data.get('Entry_Miss') == 'Yes':
@@ -678,7 +819,6 @@ with st.sidebar:
                         }.get(actual_data['Outcome'], '')
                         st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
                 else:
-                    # Tombol untuk menampilkan form
                     btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}"
                     form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}"
                     show_key = f"show_form_{idx}_{waktu_key}_{saham_key}"
@@ -686,7 +826,6 @@ with st.sidebar:
                     if st.button("📝 Catat Hasil", key=btn_key):
                         st.session_state[show_key] = True
 
-                    # Form input (muncul jika tombol diklik)
                     if st.session_state.get(show_key, False):
                         with st.form(key=form_key):
                             actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
@@ -725,7 +864,6 @@ with st.sidebar:
                                     st.success("Data actual tersimpan!")
                                     st.session_state[show_key] = False
                                     st.rerun()
-                    # ---- Tombol Hapus Riwayat ----
                     hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}"
                     if st.button("🗑️ Hapus Riwayat Ini", key=hapus_key):
                         hapus_riwayat_item(waktu_key, saham_key)
@@ -734,7 +872,6 @@ with st.sidebar:
                 if ai:
                     st.caption(f"💡 {ai[:150]}")
 
-        # Informasi jumlah tampilan
         st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
                   (f" (hasil pencarian '{search_query}')" if search_query else ""))
     else:
@@ -802,6 +939,7 @@ with st.sidebar:
     else: st.caption("Tidak ada libur dalam 2 minggu.")
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
+
     # ==================== FUNGSI DATA & INDIKATOR ====================
 @st.cache_data(ttl=3600)
 def load_stock_data(ticker, period="2y", interval="1d"):
@@ -830,72 +968,6 @@ def compute_adx_series(df, period=14):
     dx = (abs(plus_di-minus_di)/(plus_di+minus_di))*100
     return dx.ewm(alpha=1/period, adjust=False).mean()
 
-def get_google_news_rss(query_str, num=5):
-    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
-    try:
-        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
-        feed = feedparser.parse(url)
-        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
-        return news, None
-    except Exception as e: return [], str(e)
-
-def get_yahoo_search_news(query_str, num=5):
-    try:
-        items = yf.Search(query_str).news or []
-        news = []
-        for item in items[:num]:
-            inner = item.get('content') or item
-            title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
-            summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
-            if title: news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
-        return news, None
-    except: return [], "Yahoo Search gagal"
-
-def filter_relevant(news_list, ticker):
-    keywords = [ticker.lower(),'saham','ihsg','bei','idx']
-    filtered = [n for n in news_list if any(k in (n['title']+n['summary']).lower() for k in keywords)]
-    return filtered if filtered else news_list
-
-def analyze_sentiment_weighted(news_items, translator):
-    if not SENTIMENT_AVAILABLE or not news_items: return 0.0
-    analyzer = SentimentIntensityAnalyzer()
-    total_w, w_sum = 0, 0
-    for i, item in enumerate(news_items):
-        text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
-        if any(ord(c)>127 for c in text) and translator:
-            try: text = translator.translate(text)
-            except: pass
-        score = analyzer.polarity_scores(text)['compound']
-        weight = 1/(i+1)
-        w_sum += score*weight; total_w += weight
-    return w_sum/total_w if total_w>0 else 0.0
-
-def estimate_theta_ou(close_series):
-    log_price = np.log(close_series.dropna())
-    log_lag = log_price.shift(1).dropna()
-    diff = log_price.diff().dropna()
-    common_idx = diff.index.intersection(log_lag.index)
-    if len(common_idx)<20: return 0.05
-    y = diff.loc[common_idx].values
-    X = np.vstack([np.ones(len(common_idx)), log_lag.loc[common_idx].values]).T
-    coeff = np.linalg.lstsq(X, y, rcond=None)[0]
-    theta = -coeff[1] if coeff[1]<0 else 0.05
-    return theta
-
-REGIME_INFO = {
-    "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi.",
-    "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
-    "Panic Sell 🚨": "Penurunan tajam, sering oversold.",
-    "Bearish 🔻": "Tren turun terkendali.",
-    "Early Recovery 🔄": "Harga di atas EMA20 tapi EMA20 < EMA50.",
-    "Distribution 📉": "Harga di bawah EMA20, EMA20 > EMA50.",
-    "Konsolidasi Tren ↔️": "Trending namun harga bolak-balik di EMA.",
-    "Bullish Accumulation 🏗️": "Sideways dengan harga > EMA.",
-    "Bearish Accumulation 🧊": "Sideways di bawah EMA.",
-    "Sideways Bias Naik ↗️": "Sideways cenderung naik.",
-    "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
-    "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
-}
 # ==================== PROSES ANALISIS ====================
 if run_btn:
     if not ticker_input:
@@ -929,8 +1001,7 @@ if run_btn:
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
-        harga_terakhir_asli = float(df['Close'].iloc[-1])   # untuk ATR & indikator
-        # Gunakan harga manual jika diisi, jika tidak pakai harga penutupan terakhir
+        harga_terakhir_asli = float(df['Close'].iloc[-1])
         harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
         returns = df['Close'].pct_change().dropna()
         if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
@@ -952,19 +1023,27 @@ if run_btn:
         roe = ticker_info.get('returnOnEquity')
         de = ticker_info.get('debtToEquity')
 
-        # ============ BERITA & SENTIMEN ============
+        # ============ BERITA & SENTIMEN (ENHANCED) ============
         news_pool = []
         translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
         translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
-        rss, _ = get_google_news_rss(f"{ticker_raw} saham")
-        if rss: news_pool.extend(rss)
+
+        # 1. Google News multi‑query
+        google_news, _ = get_google_news_enhanced(ticker_raw, max_per_query=3, total_max=20)
+        if google_news: news_pool.extend(google_news)
+
+        # 2. Yahoo Finance RSS
+        yahoo_rss, _ = get_yahoo_rss(ticker_raw)
+        if yahoo_rss: news_pool.extend(yahoo_rss)
+
+        # 3. Yahoo Search (tambahan)
         ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
         if ysearch: news_pool.extend(ysearch)
-        news_pool = filter_relevant(news_pool, ticker_raw)
-        seen = set(); unique_news = []
-        for n in news_pool:
-            if n['title'] not in seen: seen.add(n['title']); unique_news.append(n)
-            if len(unique_news)>=5: break
+
+        # 4. Filter & scoring SMART_KEYWORDS
+        unique_news, news_count_sent = filter_and_score_news(news_pool, ticker_raw)
+        unique_news = unique_news[:5]  # tampilkan maks 5
+
         avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
         headlines = [n['title'] for n in unique_news]
         sources = [n['source'] for n in unique_news]
@@ -975,6 +1054,18 @@ if run_btn:
                 except: translated.append("")
             else: translated.append("")
         sentimen_status = "Positif 🟢" if avg_sentiment>=0.05 else ("Negatif 🔴" if avg_sentiment<=-0.05 else "Netral ⚪")
+
+        # ============ BETA (perbaiki agar ihsg_ret selalu terdefinisi) ============
+        ihsg_ret = pd.Series(dtype=float)  # REVISI: default kosong
+        try:
+            if not df_ihsg.empty:
+                ihsg_ret = df_ihsg['Close'].pct_change().dropna()
+                common = returns.index.intersection(ihsg_ret.index)
+                if len(common) > 20:
+                    beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])
+                else: beta_ihsg = 1.0
+            else: beta_ihsg = 1.0
+        except: beta_ihsg = 1.0
 
         # ============ THRESHOLD HISTORIS ============
         split_idx = max(126, len(df)-126)
@@ -1011,104 +1102,93 @@ if run_btn:
         regime, ihsg_cond = get_regime_row(df.iloc[-1])
         adx = df['ADX'].iloc[-1]
 
-        # ============ BETA ============
-        try:
-            if not df_ihsg.empty:
-                ihsg_ret = df_ihsg['Close'].pct_change().dropna()
-                common = returns.index.intersection(ihsg_ret.index)
-                if len(common) > 20:
-                    beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])
-                else: beta_ihsg = 1.0
-            else: beta_ihsg = 1.0
-        except: beta_ihsg = 1.0
+        # ============ ATR & RSI ============
+        df['TR'] = pd.concat([
+            df['High'] - df['Low'],
+            (df['High'] - df['Close'].shift()).abs(),
+            (df['Low'] - df['Close'].shift()).abs()
+        ], axis=1).max(axis=1)
+        atr14_val = df['TR'].rolling(14).mean().iloc[-1]
+        atr_pct = (atr14_val / harga_terakhir_asli) * 100
 
-    # ============ ATR & RSI ============
-    df['TR'] = pd.concat([
-        df['High'] - df['Low'],
-        (df['High'] - df['Close'].shift()).abs(),
-        (df['Low'] - df['Close'].shift()).abs()
-    ], axis=1).max(axis=1)
-    atr14_val = df['TR'].rolling(14).mean().iloc[-1]      # ATR dalam rupiah
-    atr_pct = (atr14_val / harga_terakhir_asli) * 100       # ATR dalam persen
-    
-    delta = df['Close'].diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.rolling(14).mean().iloc[-1]
-    avg_loss = loss.rolling(14).mean().iloc[-1]
-    if avg_loss is None or avg_loss == 0: rsi14 = 100.0
-    else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
-    
-           # ============ PIVOT (ADAPTIF) ============
-    if is_daytrade:
-        today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
-        if not df_daily.empty:
-            df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
-            if not df_daily_filtered.empty:
-                prev_day = df_daily_filtered.iloc[-1]
-                hi_daily = float(prev_day['High'])
-                lo_daily = float(prev_day['Low'])
-                cl_daily = float(prev_day['Close'])
+        delta = df['Close'].diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+        avg_gain = gain.rolling(14).mean().iloc[-1]
+        avg_loss = loss.rolling(14).mean().iloc[-1]
+        if avg_loss is None or avg_loss == 0: rsi14 = 100.0
+        else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
+
+        # ============ PIVOT (ADAPTIF) ============
+        if is_daytrade:
+            today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
+            if not df_daily.empty:
+                df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
+                if not df_daily_filtered.empty:
+                    prev_day = df_daily_filtered.iloc[-1]
+                    hi_daily = float(prev_day['High'])
+                    lo_daily = float(prev_day['Low'])
+                    cl_daily = float(prev_day['Close'])
+                else:
+                    prev_day = None
+                    for i in range(1, min(len(df_daily), 6)):
+                        row = df_daily.iloc[-i]
+                        h_val = float(row['High'])
+                        l_val = float(row['Low'])
+                        c_val = float(row['Close'])
+                        if h_val != l_val and h_val > 0 and l_val > 0:
+                            prev_day = row
+                            hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
+                            break
+                    if prev_day is None:
+                        last = df_daily.iloc[-1]
+                        hi_daily = float(last['High'])
+                        lo_daily = float(last['Low'])
+                        cl_daily = float(last['Close'])
             else:
-                prev_day = None
-                for i in range(1, min(len(df_daily), 6)):
-                    row = df_daily.iloc[-i]
-                    h_val = float(row['High'])
-                    l_val = float(row['Low'])
-                    c_val = float(row['Close'])
-                    if h_val != l_val and h_val > 0 and l_val > 0:
-                        prev_day = row
-                        hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
-                        break
-                if prev_day is None:
-                    last = df_daily.iloc[-1]
-                    hi_daily = float(last['High'])
-                    lo_daily = float(last['Low'])
-                    cl_daily = float(last['Close'])
-        else:
-            hi_daily = float(df['High'].iloc[-1])
-            lo_daily = float(df['Low'].iloc[-1])
-            cl_daily = float(df['Close'].iloc[-1])
+                hi_daily = float(df['High'].iloc[-1])
+                lo_daily = float(df['Low'].iloc[-1])
+                cl_daily = float(df['Close'].iloc[-1])
 
-        if hi_daily != lo_daily:
-            pp = (hi_daily + lo_daily + cl_daily) / 3
-            r1 = 2 * pp - lo_daily
-            s1 = 2 * pp - hi_daily
-            r2 = pp + (hi_daily - lo_daily)
-            s2 = pp - (hi_daily - lo_daily)
+            if hi_daily != lo_daily:
+                pp = (hi_daily + lo_daily + cl_daily) / 3
+                r1 = 2 * pp - lo_daily
+                s1 = 2 * pp - hi_daily
+                r2 = pp + (hi_daily - lo_daily)
+                s2 = pp - (hi_daily - lo_daily)
+            else:
+                pp = r1 = s1 = r2 = s2 = cl_daily
         else:
-            pp = r1 = s1 = r2 = s2 = cl_daily
-    else:
-        hi = lo = cl = None
-        for i in range(1, min(6, len(df))):
-            row = df.iloc[-i]
-            h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
-            if h_val != l_val and h_val > 0 and l_val > 0:
-                hi, lo, cl = h_val, l_val, c_val
-                break
-        if hi is None:
-            hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
-        if hi == lo:
-            pp = r1 = s1 = r2 = s2 = cl
-        else:
-            pp = (hi + lo + cl) / 3
-            r1 = 2 * pp - lo; s1 = 2 * pp - hi
-            r2 = pp + (hi - lo); s2 = pp - (hi - lo)
+            hi = lo = cl = None
+            for i in range(1, min(6, len(df))):
+                row = df.iloc[-i]
+                h_val = float(row['High']); l_val = float(row['Low']); c_val = float(row['Close'])
+                if h_val != l_val and h_val > 0 and l_val > 0:
+                    hi, lo, cl = h_val, l_val, c_val
+                    break
+            if hi is None:
+                hi = float(df['High'].iloc[-1]); lo = float(df['Low'].iloc[-1]); cl = float(df['Close'].iloc[-1])
+            if hi == lo:
+                pp = r1 = s1 = r2 = s2 = cl
+            else:
+                pp = (hi + lo + cl) / 3
+                r1 = 2 * pp - lo; s1 = 2 * pp - hi
+                r2 = pp + (hi - lo); s2 = pp - (hi - lo)
 
-    # ============ SINYAL ============
-    def generate_signals_vectorized(dataframe, mom_th):
-        score = pd.Series(0, index=dataframe.index)
-        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
-        score += is_uptrend.astype(int)*2
-        score += (dataframe['Mom5D']>mom_th).astype(int)
-        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
-        sig = pd.Series("🚨 AVOID", index=dataframe.index)
-        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
-        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
-        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
-        return sig
-    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
-    signal = df['Signal'].iloc[-1]
+        # ============ SINYAL ============
+        def generate_signals_vectorized(dataframe, mom_th):
+            score = pd.Series(0, index=dataframe.index)
+            is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
+            score += is_uptrend.astype(int)*2
+            score += (dataframe['Mom5D']>mom_th).astype(int)
+            if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
+            sig = pd.Series("🚨 AVOID", index=dataframe.index)
+            sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
+            sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
+            sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
+            return sig
+        df['Signal'] = generate_signals_vectorized(df, mom_median_th)
+        signal = df['Signal'].iloc[-1]
 
     # ============ ENTRY ZONE (ADAPTIF) ============
     if s1 >= harga_terakhir * 0.98:
