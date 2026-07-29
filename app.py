@@ -1108,7 +1108,7 @@ elif rrr >= 1.0:
     rrr_status = "Cukup (1.0 - 1.5) 🟡"
 else:
     rrr_status = "Buruk (< 1.0) 🔴"
-# ============ PIVOT (ADAPTIF) ============
+        # ============ PIVOT (ADAPTIF) ============
         if is_daytrade:
             today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
             if not df_daily.empty:
@@ -1255,7 +1255,8 @@ else:
             return sig
         df['Signal'] = generate_signals_vectorized(df, mom_median_th)
         signal = df['Signal'].iloc[-1]
-        # ============ BACKTEST (ADAPTIF) ============
+
+    # ============ BACKTEST (ADAPTIF) ============
         if is_daytrade:
             backtest_window = min(500, len(df))
         else:
