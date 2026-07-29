@@ -1159,19 +1159,19 @@ if run_btn:
     breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
     # ============ SINYAL ============
-        def generate_signals_vectorized(dataframe, mom_th):
-            score = pd.Series(0, index=dataframe.index)
-            is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
-            score += is_uptrend.astype(int)*2
-            score += (dataframe['Mom5D']>mom_th).astype(int)
-            if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
-            sig = pd.Series("🚨 AVOID", index=dataframe.index)
-            sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
-            sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
-            sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
-            return sig
-        df['Signal'] = generate_signals_vectorized(df, mom_median_th)
-        signal = df['Signal'].iloc[-1]
+    def generate_signals_vectorized(dataframe, mom_th):
+        score = pd.Series(0, index=dataframe.index)
+        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
+        score += is_uptrend.astype(int)*2
+        score += (dataframe['Mom5D']>mom_th).astype(int)
+        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
+        sig = pd.Series("🚨 AVOID", index=dataframe.index)
+        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
+        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
+        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
+        return sig
+    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
+    signal = df['Signal'].iloc[-1]
     # ============ BACKTEST (ADAPTIF) ============
         if is_daytrade:
             backtest_window = min(500, len(df))
