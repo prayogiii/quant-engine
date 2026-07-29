@@ -1033,7 +1033,7 @@ if run_btn:
     
     # ============ ENTRY ZONE ============
     # Tentukan entry_low (support utama) dengan S1 atau ATR
-    if s1 >= harga_terakhir * 0.98:          # S1 sangat dekat, gunakan sebagai entry_low
+    if s1 >= harga_terakhir * 0.98:  # S1 sangat dekat, gunakan sebagai entry_low
         entry_low = s1
     else:
         entry_low = harga_terakhir * (1 - atr_pct/100)   # fallback ATR
