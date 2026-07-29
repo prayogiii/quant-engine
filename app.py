@@ -1125,7 +1125,7 @@ if run_btn:
                             prev_day = row
                             hi_daily, lo_daily, cl_daily = h_val, l_val, c_val
                             break
-                    if prev_day is None:
+            if prev_day is None:
                         last = df_daily.iloc[-1]
                         hi_daily = float(last['High'])
                         lo_daily = float(last['Low'])
