@@ -1143,13 +1143,11 @@ if run_btn:
 
     # ============ STOP LOSS (dari entry_low) ============
     if is_daytrade:
-        # Intraday Day Trade: ATR 5m dikombinasikan dengan sl_mult (ADX & RSI), Pivot Support 2 (S2), 
-        # serta batas minimum (1.5% * sl_mult / 2 fraksi BEI) agar leluasa dari noise intraday.
-        min_sl_dist = max(3.0 * atr14_val * sl_mult, harga_terakhir * 0.015 * sl_mult, 2 * fraksi_step(harga_terakhir))
-        if s2 < entry_low and (entry_low - s2) >= min_sl_dist:
-            sl_harga = s2
-        else:
-            sl_harga = entry_low - min_sl_dist
+        # Day Trade Intraday: Target Stop Loss 4.0% (menyesuaikan sl_mult ADX & RSI antara 3.0% - 5.0%)
+        base_sl_dist = harga_terakhir * 0.04 * sl_mult
+        min_ticks_dist = 2 * fraksi_step(entry_low)
+        sl_dist = max(min_ticks_dist, base_sl_dist)
+        sl_harga = entry_low - sl_dist
     else:
         # Swing Trade: Gunakan multiplier ATR harian
         sl_harga = entry_low - sl_mult * atr14_val
