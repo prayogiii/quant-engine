@@ -1105,18 +1105,18 @@ if run_btn:
     elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
     else: rrr_status = "Buruk (< 1.0) 🔴"
         # ============ PIVOT (ADAPTIF) ============
-        if is_daytrade:
-            today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
-            if not df_daily.empty:
-                df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
-                if not df_daily_filtered.empty:
-                    prev_day = df_daily_filtered.iloc[-1]
-                    hi_daily = float(prev_day['High'])
-                    lo_daily = float(prev_day['Low'])
-                    cl_daily = float(prev_day['Close'])
-                else:
-                    prev_day = None
-                    for i in range(1, min(len(df_daily), 6)):
+    if is_daytrade:
+        today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
+        if not df_daily.empty:
+            df_daily_filtered = df_daily[df_daily.index.date < today_jkt]
+            if not df_daily_filtered.empty:
+                prev_day = df_daily_filtered.iloc[-1]
+                hi_daily = float(prev_day['High'])
+                lo_daily = float(prev_day['Low'])
+                cl_daily = float(prev_day['Close'])
+            else:
+                prev_day = None
+                for i in range(1, min(len(df_daily), 6)):
                         row = df_daily.iloc[-i]
                         h_val = float(row['High'])
                         l_val = float(row['Low'])
