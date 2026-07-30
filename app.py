@@ -1156,9 +1156,9 @@ if run_btn:
         # ============ STOP LOSS (FIXED 4% UNTUK DAY TRADE, TIDAK DIUBAH) ============
         if is_daytrade:
             base_sl_dist = harga_terakhir * 0.04 * sl_mult
-            min_ticks_dist = 2 * fraksi_step(entry_low)
+            min_ticks_dist = 2 * fraksi_step(harga_terakhir)
             sl_dist = max(min_ticks_dist, base_sl_dist)
-            sl_harga = entry_low - sl_dist
+            sl_harga = harga_terakhir - sl_dist
         else:
             # Swing Trade SL menggunakan atr14_val mentah
             sl_harga = entry_low - sl_mult * atr14_val
