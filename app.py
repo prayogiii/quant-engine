@@ -199,6 +199,24 @@ def coppock_curve(prices, rP1=14, rP2=11, wP=10):
     curr = wma(combined,wP)
     prev = wma(combined[:-1],wP) if len(combined)>wP else 0.0
     return curr,prev
+    
+def hitung_bars_remaining(now_jkt, actual_interval, bars_per_day_map):
+    h, m = now_jkt.hour, now_jkt.minute
+    interval_minutes_map = {"5m": 5, "15m": 15, "30m": 30, "60m": 60}
+    interval_menit = interval_minutes_map.get(actual_interval, 5)
+
+    if h < 12 or (h == 12 and m == 0):
+        menit_sesi1_tersisa = 12*60 - (h*60 + m)
+        sisa_menit = menit_sesi1_tersisa + 90
+        bars = math.ceil(sisa_menit / interval_menit)
+    elif h == 12 or (h == 13 and m < 30):
+        bars = math.ceil(90 / interval_menit)
+    elif (h == 13 and m >= 30) or h == 14 or (h == 15 and m == 0):
+        sisa_menit = 15*60 - (h*60 + m)
+        bars = math.ceil(sisa_menit / interval_menit)
+    else:
+        bars = bars_per_day_map.get(actual_interval, 54)
+    return max(1, bars)
 
 # ---------- Adaptive Weights ----------
 def get_adaptive_weights(ticker, regime):
@@ -1030,7 +1048,12 @@ if run_btn:
     ], axis=1).max(axis=1)
     atr14_val = df['TR'].rolling(14).mean().iloc[-1]      # ATR dalam rupiah
     atr_pct = (atr14_val / harga_terakhir_asli) * 100       # ATR dalam persen
-    
+    # === Hitung sisa bar untuk Day Trade ===
+    now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
+    if is_daytrade:
+        bars_remaining = hitung_bars_remaining(now_jkt, actual_interval, bars_per_day_map)
+    else:
+        bars_remaining = None
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
