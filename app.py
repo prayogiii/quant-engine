@@ -1264,28 +1264,36 @@ if run_btn:
 
     # ============ MONTE CARLO (ADAPTIF) ============
     if is_daytrade:
-        n_sim, n_steps = 2000, 30
+        n_sim = 2000
+        n_steps = max(1, bars_remaining)          # adaptif terhadap sisa sesi
     else:
         n_sim, n_days = 2000, 30
         n_steps = n_days
+
     latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
     scale_corrected = latest_vol/np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
     theta_ou = estimate_theta_ou(df['Close'])
     locked_log_mean20 = np.log(df['Close']).tail(20).mean()
-    paths = np.zeros((n_steps,n_sim)); current_log = np.ones((1,n_sim))*np.log(harga_terakhir)
+
+    # Simulasi multi‑langkah
+    paths = np.zeros((n_steps, n_sim))
+    current_log = np.ones(n_sim) * np.log(harga_terakhir)
     for step in range(n_steps):
         inov = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
-        next_log = current_log[-1] + theta_ou*(locked_log_mean20-current_log[-1]) + inov
-        current_log = np.vstack([current_log, next_log]); paths[step] = np.exp(next_log)
-    mu_ou = theta_ou*(locked_log_mean20-np.log(harga_terakhir))
-    est_besok = float(np.exp(np.log(harga_terakhir)+mu_ou))
-    sim_h1 = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=2000)
-    prices_besok = harga_terakhir*np.exp(mu_ou+sim_h1)
-    low_est,up_est = float(np.percentile(prices_besok,25)), float(np.percentile(prices_besok,75))
-    hit_tp = (np.any(paths>=r1,axis=0).sum()/n_sim)*100
-    hit_sl = (np.any(paths<=s2,axis=0).sum()/n_sim)*100
-    prob_bull = ((mu_ou+sim_h1>0).sum()/2000)*100
+        current_log = current_log + theta_ou*(locked_log_mean20 - current_log) + inov
+        paths[step] = np.exp(current_log)
 
+    # --- Ambil metrik dari harga di akhir simulasi ---
+    final_prices = paths[-1, :]                  # harga di akhir sesi
+    
+    est_besok = float(np.median(final_prices))   # estimasi titik tengah
+    low_est, up_est = float(np.percentile(final_prices, 25)), float(np.percentile(final_prices, 75))
+    
+    prob_bull = (final_prices > harga_terakhir).mean() * 100
+
+    # Probabilitas sentuh level tetap menggunakan seluruh path (multi‑langkah)
+    hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
+    hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
     if is_daytrade:
         estimasi_label = "Estimasi Sesi Berikutnya"
         prob_label = "Prob Naik Sesi Berikutnya"
