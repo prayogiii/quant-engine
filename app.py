@@ -650,7 +650,14 @@ with st.sidebar:
                 with c2:
                     st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div></div>""", unsafe_allow_html=True)
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-                st.caption(f"🎯 Entry Zone: {r.get('Entry_Zone','?')}")
+                # --- Entry Zone dengan gaya konsisten ---
+                entry_zone_val = r.get('Entry_Zone', '?')
+                if entry_zone_val and entry_zone_val != '?':
+                    # Format tampilan seperti metric TP/SL
+                    st.markdown(f"""<div style="margin-top: 8px;">
+                        <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">🎯 Entry Zone</label>
+                        <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{entry_zone_val}</div>
+                    </div>""", unsafe_allow_html=True)
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
                 ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
@@ -1135,7 +1142,10 @@ if run_btn:
     if (entry_high - entry_low) < min_entry_width:
         entry_high = entry_low + min_entry_width
     entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
-
+    # Bulatkan ke fraksi BEI
+    entry_low_f = fraksi_bei(entry_low)
+    entry_high_f = fraksi_bei(entry_high)
+    entry_zone_f = f"Rp {entry_low_f:,.0f} - Rp {entry_high_f:,.0f}"
     # ============ MULTIPLIER SL & TP ============
     sl_mult = 1.0
     if adx > 30 and 30 < rsi14 < 70:
@@ -1397,7 +1407,7 @@ if run_btn:
         "Trend_Consistency": f"{trend_consistency:.0f}%",
         "Beta": f"{beta_ihsg:.2f}",
         "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
-        "Entry_Zone": entry_zone,
+        "Entry_Zone": entry_zone_f,
         "Gaya": "DT" if is_daytrade else "SW"
     }
 
