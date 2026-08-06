@@ -1132,6 +1132,28 @@ if run_btn:
         return sig
     df['Signal'] = generate_signals_vectorized(df, mom_median_th)
     signal = df['Signal'].iloc[-1]
+        # ============ V12 ADAPTIVE SIGNAL GENERATION (PINDAH KE SINI) ============
+    adaptive_w = get_adaptive_weights(ticker_raw, regime)
+    
+    factor_signals = {
+        "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
+        "AI_Senti": avg_sentiment,
+        "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
+        "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
+        "Coppock": coppock_val / 10.0
+    }
+    norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
+    total_score = sum(norm_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
+    
+    if total_score > 0.3:
+        signal = "🔥 STRONG BUY"
+    elif total_score > 0.1:
+        signal = "⚡ BUY (TACTICAL)"
+    elif total_score > -0.1:
+        signal = "⏸️ HOLD / WAIT"
+    else:
+        signal = "🚨 AVOID"
+    # Sekarang signal SUDAH adaptif sebelum digunakan di bawah
 
     # ============ ENTRY ZONE (ADAPTIF) ============
     if s1 >= harga_terakhir * 0.98:
@@ -1375,6 +1397,7 @@ if run_btn:
     tp_low_f = fraksi_bei(tp_low)
     tp_high_f = fraksi_bei(tp_high)
     sl_harga_f = fraksi_bei(sl_harga)
+    
 
     ringkasan = {
         "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
