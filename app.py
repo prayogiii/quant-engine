@@ -1448,13 +1448,13 @@ if run_btn:
     st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
     if rrr < 1.0 and ("BUY" in signal):
         ac,ai = "#ef4444","⚠️"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
     elif "STRONG BUY" in signal:
         ac,ai = "#10b981","🟢"
-        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
+        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
     elif "BUY" in signal:
         ac,ai = "#f59e0b","🟡"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
     elif "HOLD" in signal:
         ac,ai = "#3b82f6","🔵"
         at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
