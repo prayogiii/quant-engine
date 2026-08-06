@@ -810,7 +810,7 @@ with st.sidebar:
     # ==================== FUNGSI DATA & INDIKATOR ====================
 @st.cache_data(ttl=60)   # sudah Anda ubah
 def load_stock_data(ticker, period="2y", interval="1d"):
-    df = yf.download(ticker, period=period, interval=interval, prepost=True, actions=False)
+    df = yf.download(ticker, period=period, interval=interval, prepost=False, actions=False)
     if df.empty:
         return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex):
@@ -819,10 +819,35 @@ def load_stock_data(ticker, period="2y", interval="1d"):
 
 @st.cache_data(ttl=60)
 def load_ihsg_data(period="2y", interval="1d"):
-    df = yf.download("^JKSE", period=period, interval=interval, prepost=True, actions=False)
+    df = yf.download("^JKSE", period=period, interval=interval, prepost=False, actions=False)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
+    
+@st.cache_data(ttl=30)
+def get_realtime_price(ticker):
+    """Ambil harga real-time terpisah dari bar historis, untuk override kalau bar terakhir stale."""
+    try:
+        t = yf.Ticker(ticker)
+        fi = t.fast_info
+        return {
+            "last_price": fi.get("last_price"),
+            "market_state": fi.get("market_state") if hasattr(fi, "get") else None,
+        }
+    except Exception:
+        return None
+
+def cek_kesegaran_data(df_ihsg_preview, now_jkt, max_lag_minutes=20):
+    """Return (is_stale, lag_minutes)."""
+    if df.empty:
+        return True, None
+    last_bar_time = df.index[-1]
+    if last_bar_time.tzinfo is None:
+        last_bar_time = pytz.timezone("Asia/Jakarta").localize(last_bar_time)
+    else:
+        last_bar_time = last_bar_time.astimezone(pytz.timezone("Asia/Jakarta"))
+    lag = (now_jkt - last_bar_time).total_seconds() / 60
+    return lag > max_lag_minutes, lag
     
 def compute_adx_series(df, period=14):
     high, low, close = df['High'], df['Low'], df['Close']
