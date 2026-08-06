@@ -90,7 +90,7 @@ def init_sheets():
         sheet = get_gsheet()
         existing = [ws.title for ws in sheet.worksheets()]
         if "riwayat" not in existing:
-            sheet.add_worksheet("riwayat", rows=100, cols=35)   # 35 kolom
+            sheet.add_worksheet("riwayat", rows=100, cols=35)
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
         if "v12_predictions" not in existing:
@@ -129,8 +129,6 @@ def save_v12_memory(mem):
         st.error(f"Gagal menyimpan V12 memory: {e}")
 
 def load_v12_predictions(ticker):
-    """Mengembalikan dict sinyal terakhir untuk ticker dari sheet v12_predictions.
-       Jika tidak ditemukan, return None."""
     try:
         sheet = get_gsheet().worksheet("v12_predictions")
         records = sheet.get_all_records()
@@ -143,8 +141,6 @@ def load_v12_predictions(ticker):
         return None
 
 def save_v12_prediction(ticker, close_price, factor_signals):
-    """Simpan/update prediksi terbaru untuk satu ticker ke sheet v12_predictions.
-       Menggunakan 'RAW' untuk mencegah konversi tipe data."""
     try:
         sheet = get_gsheet().worksheet("v12_predictions")
         new_row = {
@@ -160,7 +156,7 @@ def save_v12_prediction(ticker, close_price, factor_signals):
         headers = list(new_row.keys())
         for i, row in enumerate(records):
             if row.get('ticker') == ticker:
-                row_index = i + 2  # +2 karena header di baris 1
+                row_index = i + 2
                 break
 
         if row_index:
@@ -307,7 +303,6 @@ def muat_riwayat_dari_sheets():
         return []
 
 def muat_riwayat_actual():
-    """Mengembalikan dict { (waktu, saham): {Actual_High, Actual_Low, Actual_Close, Outcome} }"""
     data = {}
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
@@ -324,14 +319,13 @@ def muat_riwayat_actual():
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
+
 def hapus_riwayat_item(waktu, saham):
-    """Hapus satu entri riwayat berdasarkan Waktu dan Saham."""
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        # Filter entri yang tidak cocok
         filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
-        filtered = filtered[:50]  # jaga maksimal 50
+        filtered = filtered[:50]
         sheet.clear()
         if filtered:
             headers = list(filtered[0].keys())
@@ -343,12 +337,10 @@ def hapus_riwayat_item(waktu, saham):
         st.error(f"❌ Gagal menghapus riwayat: {e}")
         
 def simpan_riwayat_actual(waktu, saham, actual_data):
-    """Simpan/update data actual untuk satu entri riwayat."""
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
         headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome']
-        # Cari apakah sudah ada
         row_index = None
         for i, row in enumerate(records):
             if row.get('Waktu') == waktu and row.get('Saham') == saham:
@@ -365,28 +357,22 @@ def simpan_riwayat_actual(waktu, saham, actual_data):
             if not records:
                 sheet.insert_row(headers, 1)
             sheet.append_row(new_row, value_input_option='RAW')
-        # Refresh session state
         st.session_state.riwayat_actual = muat_riwayat_actual()
-        # === INTEGRASI KE V12 ENGINE ===
         integrate_actual_to_v12(waktu, saham, actual_data)
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
 
 def integrate_actual_to_v12(waktu, saham, actual_data):
-    """Mengintegrasikan catatan actual ke V12 adaptive engine."""
     try:
         ticker = saham
         last_pred = load_v12_predictions(ticker)
         if not last_pred:
-            return  # Tidak ada prediksi sebelumnya, tidak bisa dibandingkan
-
+            return
         factor_signals = {}
         for k in FACTOR_KEYS:
             key = f'sig_{k}'
             if key in last_pred:
                 factor_signals[k] = float(last_pred[key])
-
-        # Konversi outcome ke actual_return (-1..1)
         outcome = actual_data.get('Outcome', '')
         if outcome == 'Win':
             actual_return = 1.0
@@ -394,8 +380,6 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
             actual_return = -1.0
         else:
             actual_return = 0.0
-
-        # Jika ada Actual_Close, hitung return lebih presisi
         if actual_data.get('Actual_Close'):
             try:
                 actual_close = float(actual_data['Actual_Close'])
@@ -405,9 +389,7 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
                     actual_return = max(-1.0, min(1.0, actual_return))
             except:
                 pass
-
         update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
-
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 
@@ -507,7 +489,6 @@ def bersihkan_teks_ai(teks):
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
-# ✅ Jalankan init hanya sekali per session
 if "sheets_initialized" not in st.session_state:
     init_sheets()
     st.session_state.sheets_initialized = True
@@ -683,7 +664,6 @@ with st.sidebar:
                 actual_key = (waktu_key, saham_key)
                 actual_data = st.session_state.riwayat_actual.get(actual_key, None)
 
-                # Tampilkan data actual jika sudah ada
                 if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
                     st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
                     if actual_data.get('Entry_Miss') == 'Yes':
@@ -696,7 +676,6 @@ with st.sidebar:
                         }.get(actual_data['Outcome'], '')
                         st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
                 else:
-                    # Tombol untuk menampilkan form
                     btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}"
                     form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}"
                     show_key = f"show_form_{idx}_{waktu_key}_{saham_key}"
@@ -704,7 +683,6 @@ with st.sidebar:
                     if st.button("📝 Catat Hasil", key=btn_key):
                         st.session_state[show_key] = True
 
-                    # Form input (muncul jika tombol diklik)
                     if st.session_state.get(show_key, False):
                         with st.form(key=form_key):
                             actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
@@ -743,7 +721,6 @@ with st.sidebar:
                                     st.success("Data actual tersimpan!")
                                     st.session_state[show_key] = False
                                     st.rerun()
-                    # ---- Tombol Hapus Riwayat ----
                     hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}"
                     if st.button("🗑️ Hapus Riwayat Ini", key=hapus_key):
                         hapus_riwayat_item(waktu_key, saham_key)
@@ -752,7 +729,6 @@ with st.sidebar:
                 if ai:
                     st.caption(f"💡 {ai[:150]}")
 
-        # Informasi jumlah tampilan
         st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
                   (f" (hasil pencarian '{search_query}')" if search_query else ""))
     else:
@@ -947,8 +923,7 @@ if run_btn:
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
 
-        harga_terakhir_asli = float(df['Close'].iloc[-1])   # untuk ATR & indikator
-        # Gunakan harga manual jika diisi, jika tidak pakai harga penutupan terakhir
+        harga_terakhir_asli = float(df['Close'].iloc[-1])
         harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
         returns = df['Close'].pct_change().dropna()
         if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
@@ -1046,14 +1021,15 @@ if run_btn:
         (df['High'] - df['Close'].shift()).abs(),
         (df['Low'] - df['Close'].shift()).abs()
     ], axis=1).max(axis=1)
-    atr14_val = df['TR'].rolling(14).mean().iloc[-1]      # ATR dalam rupiah
-    atr_pct = (atr14_val / harga_terakhir_asli) * 100       # ATR dalam persen
-    # === Hitung sisa bar untuk Day Trade ===
+    atr14_val = df['TR'].rolling(14).mean().iloc[-1]
+    atr_pct = (atr14_val / harga_terakhir_asli) * 100
+    
     now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
     if is_daytrade:
         bars_remaining = hitung_bars_remaining(now_jkt, actual_interval, bars_per_day_map)
     else:
         bars_remaining = None
+
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
@@ -1062,7 +1038,7 @@ if run_btn:
     if avg_loss is None or avg_loss == 0: rsi14 = 100.0
     else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
     
-           # ============ PIVOT (ADAPTIF) ============
+    # ============ PIVOT (ADAPTIF) ============
     if is_daytrade:
         today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
         if not df_daily.empty:
@@ -1118,30 +1094,9 @@ if run_btn:
             r1 = 2 * pp - lo; s1 = 2 * pp - hi
             r2 = pp + (hi - lo); s2 = pp - (hi - lo)
 
-    # ============ SINYAL ============
-    def generate_signals_vectorized(dataframe, mom_th):
-        score = pd.Series(0, index=dataframe.index)
-        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
-        score += is_uptrend.astype(int)*2
-        score += (dataframe['Mom5D']>mom_th).astype(int)
-        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
-        sig = pd.Series("🚨 AVOID", index=dataframe.index)
-        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
-        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
-        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
-        return sig
-    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
-    signal = df['Signal'].iloc[-1]
-    # ============ V12 ADAPTIVE SIGNAL GENERATION (PINDAH KE SINI) ============
+    # ============ V12 ADAPTIVE SIGNAL ============
     adaptive_w = get_adaptive_weights(ticker_raw, regime)
-
-    # Hitung Coppock lebih awal agar tersedia untuk factor_signals
-    coppock_val, coppock_prev = 0.0, 0.0
-    try:
-        coppock_val, coppock_prev = coppock_curve(df['Close'].values)
-    except Exception:
-        pass
-
+    coppock_val, coppock_prev = coppock_curve(df['Close'].values)
     factor_signals = {
         "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
         "AI_Senti": avg_sentiment,
@@ -1160,7 +1115,6 @@ if run_btn:
         signal = "⏸️ HOLD / WAIT"
     else:
         signal = "🚨 AVOID"
-    # Sekarang signal SUDAH adaptif sebelum digunakan di bawah
 
     # ============ ENTRY ZONE (ADAPTIF) ============
     if s1 >= harga_terakhir * 0.98:
@@ -1193,18 +1147,15 @@ if run_btn:
     elif adx < 20:
         tp_mult_low, tp_mult_high = 1.2, 1.8
 
-    # ============ STOP LOSS (dari entry_low) ============
+    # ============ STOP LOSS ============
     if is_daytrade:
-        # Day Trade Intraday: Target Stop Loss 4.0% (menyesuaikan sl_mult ADX & RSI antara 3.0% - 5.0%)
         base_sl_dist = harga_terakhir * 0.04 * sl_mult
         min_ticks_dist = 2 * fraksi_step(entry_low)
         sl_dist = max(min_ticks_dist, base_sl_dist)
         sl_harga = entry_low - sl_dist
     else:
-        # Swing Trade: Gunakan multiplier ATR harian
         sl_harga = entry_low - sl_mult * atr14_val
 
-    # Pastikan SL dibulatkan ke fraksi BEI & minimal 1-2 fraksi di bawah entry_low
     sl_harga = fraksi_bei(sl_harga)
     step = fraksi_step(entry_low)
     if sl_harga >= entry_low:
@@ -1213,7 +1164,7 @@ if run_btn:
         sl_harga = fraksi_bei(harga_terakhir * 0.95)
     sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
 
-     # ============ TAKE PROFIT RANGE ============
+    # ============ TAKE PROFIT RANGE ============
     if r1 > harga_terakhir:
         tp_low = r1
     else:
@@ -1253,8 +1204,21 @@ if run_btn:
         breakout_label = "Breakout 20 Hari"
     breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
-
     # ============ BACKTEST (ADAPTIF) ============
+    # Untuk backtest, gunakan sinyal lama dari generate_signals_vectorized agar konsisten
+    def generate_signals_vectorized(dataframe, mom_th):
+        score = pd.Series(0, index=dataframe.index)
+        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
+        score += is_uptrend.astype(int)*2
+        score += (dataframe['Mom5D']>mom_th).astype(int)
+        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
+        sig = pd.Series("🚨 AVOID", index=dataframe.index)
+        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
+        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
+        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
+        return sig
+    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
+
     if is_daytrade:
         backtest_window = min(500, len(df))
     else:
@@ -1314,10 +1278,10 @@ if run_btn:
     kurt_penalty = 0.5 if ret_kurt>3 else 1.0
     kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
 
-    # ============ MONTE CARLO (ADAPTIF) ============
+    # ============ MONTE CARLO ============
     if is_daytrade:
         n_sim = 2000
-        n_steps = max(1, bars_remaining)          # adaptif terhadap sisa sesi
+        n_steps = max(1, bars_remaining)
     else:
         n_sim, n_days = 2000, 30
         n_steps = n_days
@@ -1327,7 +1291,6 @@ if run_btn:
     theta_ou = estimate_theta_ou(df['Close'])
     locked_log_mean20 = np.log(df['Close']).tail(20).mean()
 
-    # Simulasi multi‑langkah
     paths = np.zeros((n_steps, n_sim))
     current_log = np.ones(n_sim) * np.log(harga_terakhir)
     for step in range(n_steps):
@@ -1335,17 +1298,13 @@ if run_btn:
         current_log = current_log + theta_ou*(locked_log_mean20 - current_log) + inov
         paths[step] = np.exp(current_log)
 
-    # --- Ambil metrik dari harga di akhir simulasi ---
-    final_prices = paths[-1, :]                  # harga di akhir sesi
-    
-    est_besok = float(np.median(final_prices))   # estimasi titik tengah
+    final_prices = paths[-1, :]
+    est_besok = float(np.median(final_prices))
     low_est, up_est = float(np.percentile(final_prices, 25)), float(np.percentile(final_prices, 75))
-    
     prob_bull = (final_prices > harga_terakhir).mean() * 100
-
-    # Probabilitas sentuh level tetap menggunakan seluruh path (multi‑langkah)
     hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
     hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
+
     if is_daytrade:
         estimasi_label = "Estimasi Sesi Berikutnya"
         prob_label = "Prob Naik Sesi Berikutnya"
@@ -1391,7 +1350,6 @@ if run_btn:
     elif vol_surge_pct < -30: vs_status = "Rendah"
     else: vs_status = "Normal"
     
-    # coppock_val sudah dihitung di atas (sebelum factor_signals)
     coppock_rising = coppock_val > coppock_prev
     coppock_turning_up = coppock_rising and coppock_prev <= 0
     if coppock_turning_up: coppock_status = "Turning Up"
@@ -1405,7 +1363,6 @@ if run_btn:
     tp_high_f = fraksi_bei(tp_high)
     sl_harga_f = fraksi_bei(sl_harga)
     
-
     ringkasan = {
         "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
         "Saham": ticker_raw,
@@ -1516,11 +1473,9 @@ if run_btn:
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
-  # --- Penyusunan ulang tabel fundamental dengan Market Cap yang sudah disingkat ---
             def clean_val(v, f="{:.2f}"):
                 return "N/A" if v is None else f.format(v)
 
-            # Fungsi singkat angka untuk Market Cap
             def singkat_angka(n):
                 if n is None:
                     return "N/A"
@@ -1665,7 +1620,6 @@ if run_btn:
             "Bobot di bawah dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. "
             "Faktor yang sering benar mendapat bobot lebih tinggi. Bobot ini digunakan untuk sinyal akhir."
         )
-        adaptive_w = get_adaptive_weights(ticker_raw, regime)
 
         if is_daytrade:
             display_adaptive_w = {k: v for k, v in adaptive_w.items() if k != "Coppock"}
@@ -1726,7 +1680,6 @@ if run_btn:
             "Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. "
             "Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan."
         )
-        # --- SELF-LEARNING via Google Sheets ---
         last_pred = load_v12_predictions(ticker_raw)
         if last_pred:
             last_close = last_pred['close_price']
@@ -1809,7 +1762,6 @@ else:
     st.markdown("---")
     st.subheader("📈 Informasi Pasar Terkini (IHSG)")
 
-    # Pilihan periode IHSG
     periode_pilihan = st.selectbox(
         "Periode data IHSG:",
         options=["1d", "5d", "1mo"],
@@ -1818,7 +1770,6 @@ else:
         key="ihsg_period"
     )
 
-    # Interval: coba 1m untuk 1d, 5m untuk 5d, 1d untuk 1mo (fallback jika tidak cukup)
     if periode_pilihan == "1d":
         interval_candidates = ["1m", "5m", "15m", "30m", "60m", "1d"]
     elif periode_pilihan == "5d":
@@ -1836,13 +1787,11 @@ else:
             interval_terpakai = interval
             break
         elif not temp_df.empty and len(temp_df) == 1 and interval == interval_candidates[-1]:
-            # hanya fallback terakhir jika tidak ada pilihan lain
             df_ihsg_preview = temp_df
             interval_terpakai = interval
             break
 
     try:
-        # Ambil previous close & Open dari Yahoo Finance
         try:
             ihsg_info = yf.Ticker("^JKSE").info
             prev_close = ihsg_info.get('previousClose', None)
@@ -1855,7 +1804,6 @@ else:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             open_period = float(df_ihsg_preview['Open'].iloc[0])
 
-            # Perubahan: 1d pakai previousClose, 5d/1mo pakai Open periode
             if periode_pilihan == "1d":
                 if prev_close is not None and prev_close > 0:
                     ihsg_change = (ihsg_close - prev_close) / prev_close * 100
@@ -1868,21 +1816,17 @@ else:
                 else:
                     ihsg_change = 0.0
 
-            # ✅ High/Low menggunakan max/min seluruh data (mencakup seluruh periode)
             ihsg_high = float(df_ihsg_preview['High'].max())
             ihsg_low = float(df_ihsg_preview['Low'].min())
-            # Open untuk metrik & garis
             if open_price is None or open_price == 0:
                 open_price = open_period
 
-            # Volume: total untuk intraday, terakhir untuk harian
             if interval_terpakai in ("1m", "5m", "15m", "30m", "60m"):
                 vol_val = df_ihsg_preview['Volume'].sum()
             else:
                 vol_val = float(df_ihsg_preview['Volume'].iloc[-1])
             volume_str = f"{vol_val:,.0f}" if vol_val > 0 else "N/A"
 
-            # Metrik
             col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
             col2.metric("Open", f"{open_price:,.0f}" if open_price else "N/A")
@@ -1890,14 +1834,11 @@ else:
             col4.metric("Low", f"{ihsg_low:,.0f}")
             col5.metric("Volume", volume_str)
 
-            # Grafik mountain
             if PLOTLY_AVAILABLE:
                 line_color = '#26a69a' if ihsg_change >= 0 else '#ef5350'
                 area_color = f"rgba({38 if ihsg_change >= 0 else 239}, {166 if ihsg_change >= 0 else 83}, {154 if ihsg_change >= 0 else 80}, 0.25)"
 
                 fig = go.Figure()
-
-                # Trace mountain
                 fig.add_trace(go.Scatter(
                     x=df_ihsg_preview.index,
                     y=df_ihsg_preview['Close'],
@@ -1908,50 +1849,20 @@ else:
                     name='IHSG',
                     hovertemplate='<b>%{x|%d %b %H:%M WIB}</b><br>Close: %{y:,.0f}<extra></extra>'
                 ))
-                
-                # Garis + label High di dalam grafik
-                fig.add_hline(
-                    y=ihsg_high,
-                    line_dash='dot',
-                    line_color='rgba(255,255,255,0.4)',
-                    line_width=1,
-                )
-                fig.add_annotation(
-                    x=0.5, y=ihsg_high,
-                    xref='paper', yref='y',
-                    text=f'H {ihsg_high:,.0f}',
-                    showarrow=False,
-                    font=dict(size=9, color='rgba(255,255,255,0.6)'),
-                    bgcolor='rgba(15, 17, 22, 0.7)',
-                    bordercolor='rgba(255,255,255,0.3)',
-                    borderwidth=1,
-                    borderpad=4,
-                    xanchor='center',
-                    yanchor='bottom'
-                )
-
-                # Garis + label Low di dalam grafik
-                fig.add_hline(
-                    y=ihsg_low,
-                    line_dash='dot',
-                    line_color='rgba(255,255,255,0.4)',
-                    line_width=1,
-                )
-                fig.add_annotation(
-                    x=0.5, y=ihsg_low,
-                    xref='paper', yref='y',
-                    text=f'L {ihsg_low:,.0f}',
-                    showarrow=False,
-                    font=dict(size=9, color='rgba(255,255,255,0.6)'),
-                    bgcolor='rgba(15, 17, 22, 0.7)',
-                    bordercolor='rgba(255,255,255,0.3)',
-                    borderwidth=1,
-                    borderpad=4,
-                    xanchor='center',
-                    yanchor='bottom'
-                )
-
-                # Rentang sumbu Y dinamis
+                fig.add_hline(y=ihsg_high, line_dash='dot', line_color='rgba(255,255,255,0.4)')
+                fig.add_annotation(x=0.5, y=ihsg_high, xref='paper', yref='y',
+                                   text=f'H {ihsg_high:,.0f}', showarrow=False,
+                                   font=dict(size=9, color='rgba(255,255,255,0.6)'),
+                                   bgcolor='rgba(15, 17, 22, 0.7)',
+                                   bordercolor='rgba(255,255,255,0.3)',
+                                   borderwidth=1, borderpad=4, xanchor='center', yanchor='bottom')
+                fig.add_hline(y=ihsg_low, line_dash='dot', line_color='rgba(255,255,255,0.4)')
+                fig.add_annotation(x=0.5, y=ihsg_low, xref='paper', yref='y',
+                                   text=f'L {ihsg_low:,.0f}', showarrow=False,
+                                   font=dict(size=9, color='rgba(255,255,255,0.6)'),
+                                   bgcolor='rgba(15, 17, 22, 0.7)',
+                                   bordercolor='rgba(255,255,255,0.3)',
+                                   borderwidth=1, borderpad=4, xanchor='center', yanchor='bottom')
                 y_min = float(df_ihsg_preview['Low'].min()) * 0.998
                 y_max = float(df_ihsg_preview['High'].max()) * 1.002
                 fig.update_yaxes(range=[y_min, y_max])
@@ -1968,44 +1879,22 @@ else:
                     height=400,
                     margin=dict(l=10, r=20, t=40, b=10),
                     dragmode='pan',
-                    xaxis=dict(
-                        title=None,
-                        showgrid=False,
-                        zeroline=False,
-                        showline=True,
-                        linecolor='rgba(128,128,128,0.2)',
-                        ticks='outside',
-                        tickfont=dict(size=10)
-                    ),
-                    yaxis=dict(
-                        title=None,
-                        showgrid=True,
-                        gridcolor='rgba(128,128,128,0.1)',
-                        zeroline=False,
-                        showline=False,
-                        side='right',
-                        tickfont=dict(size=10)
-                    ),
+                    xaxis=dict(title=None, showgrid=False, zeroline=False, showline=True, linecolor='rgba(128,128,128,0.2)'),
+                    yaxis=dict(title=None, showgrid=True, gridcolor='rgba(128,128,128,0.1)', zeroline=False, side='right'),
                     hovermode='x unified',
                     hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family="monospace"),
                     paper_bgcolor='#0f1116',
                     plot_bgcolor='#0f1116',
                     showlegend=False
                 )
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    config={
-                        'modeBarButtonSize': 4,   # perkecil tombol (default 12)
-                        'displaylogo': False      # opsional: hilangkan logo Plotly
-                    }
-                )
-
+                st.plotly_chart(fig, use_container_width=True, config={
+                    'modeBarButtonSize': 4,
+                    'displaylogo': False
+                })
                 if interval_terpakai != "1m" and periode_pilihan == "1d":
                     st.info("ℹ️ Data 1 menit tidak tersedia, menggunakan interval yang lebih besar.")
             else:
                 st.line_chart(df_ihsg_preview['Close'])
-                
         elif not df_ihsg_preview.empty and len(df_ihsg_preview) == 1:
             ihsg_close = float(df_ihsg_preview['Close'].iloc[-1])
             if prev_close:
@@ -2013,8 +1902,7 @@ else:
                 st.metric("IHSG", f"{ihsg_close:,.0f}", f"{ihsg_change:+.2f}%")
             else:
                 st.metric("IHSG", f"{ihsg_close:,.0f}")
-            st.warning("Data IHSG hanya tersedia 1 titik (kemungkinan di luar jam bursa). Grafik tidak dapat ditampilkan.")
-            # --- Tambahan: grafik dengan dragmode='pan' ---
+            st.warning("Data IHSG hanya tersedia 1 titik (kemungkinan di luar jam bursa).")
             if PLOTLY_AVAILABLE:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
@@ -2025,13 +1913,7 @@ else:
                     line=dict(color='#f59e0b', width=2),
                     name='IHSG'
                 ))
-                fig.update_layout(
-                    title="IHSG (Data Terbatas)",
-                    template="plotly_dark",
-                    height=350,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    dragmode='pan'          # ← agar grafik bisa digeser
-                )
+                fig.update_layout(title="IHSG (Data Terbatas)", template="plotly_dark", height=350, dragmode='pan')
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.line_chart(df_ihsg_preview['Close'])
@@ -2051,4 +1933,3 @@ if ai_riwayat_btn:
             elif hasil:
                 hasil_bersih = bersihkan_teks_ai(hasil)
                 st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{hasil_bersih}</p></div>', unsafe_allow_html=True)
-                
