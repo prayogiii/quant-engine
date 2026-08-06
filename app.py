@@ -631,6 +631,9 @@ with st.sidebar:
             with st.expander(expander_title):
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
                 st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
+                waktu_analisis = r.get('Waktu', '?')
+                if waktu_analisis and waktu_analisis != '?':
+                    st.caption(f"🕒 Waktu Analisis: {waktu_analisis}")
                 st.divider()
                 c1, c2 = st.columns(2)
                 c1.metric("Coppock", r.get('Coppock','?'))
@@ -1401,9 +1404,17 @@ if run_btn:
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest + AI + Grafik Interaktif + Fundamental")
     st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",","."))
-
+    # Ambil waktu Jakarta saat ini
+    now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
+    st.caption(f"⏱️ **Waktu Analisis:** {now_jkt.strftime('%d %B %Y, %H:%M:%S WIB')}")
+    waktu_str = now_jkt.strftime('%d %B %Y, %H:%M WIB')
     col1,col2,col3 = st.columns(3)
-    col1.metric("Sinyal Eksekusi", signal)
+    col1.metric(
+        "Sinyal Eksekusi", 
+        signal, 
+        delta=f"per {now_jkt.strftime('%d/%m %H:%M')} WIB",  # format pendek
+        delta_color="off"
+    )
     col2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."),
                 f"50% range: Rp {low_est_f:,.0f} - {up_est_f:,.0f}".replace(",","."))
     col3.metric(prob_label, f"{prob_bull:.1f}%")
@@ -1443,6 +1454,7 @@ if run_btn:
     with col1:
         st.markdown(f'''
             <div class="summary-card">
+                <div class="summary-item">🕒 <b>Waktu Scan:</b> {waktu_str}</div>
                 <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
                 <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga_f:,.0f} (-{sl_pct:.1f}%)</div>
                 <div class="summary-item">🎯 <b>Take Profit Range:</b> {ringkasan['TP_Range']}<br>
