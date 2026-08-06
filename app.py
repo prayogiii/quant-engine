@@ -1,5 +1,8 @@
 import streamlit as st
 import yfinance as yf
+st.write(f"Python executable: {sys.executable}")
+st.write(f"yfinance version: {yf.__version__}")
+st.write(f"yfinance location: {yf.__file__}")
 import pandas as pd
 import numpy as np
 from scipy.stats import skew, kurtosis, t as student_t
