@@ -1132,7 +1132,7 @@ if run_btn:
         return sig
     df['Signal'] = generate_signals_vectorized(df, mom_median_th)
     signal = df['Signal'].iloc[-1]
-        # ============ V12 ADAPTIVE SIGNAL GENERATION (PINDAH KE SINI) ============
+    # ============ V12 ADAPTIVE SIGNAL GENERATION (PINDAH KE SINI) ============
     adaptive_w = get_adaptive_weights(ticker_raw, regime)
 
     # Hitung Coppock lebih awal agar tersedia untuk factor_signals
