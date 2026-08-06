@@ -1,8 +1,5 @@
 import streamlit as st
 import yfinance as yf
-st.write(f"Python executable: {sys.executable}")
-st.write(f"yfinance version: {yf.__version__}")
-st.write(f"yfinance location: {yf.__file__}")
 import pandas as pd
 import numpy as np
 from scipy.stats import skew, kurtosis, t as student_t
@@ -936,6 +933,9 @@ if run_btn:
             df_daily = df
         
         if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
+        st.write(f"Python executable: {sys.executable}")
+        st.write(f"yfinance version: {yf.__version__}")
+        st.write(f"yfinance location: {yf.__file__}")
         # ===== DEBUG: lihat data mentah =====
         st.write(f"🔍 DEBUG {ticker_input}: {len(df)} bar, dari {df.index[0]} sampai {df.index[-1]}")
         st.write(f"🔍 DEBUG Close terakhir: {df['Close'].iloc[-1]}")
