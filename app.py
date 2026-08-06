@@ -1571,16 +1571,18 @@ if run_btn:
         p5.metric("S2", f"Rp {s2_f:,.0f}".replace(",","."))
         st.write(f"Kondisi {breakout_label}: **{breakout}**"); st.divider()
         st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest" + (" (Intraday)" if is_daytrade else " (6 Bulan)"))
-        t1,t2,t3,t4,t5=st.columns(5)
-        t1.metric("Sinyal",signal); t2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."))
-        entry_low_f = fraksi_bei(entry_low)
-        entry_high_f = fraksi_bei(entry_high)
-        entry_zone_f = f"Rp {entry_low_f:,.0f} - {entry_high_f:,.0f}"
+        t1, t2 = st.columns(2)
+        t1.metric("Sinyal", signal)
+        t2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."))
         
-        t3.metric("Entry Zone", entry_zone_f)
-        t4.metric("TP Range", f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
-          f"+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%")
-        t5.metric("Stop Loss", f"Rp {sl_harga_f:,.0f}", f"-{sl_pct:.1f}%")
+        if "AVOID" not in signal:
+            t3, t4, t5 = st.columns(3)
+            t3.metric("Entry Zone", entry_zone_f)
+            t4.metric("TP Range", f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
+                      f"+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%")
+            t5.metric("Stop Loss", f"Rp {sl_harga_f:,.0f}", f"-{sl_pct:.1f}%")
+        else:
+            st.info("⛔ Tidak ada rekomendasi entry, TP, atau SL untuk sinyal AVOID.")
         st.markdown(f"**Hasil Backtest ({backtest_window} Bar):**"); b1,b2,b3,b4,b5,b6=st.columns(6)
         b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
         b3.metric("Avg Return/Trade",f"{avg_bt:.2%}" if trades_bt else "N/A"); b4.metric("Max DD Strat",f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
