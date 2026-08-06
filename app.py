@@ -808,14 +808,14 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
     # ==================== FUNGSI DATA & INDIKATOR ====================
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 def load_stock_data(ticker, period="2y", interval="1d"):
     df = yf.download(ticker, period=period, interval=interval)
     if df.empty: return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     return df
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 def load_ihsg_data(period="2y", interval="1d"):
     df = yf.download("^JKSE", period=period, interval=interval)
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
