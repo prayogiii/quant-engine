@@ -808,19 +808,22 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
     # ==================== FUNGSI DATA & INDIKATOR ====================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=60)   # sudah Anda ubah
 def load_stock_data(ticker, period="2y", interval="1d"):
-    df = yf.download(ticker, period=period, interval=interval)
-    if df.empty: return pd.DataFrame()
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    df = yf.download(ticker, period=period, interval=interval, prepost=True, actions=False)
+    if df.empty:
+        return pd.DataFrame()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     return df
 
 @st.cache_data(ttl=60)
 def load_ihsg_data(period="2y", interval="1d"):
-    df = yf.download("^JKSE", period=period, interval=interval)
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    df = yf.download("^JKSE", period=period, interval=interval, prepost=True, actions=False)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     return df
-
+    
 def compute_adx_series(df, period=14):
     high, low, close = df['High'], df['Low'], df['Close']
     up = high.diff(); down = -low.diff()
