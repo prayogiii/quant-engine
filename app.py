@@ -1134,7 +1134,14 @@ if run_btn:
     signal = df['Signal'].iloc[-1]
         # ============ V12 ADAPTIVE SIGNAL GENERATION (PINDAH KE SINI) ============
     adaptive_w = get_adaptive_weights(ticker_raw, regime)
-    
+
+    # Hitung Coppock lebih awal agar tersedia untuk factor_signals
+    coppock_val, coppock_prev = 0.0, 0.0
+    try:
+        coppock_val, coppock_prev = coppock_curve(df['Close'].values)
+    except Exception:
+        pass
+
     factor_signals = {
         "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
         "AI_Senti": avg_sentiment,
@@ -1384,11 +1391,7 @@ if run_btn:
     elif vol_surge_pct < -30: vs_status = "Rendah"
     else: vs_status = "Normal"
     
-    coppock_val, coppock_prev = 0.0, 0.0  # default sebelum dihitung
-    try:
-        coppock_val, coppock_prev = coppock_curve(df['Close'].values)
-    except Exception:
-        pass
+    # coppock_val sudah dihitung di atas (sebelum factor_signals)
     coppock_rising = coppock_val > coppock_prev
     coppock_turning_up = coppock_rising and coppock_prev <= 0
     if coppock_turning_up: coppock_status = "Turning Up"
@@ -1741,7 +1744,7 @@ if run_btn:
             "AI_Senti": avg_sentiment,
             "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
             "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
-            "Coppock": locals().get('coppock_val', 0.0) / 10.0
+            "Coppock": coppock_val / 10.0
         }
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
