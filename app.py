@@ -889,6 +889,23 @@ def get_google_news_rss(query_str, num=5):
         news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
         return news, None
     except Exception as e: return [], str(e)
+def get_ipot_news(query, num=5):
+    """Ambil berita dari Ipotnews berdasarkan kata kunci."""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        url = f"https://www.ipotnews.com/search?q={urllib.parse.quote(query)}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(r.text, 'html.parser')
+        news = []
+        for item in soup.select('h2 a')[:num]:   # selector bisa disesuaikan
+            title = item.get_text(strip=True)
+            link = item.get('href', '')
+            # Ipotnews biasanya tidak ada summary, bisa dikosongkan
+            news.append({'title': title, 'summary': '', 'source': 'Ipotnews'})
+        return news, None
+    except Exception as e: return [], str(e)
 
 def get_yahoo_search_news(query_str, num=5):
     try:
@@ -1043,6 +1060,9 @@ if run_btn:
         if rss: news_pool.extend(rss)
         ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
         if ysearch: news_pool.extend(ysearch)
+        # --- Ipotnews ---
+        ipot, _ = get_ipot_news(f"{ticker_raw}")
+        if ipot: news_pool.extend(ipot)
         news_pool = filter_relevant(news_pool, ticker_raw)
         seen = set(); unique_news = []
         for n in news_pool:
@@ -1833,7 +1853,8 @@ if run_btn:
             "AI_Senti": avg_sentiment,
             "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
             "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),  # ✅ diperbaiki
-            "Coppock": coppock_val / 10.0
+            "Coppock": coppock_val / 10.0,
+            "OFI": df['OFI_raw'].iloc[-1] / 3.0
         }
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
         save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
