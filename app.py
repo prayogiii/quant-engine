@@ -947,6 +947,33 @@ REGIME_INFO = {
     "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
+def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
+    base = REGIME_INFO.get(regime, "Rezim tidak terdefinisi.")
+    notes = []
+
+    # Analisis OFI
+    if ofi_raw > 0.5:
+        notes.append("🔹 OFI positif kuat → akumulasi tinggi, konfirmasi bullish.")
+    elif ofi_raw < -0.5:
+        notes.append("🔹 OFI negatif signifikan → tekanan jual, waspadai potensi distribusi.")
+    elif ofi_raw < 0:
+        notes.append("🔹 OFI sedikit negatif → aliran dana netral cenderung keluar.")
+
+    # Analisis ADX
+    if adx > 40:
+        notes.append("🔹 ADX > 40 → tren sangat kuat, tapi waspadai kejenuhan.")
+    elif adx < 20:
+        notes.append("🔹 ADX rendah → pasar sedang konsolidasi, breakout mungkin terjadi.")
+
+    # Tambahan untuk RISK-ON / RISK-OFF
+    if "RISK-ON" in ihsg_cond:
+        notes.append("🔹 Sentimen pasar luas mendukung (RISK-ON).")
+    elif "RISK-OFF" in ihsg_cond:
+        notes.append("🔹 Sentimen pasar luas sedang defensif (RISK-OFF).")
+
+    if notes:
+        return base + " " + " ".join(notes)
+    return base
 # ==================== PROSES ANALISIS ====================
 if run_btn:
     if not ticker_input:
@@ -1569,7 +1596,7 @@ if run_btn:
         m2.metric("Kondisi Makro IHSG",ihsg_cond)
         m3.metric("ADX Adaptif",f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
         m4.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
-        st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime,'Regime tidak terdefinisi.')}")
+        st.markdown(f"**Insight Regime:** {generate_regime_insight(regime, adx, df['OFI_raw'].iloc[-1], ihsg_cond)}")
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
