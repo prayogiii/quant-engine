@@ -995,6 +995,8 @@ def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
         notes.append("🔹 Sentimen pasar luas mendukung (RISK-ON).")
     elif "RISK-OFF" in ihsg_cond:
         notes.append("🔹 Sentimen pasar luas sedang defensif (RISK-OFF).")
+    else:
+        notes.append(f"🔹 Sentimen pasar luas: {ihsg_cond}")
 
     if notes:
         return base + " " + " ".join(notes)
