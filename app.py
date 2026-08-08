@@ -1631,20 +1631,14 @@ if run_btn:
                 if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>",unsafe_allow_html=True)
         st.divider()
         st.subheader("🧬 Regime Pasar & Volatilitas"); m1,m2,m3,m4 = st.columns(4)
-        m1.metric("Market Regime", regime)
-        m2.metric("Kondisi Makro IHSG", ihsg_cond)
-        m3.metric("ADX Adaptif", f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
+        m1.metric("Market Regime",regime)
+        m2.metric("Kondisi Makro IHSG",ihsg_cond)
+        m3.metric("ADX Adaptif",f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
         m4.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
-        
         if is_daytrade:
             vwap_col = st.columns(1)[0]
             vwap_col.metric("VWAP", f"{vwap_now:,.0f}", vwap_bias)
-        
-        # Ringkasan pendek
-        ringkasan = f"📌 **{regime}** | **{ihsg_cond}** | ADX {adx:.1f} | OFI {df['OFI_raw'].iloc[-1]:.2f}"
-        if is_daytrade and vwap_now is not None:
-            ringkasan += f" | VWAP {vwap_now:,.0f} ({vwap_bias})"
-        st.markdown(ringkasan)
+        st.markdown(f"**Insight Regime:** {generate_regime_insight(regime, adx, df['OFI_raw'].iloc[-1], ihsg_cond)}")
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
