@@ -44,7 +44,7 @@ warnings.filterwarnings("ignore")
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
-FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock"]
+FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock","OFI"]
 WEIGHT_MIN    = 0.08
 WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
@@ -172,11 +172,11 @@ def save_v12_prediction(ticker, close_price, factor_signals):
 
 def default_weight(factor, regime):
     defaults = {
-        "STABLE BULLISH": {"Momentum":0.25,"AI_Senti":0.18,"MeanRev":0.12,"Beta_IHSG":0.15,"Coppock":0.30},
-        "VOLATILE UPTREND": {"Momentum":0.28,"AI_Senti":0.14,"MeanRev":0.12,"Beta_IHSG":0.16,"Coppock":0.30},
-        "HIGH-STRESS PANIC": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.22,"Beta_IHSG":0.15,"Coppock":0.30},
-        "SIDEWAYS / CONSOLIDATION": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.27,"Beta_IHSG":0.12,"Coppock":0.28},
-        "BEARISH ACCUMULATION": {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.20,"Beta_IHSG":0.15,"Coppock":0.27}
+        "STABLE BULLISH": {"Momentum":0.25,"AI_Senti":0.18,"MeanRev":0.12,"Beta_IHSG":0.15,"Coppock":0.30,"OFI": 0.12},
+        "VOLATILE UPTREND": {"Momentum":0.28,"AI_Senti":0.14,"MeanRev":0.12,"Beta_IHSG":0.16,"Coppock":0.30,"OFI": 0.10},
+        "HIGH-STRESS PANIC": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.22,"Beta_IHSG":0.15,"Coppock":0.30,"OFI": 0.18},
+        "SIDEWAYS / CONSOLIDATION": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.27,"Beta_IHSG":0.12,"Coppock":0.28,"OFI": 0.14},
+        "BEARISH ACCUMULATION": {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.20,"Beta_IHSG":0.15,"Coppock":0.27,"OFI": 0.13}
     }
     return defaults.get(regime, {"Momentum":0.23,"AI_Senti":0.17,"MeanRev":0.15,"Beta_IHSG":0.15,"Coppock":0.30}).get(factor,0.15)
 
@@ -650,6 +650,8 @@ with st.sidebar:
                 with c2:
                     st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div></div>""", unsafe_allow_html=True)
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
+                # --- OFI Ratio ---
+                st.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
                 # --- Entry Zone dengan gaya konsisten ---
                 entry_zone_val = r.get('Entry_Zone', '?')
                 if entry_zone_val and entry_zone_val != '?':
@@ -977,7 +979,10 @@ if run_btn:
             df['Mom5D'] = df['Close'].pct_change(5) * 100    # 5 hari untuk swing
         df['ZScore'] = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
         df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
-
+        # ============ OFI (Order Flow Imbalance) ============
+        df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
+        df['Cumulative_OFI'] = df['Delta'].cumsum()
+        df['OFI_raw'] = df['Delta'] / df['Volume'].rolling(20).mean().fillna(1)
         # ============ FUNDAMENTAL ============
         try: ticker_info = yf.Ticker(ticker_input).info
         except: ticker_info = {}
@@ -1153,7 +1158,8 @@ if run_btn:
         "AI_Senti": avg_sentiment,
         "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
         "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),
-        "Coppock": coppock_val / 10.0
+        "Coppock": coppock_val / 10.0,
+        "OFI": df['OFI_raw'].iloc[-1] / 3.0
     }
     norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
     total_score = sum(norm_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
