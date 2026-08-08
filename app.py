@@ -903,7 +903,7 @@ def get_ipot_news(query, num=5):
         r = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(r.text, 'html.parser')
         news = []
-        for item in soup.select('h2 a')[:num]:   # selector bisa disesuaikan
+        for item in soup.select('.title a')[:num]:   # selector bisa disesuaikan
             title = item.get_text(strip=True)
             link = item.get('href', '')
             news.append({'title': title, 'summary': '', 'source': 'Ipotnews'})
