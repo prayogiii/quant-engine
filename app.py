@@ -971,7 +971,10 @@ if run_btn:
         df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['ADX'] = compute_adx_series(df)
-        df['Mom5D'] = df['Close'].pct_change(5)*100
+        if is_daytrade:
+            df['Mom5D'] = df['Close'].pct_change(10) * 100   # 10 bar = 50 menit (lebih smooth)
+        else:
+            df['Mom5D'] = df['Close'].pct_change(5) * 100    # 5 hari untuk swing
         df['ZScore'] = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
         df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
 
@@ -1008,13 +1011,19 @@ if run_btn:
             else: translated.append("")
         sentimen_status = "Positif 🟢" if avg_sentiment>=0.05 else ("Negatif 🔴" if avg_sentiment<=-0.05 else "Netral ⚪")
 
-        # ============ THRESHOLD HISTORIS ============
-        split_idx = max(126, len(df)-126)
-        df_thresh = df.iloc[:split_idx]
+        # ============ THRESHOLD & DISTRIBUTION (adaptive, trailing window) ============
+        if is_daytrade:
+            # gunakan 200 bar terakhir (≈ 1–2 hari) agar threshold mengikuti kondisi sesi terbaru
+            n_recent = min(200, len(df))
+            df_thresh = df.iloc[-n_recent:]
+        else:
+            split_idx = max(126, len(df)-126)
+            df_thresh = df.iloc[:split_idx]
+        
         returns_thresh = df_thresh['Close'].pct_change().dropna()
-        adx_threshold = np.percentile(df_thresh['ADX'].dropna(),75) if not df_thresh['ADX'].dropna().empty else 20
+        adx_threshold = np.percentile(df_thresh['ADX'].dropna(), 75) if not df_thresh['ADX'].dropna().empty else 20
         z_oversold_th = -1.5
-        mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(),50) if not df_thresh['Mom5D'].dropna().empty else 0.0
+        mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(), 50) if not df_thresh['Mom5D'].dropna().empty else 0.0
 
         def t_loglike(p,d):
             if p[0]<=2 or p[2]<=0: return np.inf
@@ -1044,15 +1053,18 @@ if run_btn:
         adx = df['ADX'].iloc[-1]
 
         # ============ BETA ============
+        # Inisialisasi default
+        beta_ihsg = 1.0
+        ihsg_ret = pd.Series(dtype=float)  # series kosong sebagai fallback
+        
         try:
             if not df_ihsg.empty:
                 ihsg_ret = df_ihsg['Close'].pct_change().dropna()
                 common = returns.index.intersection(ihsg_ret.index)
                 if len(common) > 20:
                     beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])
-                else: beta_ihsg = 1.0
-            else: beta_ihsg = 1.0
-        except: beta_ihsg = 1.0
+        except:
+            pass
 
     # ============ ATR & RSI ============
     df['TR'] = pd.concat([
@@ -1140,7 +1152,7 @@ if run_btn:
         "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
         "AI_Senti": avg_sentiment,
         "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
-        "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
+        "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),
         "Coppock": coppock_val / 10.0
     }
     norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
@@ -1262,7 +1274,7 @@ if run_btn:
     df['Signal'] = generate_signals_vectorized(df, mom_median_th)
 
     if is_daytrade:
-        backtest_window = min(500, len(df))
+        backtest_window = min(200, len(df))   # lebih pendek, lebih relevan untuk intraday
     else:
         backtest_window = 126
     df_back = df.iloc[-backtest_window:].copy()
@@ -1762,7 +1774,7 @@ if run_btn:
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
             "AI_Senti": avg_sentiment,
             "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
-            "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if 'ihsg_ret' in dir() else 0.0),
+            "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),  # ✅ diperbaiki
             "Coppock": coppock_val / 10.0
         }
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
