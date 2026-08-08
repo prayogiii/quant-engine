@@ -1053,6 +1053,16 @@ if run_btn:
         df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
         df['Cumulative_OFI'] = df['Delta'].cumsum()
         df['OFI_raw'] = df['Delta'] / df['Volume'].rolling(20).mean().fillna(1)
+        # ============ VWAP (Intraday Fair Value) ============
+        if is_daytrade:
+            df['CumVol'] = df['Volume'].cumsum()
+            df['CumPV'] = (df['Close'] * df['Volume']).cumsum()
+            df['VWAP'] = df['CumPV'] / df['CumVol']
+            vwap_now = df['VWAP'].iloc[-1]
+            vwap_bias = "Di Atas VWAP (Bullish)" if harga_terakhir > vwap_now else "Di Bawah VWAP (Bearish)"
+        else:
+            vwap_now = None
+            vwap_bias = "N/A"
         # ============ FUNDAMENTAL ============
         try: ticker_info = yf.Ticker(ticker_input).info
         except: ticker_info = {}
@@ -1625,6 +1635,9 @@ if run_btn:
         m2.metric("Kondisi Makro IHSG",ihsg_cond)
         m3.metric("ADX Adaptif",f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
         m4.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
+        if is_daytrade:
+            vwap_col = st.columns(1)[0]
+            vwap_col.metric("VWAP", f"{vwap_now:,.0f}", vwap_bias)
         st.markdown(f"**Insight Regime:** {generate_regime_insight(regime, adx, df['OFI_raw'].iloc[-1], ihsg_cond)}")
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
