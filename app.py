@@ -886,9 +886,13 @@ def get_google_news_rss(query_str, num=5):
     try:
         url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
         feed = feedparser.parse(url)
-        news = [{'title': e.get('title','').strip(), 'summary': re.sub('<[^<]+?>','',e.get('summary','')), 'source':'Google News'} for e in feed.entries[:num]]
+        news = [{'title': e.get('title','').strip(),
+                 'summary': re.sub('<[^<]+?>','',e.get('summary','')),
+                 'source':'Google News'} for e in feed.entries[:num]]
         return news, None
-    except Exception as e: return [], str(e)
+    except Exception as e:
+        return [], str(e)
+
 def get_ipot_news(query, num=5):
     """Ambil berita dari Ipotnews berdasarkan kata kunci."""
     try:
@@ -902,15 +906,10 @@ def get_ipot_news(query, num=5):
         for item in soup.select('h2 a')[:num]:   # selector bisa disesuaikan
             title = item.get_text(strip=True)
             link = item.get('href', '')
-            # Ipotnews biasanya tidak ada summary, bisa dikosongkan
             news.append({'title': title, 'summary': '', 'source': 'Ipotnews'})
         return news, None
-    except Exception as e: return [], str(e)
-    ipot, ipot_error = get_ipot_news(f"{ticker_raw}")
-    if ipot:
-        news_pool.extend(ipot)
-    else:
-        st.warning(f"⚠️ Ipotnews tidak mengembalikan berita. Error: {ipot_error}")
+    except Exception as e:
+        return [], str(e)
 
 def get_yahoo_search_news(query_str, num=5):
     try:
@@ -920,9 +919,11 @@ def get_yahoo_search_news(query_str, num=5):
             inner = item.get('content') or item
             title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
             summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
-            if title: news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
+            if title:
+                news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
         return news, None
-    except: return [], "Yahoo Search gagal"
+    except:
+        return [], "Yahoo Search gagal"
 
 def filter_relevant(news_list, ticker):
     keywords = [ticker.lower(),'saham','ihsg','bei','idx']
@@ -1068,6 +1069,8 @@ if run_btn:
         # --- Ipotnews ---
         ipot, _ = get_ipot_news(f"{ticker_raw}")
         if ipot: news_pool.extend(ipot)
+        else:
+            st.warning(f"⚠️ Ipotnews tidak mengembalikan berita. Error: {ipot_error}")
         news_pool = filter_relevant(news_pool, ticker_raw)
         seen = set(); unique_news = []
         for n in news_pool:
