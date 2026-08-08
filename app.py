@@ -1068,10 +1068,7 @@ if run_btn:
         if ysearch: news_pool.extend(ysearch)
         # --- Ipotnews ---
         ipot, _ = get_ipot_news(f"{ticker_raw}")
-        if ipot:
-                news_pool.extend(ipot)
-        else:
-            st.warning(f"⚠️ Ipotnews tidak mengembalikan berita. Error: {ipot_error}")
+        if ipot: news_pool.extend(ipot)
         news_pool = filter_relevant(news_pool, ticker_raw)
         seen = set(); unique_news = []
         for n in news_pool:
