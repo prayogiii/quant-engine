@@ -146,7 +146,8 @@ def load_v12_predictions(ticker):
 
 def save_v12_prediction(ticker, close_price, factor_signals):
     try:
-        sheet = get_gsheet().worksheet("v12_predictions")
+        sheet = get_gsheet()
+        ws = sheet.worksheet("v12_predictions")
         new_row = {
             'ticker': ticker,
             'close_price': close_price,
@@ -155,9 +156,15 @@ def save_v12_prediction(ticker, close_price, factor_signals):
         for k in FACTOR_KEYS:
             new_row[f'sig_{k}'] = factor_signals.get(k, 0.0)
 
-        records = sheet.get_all_records()
+        headers = list(new_row.keys())   # sekarang 9 kolom
+
+        # ---------- Pastikan jumlah kolom cukup ----------
+        if ws.col_count < len(headers):
+            ws.add_cols(len(headers) - ws.col_count)
+        # -------------------------------------------------
+
+        records = ws.get_all_records()
         row_index = None
-        headers = list(new_row.keys())
         for i, row in enumerate(records):
             if row.get('ticker') == ticker:
                 row_index = i + 2
@@ -165,12 +172,17 @@ def save_v12_prediction(ticker, close_price, factor_signals):
 
         if row_index:
             values = [new_row[h] for h in headers]
-            sheet.update(f'A{row_index}:H{row_index}', [values], value_input_option='RAW')
+            # Tentukan huruf kolom terakhir (misal 9 kolom -> 'I')
+            last_col = chr(64 + len(headers))  # 65='A', 73='I'
+            ws.update(f'A{row_index}:{last_col}{row_index}', [values], value_input_option='RAW')
         else:
             if not records:
-                sheet.insert_row(headers, 1)
+                # pastikan header di baris 1 lengkap
+                existing_headers = ws.row_values(1)
+                if not existing_headers or len(existing_headers) < len(headers):
+                    ws.insert_row(headers, 1)
             values = [new_row[h] for h in headers]
-            sheet.append_row(values, value_input_option='RAW')
+            ws.append_row(values, value_input_option='RAW')
     except Exception as e:
         st.error(f"Gagal menyimpan prediksi: {e}")
 
