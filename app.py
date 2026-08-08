@@ -650,8 +650,6 @@ with st.sidebar:
                 with c2:
                     st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div></div>""", unsafe_allow_html=True)
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-                # --- OFI Ratio ---
-                st.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
                 # --- Entry Zone dengan gaya konsisten ---
                 entry_zone_val = r.get('Entry_Zone', '?')
                 if entry_zone_val and entry_zone_val != '?':
@@ -1548,8 +1546,11 @@ if run_btn:
                 st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>",unsafe_allow_html=True)
                 if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>",unsafe_allow_html=True)
         st.divider()
-        st.subheader("🧬 Regime Pasar & Volatilitas"); m1,m2,m3=st.columns(3)
-        m1.metric("Market Regime",regime); m2.metric("Kondisi Makro IHSG",ihsg_cond); m3.metric("ADX Adaptif",f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
+        st.subheader("🧬 Regime Pasar & Volatilitas"); m1,m2,m3,m4 = st.columns(4)
+        m1.metric("Market Regime",regime)
+        m2.metric("Kondisi Makro IHSG",ihsg_cond)
+        m3.metric("ADX Adaptif",f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
+        m4.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
         st.markdown(f"**Insight Regime:** {REGIME_INFO.get(regime,'Regime tidak terdefinisi.')}")
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
