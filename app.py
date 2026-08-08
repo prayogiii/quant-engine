@@ -94,7 +94,7 @@ def init_sheets():
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
         if "v12_predictions" not in existing:
-            sheet.add_worksheet("v12_predictions", rows=500, cols=8)
+            sheet.add_worksheet("v12_predictions", rows=500, cols=9)
         if "riwayat_actual" not in existing:
             sheet.add_worksheet("riwayat_actual", rows=100, cols=6)
     except Exception as e:
@@ -373,6 +373,8 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
             key = f'sig_{k}'
             if key in last_pred:
                 factor_signals[k] = float(last_pred[key])
+            else:
+                factor_signals[k] = 0.0
         outcome = actual_data.get('Outcome', '')
         if outcome == 'Win':
             actual_return = 1.0
@@ -1768,7 +1770,13 @@ if run_btn:
         last_pred = load_v12_predictions(ticker_raw)
         if last_pred:
             last_close = last_pred['close_price']
-            last_signals = {k: last_pred[f'sig_{k}'] for k in FACTOR_KEYS}
+            last_signals = {}
+            for k in FACTOR_KEYS:
+                key = f'sig_{k}'
+                if key in last_pred:
+                    last_signals[k] = float(last_pred[key])
+                else:
+                    last_signals[k] = 0.0
             actual_return = (harga_terakhir - float(last_close)) / float(last_close) if float(last_close) > 0 else 0.0
             volatility = returns.std()
             update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
