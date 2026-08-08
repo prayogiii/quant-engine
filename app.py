@@ -982,11 +982,13 @@ def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
     elif ofi_raw < 0:
         notes.append("🔹 OFI sedikit negatif → aliran dana netral cenderung keluar.")
 
-    # Analisis ADX
+    # Analisis ADX (selalu tampil)
     if adx > 40:
         notes.append("🔹 ADX > 40 → tren sangat kuat, tapi waspadai kejenuhan.")
     elif adx < 20:
         notes.append("🔹 ADX rendah → pasar sedang konsolidasi, breakout mungkin terjadi.")
+    else:
+        notes.append(f"🔹 ADX {adx:.1f} → kekuatan tren moderat.")   # ← tambahan
 
     # Tambahan untuk RISK-ON / RISK-OFF
     if "RISK-ON" in ihsg_cond:
