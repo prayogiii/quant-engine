@@ -88,19 +88,23 @@ def init_sheets():
     """Membuat sheet 'riwayat', 'v12_memory', dan 'v12_predictions' jika belum ada."""
     try:
         sheet = get_gsheet()
-        existing = [ws.title for ws in sheet.worksheets()]
+        existing = {ws.title: ws for ws in sheet.worksheets()}   # ⬅️ ubah di sini
         if "riwayat" not in existing:
             sheet.add_worksheet("riwayat", rows=100, cols=35)
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
         if "v12_predictions" not in existing:
             sheet.add_worksheet("v12_predictions", rows=500, cols=9)
+        else:
+            ws = existing["v12_predictions"]
+            if ws.col_count < 9:
+                ws.add_cols(9 - ws.col_count)
         if "riwayat_actual" not in existing:
             sheet.add_worksheet("riwayat_actual", rows=100, cols=6)
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
-# V12 Memory (Google Sheets)
+#V12 Memory (Google Sheets)
 def load_v12_memory():
     mem = {}
     try:
