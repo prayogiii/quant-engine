@@ -1636,7 +1636,11 @@ if run_btn:
         m3.metric("ADX Adaptif", f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
         m4.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
         
-        # Ringkasan pendek (VWAP langsung dimasukkan jika daytrade)
+        if is_daytrade:
+            vwap_col = st.columns(1)[0]
+            vwap_col.metric("VWAP", f"{vwap_now:,.0f}", vwap_bias)
+        
+        # Ringkasan pendek
         ringkasan = f"📌 **{regime}** | **{ihsg_cond}** | ADX {adx:.1f} | OFI {df['OFI_raw'].iloc[-1]:.2f}"
         if is_daytrade and vwap_now is not None:
             ringkasan += f" | VWAP {vwap_now:,.0f} ({vwap_bias})"
