@@ -1058,22 +1058,40 @@ if run_btn:
         roe = ticker_info.get('returnOnEquity')
         de = ticker_info.get('debtToEquity')
 
-        # ============ BERITA & SENTIMEN ============
+               # ============ BERITA & SENTIMEN (jatah per sumber) ============
         news_pool = []
         translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
         translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
-        rss, _ = get_google_news_rss(f"{ticker_raw} saham")
-        if rss: news_pool.extend(rss)
-        ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
-        if ysearch: news_pool.extend(ysearch)
-        # --- Ipotnews ---
-        ipot, _ = get_ipot_news(f"{ticker_raw}")
-        if ipot: news_pool.extend(ipot)
+
+        # 1. Google News (maks 3)
+        gnews, _ = get_google_news_rss(f"{ticker_raw} saham", num=3)
+        if gnews: news_pool.extend(gnews)
+
+        # 2. Yahoo (maks 2)
+        ynews, _ = get_yahoo_search_news(f"{ticker_raw} saham", num=2)
+        if ynews: news_pool.extend(ynews)
+
+        # 3. Ipotnews (maks 1)
+        ipot, ipot_error = get_ipot_news(f"{ticker_raw}", num=1)
+        if ipot:
+            news_pool.extend(ipot)
+        else:
+            if ipot_error:
+                st.warning(f"⚠️ Ipotnews gagal: {ipot_error}")
+            else:
+                st.warning("⚠️ Ipotnews tidak mengembalikan berita.")
+
+        # Filter relevan & deduplikasi
         news_pool = filter_relevant(news_pool, ticker_raw)
-        seen = set(); unique_news = []
+        seen = set()
+        unique_news = []
         for n in news_pool:
-            if n['title'] not in seen: seen.add(n['title']); unique_news.append(n)
-            if len(unique_news)>=5: break
+            if n['title'] not in seen:
+                seen.add(n['title'])
+                unique_news.append(n)
+            if len(unique_news) >= 5:
+                break
+
         avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
         headlines = [n['title'] for n in unique_news]
         sources = [n['source'] for n in unique_news]
