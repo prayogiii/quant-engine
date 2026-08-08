@@ -906,6 +906,11 @@ def get_ipot_news(query, num=5):
             news.append({'title': title, 'summary': '', 'source': 'Ipotnews'})
         return news, None
     except Exception as e: return [], str(e)
+    ipot, ipot_error = get_ipot_news(f"{ticker_raw}")
+    if ipot:
+        news_pool.extend(ipot)
+    else:
+        st.warning(f"⚠️ Ipotnews tidak mengembalikan berita. Error: {ipot_error}")
 
 def get_yahoo_search_news(query_str, num=5):
     try:
