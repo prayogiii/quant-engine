@@ -2368,7 +2368,7 @@ if scan_btn:
         st.subheader("🏆 Top 15 Kandidat")
         df_top15 = pd.DataFrame(top15)
         df_top15.index = range(1, len(df_top15) + 1)
-        st.dataframe(df_top15, use_container_width=True
+        st.dataframe(df_top15, use_container_width=True)
         
         if ai_rerank and st.session_state.get("gemini_api_key"):
             with st.spinner("🤖 AI sedang me-rerank kandidat..."):
