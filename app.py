@@ -584,6 +584,8 @@ with st.sidebar:
             harga_terakhir_manual = None
     else:
         harga_terakhir_manual = None
+    # Letakkan sebelum tombol ANALISIS, misal setelah harga_manual
+    sudah_beli = st.checkbox("🟢 Saya sudah punya posisi di saham ini", value=False)
     col1, col2 = st.columns(2)
     with col1:
         run_btn = st.button("🚀 ANALISIS", use_container_width=True)
@@ -695,6 +697,9 @@ with st.sidebar:
                 b2.metric("Momentum (5D)", r.get('Momentum','?'))
                 st.caption(f"Regime: **{r.get('Rezim','?')}**")
                 ai = r.get("AI_Insight", "").strip()
+                status_pos = r.get('Status_Posisi', '')
+                if status_pos == 'Sudah Beli':
+                    st.caption("🟢 Saat analisis: **Sudah memiliki posisi**")
 
                 # ---- Fitur Catat Actual ----
                 waktu_key = r.get('Waktu','')
@@ -1561,7 +1566,8 @@ if run_btn:
         "Beta": f"{beta_ihsg:.2f}",
         "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
         "Entry_Zone": entry_zone_f,
-        "Gaya": "DT" if is_daytrade else "SW"
+        "Gaya": "DT" if is_daytrade else "SW",
+        "Status_Posisi": "Sudah Beli" if sudah_beli else "Belum"
     }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -1623,6 +1629,18 @@ if run_btn:
     else:
         ac,ai = "#ef4444","🔴"
         at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
+    # --- Tambahan untuk status kepemilikan ---
+    if sudah_beli:
+        if "AVOID" in signal:
+            extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk **take profit sebagian** atau **keluar seluruhnya** untuk mengamankan modal."
+        elif "HOLD" in signal:
+            extra = "🔒 Kamu sudah punya posisi. Disarankan **tahan** dan pasang **trailing stop** di bawah support terdekat."
+        elif "STRONG BUY" in signal or "BUY" in signal:
+            extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh **entry zone**."
+        else:
+            extra = ""
+        if extra:
+            at += f"<br><br><b>📌 Status Posisi:</b> {extra}"
     col1,col2 = st.columns([1,1])
     with col1:
         if "AVOID" not in signal:
@@ -1934,7 +1952,8 @@ if run_btn:
                 "Fundamental_PER": f"{per:.2f}" if per else "N/A",
                 "Fundamental_PBV": f"{pbv:.2f}" if pbv else "N/A",
                 "Fundamental_ROE": f"{roe*100:.1f}" if roe else "N/A",
-                "Fundamental_DE": f"{de:.2f}" if de else "N/A"
+                "Fundamental_DE": f"{de:.2f}" if de else "N/A",
+                "Status_Posisi": "Sudah memiliki saham" if sudah_beli else "Belum memiliki saham"
             }
             riwayat_konteks = [r for r in st.session_state.riwayat if r['Saham']==ticker_input][:10]
             hasil_ai, error_ai = analisis_saham_dengan_ai(data_ai, riwayat_konteks, st.session_state.gemini_api_key)
