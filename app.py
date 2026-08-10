@@ -1651,19 +1651,19 @@ if run_btn:
     if sudah_beli:
         # Saran dasar berdasarkan sinyal (dari kode sebelumnya)
         if "AVOID" in signal:
-            extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk **take profit sebagian** atau **keluar seluruhnya** untuk mengamankan modal."
+            extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk <b>take profit sebagian</b> atau <b>keluar seluruhnya</b> untuk mengamankan modal."
         elif "HOLD" in signal:
-            extra = "🔒 Kamu sudah punya posisi. Disarankan **tahan** dan pasang **trailing stop** di bawah support terdekat."
+            extra = "🔒 Kamu sudah punya posisi. Disarankan **tahan** dan pasang <b>trailing stop</b> di bawah support terdekat."
         elif "STRONG BUY" in signal or "BUY" in signal:
-            extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh **entry zone**."
+            extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh <b>entry zone</b>."
         else:
             extra = ""
     
         # Tambahan berdasarkan floating P/L (jika harga beli diisi)
         if floating_pl_pct is not None:
-            pl_str = f"💰 **Floating P/L:** {floating_pl_pct:+.2f}%"
+            pl_str = f"💰 <b>Floating P/L:<b> {floating_pl_pct:+.2f}%"
             if floating_pl_pct > 5:
-                extra += f" (Profit sudah >5%. Pertimbangkan **take profit sebagian** atau **trailing stop**.)"
+                extra += f" (Profit sudah >5%. Pertimbangkan <b>take profit sebagian<b> atau <b>trailing stop<b>.)"
             elif floating_pl_pct > 0:
                 extra += f" (Masih profit. Pantau SL ketat.)"
             elif floating_pl_pct < -3:
