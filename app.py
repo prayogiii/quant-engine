@@ -408,6 +408,50 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
         # Jika Actual_Close tidak diisi, tidak ada update V12
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
+# ====================== API IDX ======================
+def fetch_idx_stock_list():
+    """
+    Mengambil daftar kode saham dari API resmi IDX.
+    Mengembalikan list kode (string) atau None jika gagal.
+    """
+    endpoints = [
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?start=0&length=9999&exchangeBoard=&industry=&subIndustry=&search=",
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?language=id-id&start=0&length=9999"
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham/"
+    }
+
+    for url in endpoints:
+        try:
+            resp = requests.get(url, headers=headers, timeout=25)
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            if isinstance(data, list):
+                return [item['code'] for item in data if 'code' in item]
+            elif isinstance(data, dict) and 'data' in data:
+                return [item['code'] for item in data['data'] if 'code' in item]
+            else:
+                codes = []
+                def extract_codes(obj):
+                    if isinstance(obj, dict):
+                        if 'code' in obj:
+                            codes.append(obj['code'])
+                        for v in obj.values():
+                            extract_codes(v)
+                    elif isinstance(obj, list):
+                        for v in obj:
+                            extract_codes(v)
+                extract_codes(data)
+                if codes:
+                    return codes
+        except Exception:
+            continue
+    return None
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
@@ -1307,8 +1351,7 @@ if run_btn:
         else:
             df['Mom5D'] = df['Close'].pct_change(5) * 100    # 5 hari untuk swing
         df['ZScore'] = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
-        df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
-        df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])   
+        df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0   
         # ============ OFI (Order Flow Imbalance) ============
         df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
         df['Cumulative_OFI'] = df['Delta'].cumsum()
@@ -2261,7 +2304,7 @@ if scan_btn:
             df['Mom5D'] = df['Close'].pct_change(10) * 100
             df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
             df['Vol_MA20'] = df['Volume'].rolling(20).mean()
-            
+            df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
             harga_terakhir = float(df['Close'].iloc[-1])
             volume_avg = df['Volume'].rolling(20).mean().iloc[-1]
             if volume_avg == 0:
