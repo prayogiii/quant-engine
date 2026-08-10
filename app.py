@@ -639,10 +639,6 @@ with st.sidebar:
             try: conf_val = float(conf_str.replace('%',''))
             except: conf_val = 0
             conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
-            est_ret_str = r.get('Est_Return', '0%')
-            try: est_ret = float(est_ret_str.replace('%','').replace(',',''))
-            except: est_ret = 0
-            ret_color = "🟢" if est_ret > 1 else ("🟡" if est_ret > 0 else "🔴")
             gaya = r.get('Gaya','?')
             gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
             expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
@@ -653,9 +649,18 @@ with st.sidebar:
                 if waktu_analisis and waktu_analisis != '?':
                     st.caption(f"🕒 Waktu Analisis: {waktu_analisis}")
                 st.divider()
-                c1, c2 = st.columns(2)
-                c1.metric("Coppock", r.get('Coppock','?'))
-                c2.metric("Est. Return", f"{r.get('Est_Return','?')} {ret_color}")
+            
+                # Coppock full width
+                st.metric("Coppock", r.get('Coppock','?'))
+            
+                # Estimasi (caption)
+                est_netral = r.get('Estimasi_Netral', '?')
+                est_sinyal = r.get('Estimasi_Sinyal', '?')
+                ret_netral = r.get('Est_Return', '?')
+                ret_sinyal = r.get('Est_Return_Sinyal', '?')
+                st.caption(f"📊 Netral: {est_netral} ({ret_netral})  |  🎯 Sinyal: {est_sinyal} ({ret_sinyal})")
+            
+                # TP & SL dalam dua kolom
                 c1, c2 = st.columns(2)
                 tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
                 sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
@@ -667,15 +672,19 @@ with st.sidebar:
                     st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{tp_display}</div></div>""", unsafe_allow_html=True)
                 with c2:
                     st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div></div>""", unsafe_allow_html=True)
+            
+                # Likuiditas
                 st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-                # --- Entry Zone dengan gaya konsisten ---
+            
+                # Entry Zone (bila ada)
                 entry_zone_val = r.get('Entry_Zone', '?')
                 if entry_zone_val and entry_zone_val != '?':
-                    # Format tampilan seperti metric TP/SL
                     st.markdown(f"""<div style="margin-top: 8px;">
                         <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">🎯 Entry Zone</label>
                         <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{entry_zone_val}</div>
                     </div>""", unsafe_allow_html=True)
+            
+                # Indikator tambahan
                 ind1, ind2, ind3, ind4 = st.columns(4)
                 ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
                 ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
@@ -1441,8 +1450,20 @@ if run_btn:
         paths[step] = np.exp(current_log)
 
     final_prices = paths[-1, :]
+    # 1. Estimasi netral (median) – untuk backtest, self‑learning, dan metrik objektif
     est_besok = float(np.median(final_prices))
+    # 2. Estimasi kontekstual berdasarkan sinyal (hanya untuk tampilan)
+    if "STRONG BUY" in signal:
+        est_besok_sinyal = float(np.percentile(final_prices, 75))
+    elif "BUY" in signal:
+        est_besok_sinyal = float(np.percentile(final_prices, 65))
+    elif "HOLD" in signal:
+        est_besok_sinyal = float(np.percentile(final_prices, 50))   # sama dengan netral
+    else:  # AVOID
+        est_besok_sinyal = float(np.percentile(final_prices, 35))
+    # 3. Range ketidakpastian tetap pakai persentil 25 dan 75
     low_est, up_est = float(np.percentile(final_prices, 25)), float(np.percentile(final_prices, 75))
+    # 4. Probabilitas & hit TP/SL (tidak berubah)
     prob_bull = (final_prices > harga_terakhir).mean() * 100
     hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
     hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
@@ -1499,6 +1520,7 @@ if run_btn:
     else: coppock_status = "Falling"
 
     est_besok_f = fraksi_bei(est_besok)
+    est_besok_sinyal_f = fraksi_bei(est_besok_sinyal)
     low_est_f = fraksi_bei(low_est)
     up_est_f = fraksi_bei(up_est)
     tp_low_f = fraksi_bei(tp_low)
@@ -1510,7 +1532,9 @@ if run_btn:
         "Saham": ticker_raw,
         "Harga": f"{harga_terakhir:,.0f}",
         "Sinyal": signal,
-        "Estimasi": f"{est_besok:,.0f}",
+        "Estimasi": f"{est_besok:,.0f}",   # tetap median untuk kompatibilitas
+        "Estimasi_Netral": f"Rp {est_besok_f:,.0f}",
+        "Estimasi_Sinyal": f"Rp {est_besok_sinyal_f:,.0f}",
         "Prob Naik": f"{prob_bull:.1f}%",
         "RRR": f"{rrr:.2f}",
         "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
@@ -1522,6 +1546,7 @@ if run_btn:
         "Confidence": f"{confidence:.0%}",
         "Coppock": coppock_status,
         "Est_Return": f"{((est_besok - harga_terakhir) / harga_terakhir * 100):+.2f}%",
+        "Est_Return_Sinyal": f"{((est_besok_sinyal - harga_terakhir) / harga_terakhir * 100):+.2f}%",
         "TP_Harga": f"{tp_low_f:,.0f} - {tp_high_f:,.0f}",
         "TP_Range": f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
         "SL_Harga": f"{sl_harga_f:,.0f}",
@@ -1554,8 +1579,17 @@ if run_btn:
         delta=f"per {now_jkt.strftime('%d/%m %H:%M')} WIB",  # format pendek
         delta_color="off"
     )
-    col2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."),
-                f"50% range: Rp {low_est_f:,.0f} - {up_est_f:,.0f}".replace(",","."))
+    with col2:
+        st.metric(
+            label=f"{estimasi_label} (Netral)",
+            value=f"Rp {est_besok_f:,.0f}",
+            delta=f"Range: Rp {low_est_f:,.0f} - {up_est_f:,.0f}"
+        )
+        st.metric(
+            label=f"{estimasi_label} (Sinyal {signal.split()[0]})",
+            value=f"Rp {est_besok_sinyal_f:,.0f}",
+            delta=f"{((est_besok_sinyal - harga_terakhir) / harga_terakhir * 100):+.2f}%"
+        )
     col3.metric(prob_label, f"{prob_bull:.1f}%")
 
     if PLOTLY_AVAILABLE:
