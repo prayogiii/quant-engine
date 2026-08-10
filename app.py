@@ -586,6 +586,15 @@ with st.sidebar:
         harga_terakhir_manual = None
     # Letakkan sebelum tombol ANALISIS, misal setelah harga_manual
     sudah_beli = st.checkbox("🟢 Saya sudah punya posisi di saham ini", value=False)
+    # ---- Tambahan input harga beli ----
+    harga_beli_float = None
+    if sudah_beli:
+        harga_beli_str = st.text_input("💰 Harga Beli Rata‑rata (opsional)", placeholder="Kosongkan jika tidak tahu")
+        if harga_beli_str:
+            try:
+                harga_beli_float = float(harga_beli_str.replace(",", ""))
+            except:
+                st.error("Format harga beli salah")
     col1, col2 = st.columns(2)
     with col1:
         run_btn = st.button("🚀 ANALISIS", use_container_width=True)
@@ -643,6 +652,9 @@ with st.sidebar:
             conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
             gaya = r.get('Gaya','?')
             gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
+            harga_beli_r = r.get('Harga_Beli', '')
+            if harga_beli_r:
+                st.caption(f"💰 Harga Beli: Rp {harga_beli_r} | Floating: {r.get('Floating_PL', '')}")
             expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
             with st.expander(expander_title):
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
@@ -1050,6 +1062,10 @@ if run_btn:
 
         harga_terakhir_asli = float(df['Close'].iloc[-1])
         harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
+        # --- Hitung floating P/L jika user sudah beli ---
+        floating_pl_pct = None
+        if sudah_beli and harga_beli_float and harga_beli_float > 0:
+            floating_pl_pct = (harga_terakhir - harga_beli_float) / harga_beli_float * 100
         returns = df['Close'].pct_change().dropna()
         if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
 
@@ -1567,7 +1583,9 @@ if run_btn:
         "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
         "Entry_Zone": entry_zone_f,
         "Gaya": "DT" if is_daytrade else "SW",
-        "Status_Posisi": "Sudah Beli" if sudah_beli else "Belum"
+        "Status_Posisi": "Sudah Beli" if sudah_beli else "Belum",
+        "Harga_Beli": f"{harga_beli_float:,.0f}" if harga_beli_float else "",
+        "Floating_PL": f"{floating_pl_pct:+.2f}%" if floating_pl_pct is not None else ""
     }
 
     # ==================== TAMPILAN UTAMA ====================
@@ -1629,8 +1647,9 @@ if run_btn:
     else:
         ac,ai = "#ef4444","🔴"
         at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
-    # --- Tambahan untuk status kepemilikan ---
+    # --- Tambahan untuk status kepemilikan & harga beli ---
     if sudah_beli:
+        # Saran dasar berdasarkan sinyal (dari kode sebelumnya)
         if "AVOID" in signal:
             extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk **take profit sebagian** atau **keluar seluruhnya** untuk mengamankan modal."
         elif "HOLD" in signal:
@@ -1639,6 +1658,21 @@ if run_btn:
             extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh **entry zone**."
         else:
             extra = ""
+    
+        # Tambahan berdasarkan floating P/L (jika harga beli diisi)
+        if floating_pl_pct is not None:
+            pl_str = f"💰 **Floating P/L:** {floating_pl_pct:+.2f}%"
+            if floating_pl_pct > 5:
+                extra += f" (Profit sudah >5%. Pertimbangkan **take profit sebagian** atau **trailing stop**.)"
+            elif floating_pl_pct > 0:
+                extra += f" (Masih profit. Pantau SL ketat.)"
+            elif floating_pl_pct < -3:
+                extra += f" (Rugi >3%. Jika menembus SL, keluar.)"
+            else:
+                extra += f" (Rugi kecil. Tahan dengan SL sesuai rekomendasi.)"
+            # Gabungkan dengan extra
+            extra = pl_str + " " + extra
+    
         if extra:
             at += f"<br><br><b>📌 Status Posisi:</b> {extra}"
     col1,col2 = st.columns([1,1])
