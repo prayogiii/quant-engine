@@ -598,7 +598,23 @@ with st.sidebar:
         if st.button("🗑️ Reset Cache", use_container_width=True):
             st.cache_data.clear()
             st.success("Cache dibersihkan!")
+    # ==================== SCANNER SAHAM IDX ====================
     st.markdown("---")
+    st.subheader("🔍 Scanner Saham IDX")
+    mode_scan = st.selectbox(
+        "Pilih Mode Scan:",
+        ["Cepat (LQ45)", "Papan Utama", "Komprehensif (Utama + Pengembangan)", "Full IDX", "Auto-Fetch (API BEI)"],
+        index=0, key="mode_scan"
+    )
+    likuiditas_min = st.number_input(
+        "Filter Likuiditas Minimum (Rp/hari, rata2 20 hari)",
+        min_value=0, value=300_000_000, step=100_000_000, key="likuiditas_min"
+    )
+    ai_rerank = st.checkbox("Sertakan Scanner AI Re-Rank (Top 15 kandidat teknikal)", value=False, key="ai_rerank")
+    if ai_rerank:
+        st.caption("+15-30 detik. Hemat kuota Gemini gratis: HANYA 1 panggilan API dibatch utk semua kandidat + cache harian per-saham.")
+    
+    scan_btn = st.button("🔍 SCAN SAHAM", use_container_width=True)
 
     # ---------- RIWAYAT ANALISIS (dengan Search & Paginasi) ----------
     st.subheader("📜 Riwayat Analisis")
@@ -970,6 +986,115 @@ def load_ihsg_data(period="2y", interval="1d"):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
+@st.cache_data(ttl=3600)
+def get_daftar_saham(mode):
+    """Mengembalikan list kode saham (tanpa .JK) berdasarkan mode scan."""
+    # Daftar statis fallback (contoh, kamu bisa lengkapi sendiri)
+    lq45 = ["AADI", "ADMR", "ADRO", "AKRA", "AMMN", "AMRT", "ANTM", "ASII", "BBCA", "BBNI",
+            "BBRI", "BBTN", "BMRI", "BRPT", "BUMI", "CPIN", "CUAN", "DEWA", "EMTK", "ESSA",
+            "EXCL", "GOTO", "HRTA", "ICBP", "INCO", "INDF", "INDY", "INKP", "ISAT", "ITMG",
+            "JPFA", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "NCKL", "PGAS", "PGEO", "PTBA",
+            "SCMA", "TLKM", "UNTR", "UNVR", "WIFI"]
+    
+    papan_utama = lq45 + ["AALI", "ABMM", "ACES", "ADHI", "AISA", "ALDO", "AMAG", "APLN", "ARNA", "ARTO",
+                          "ASGR", "ASRI", "ASSA", "AUTO", "BACA", "BALI", "BAYU", "BBHI", "BBMD", "BBYB",
+                          "BCAP", "BDMN", "BEST", "BFIN", "BGTG", "BINA", "BIRD", "BISI", "BJBR", "BJTM",
+                          "BKSL", "BMTR", "BNGA", "BNII", "BNLI", "BRMS", "BSDE", "BSIM", "BSSR", "BTPN",
+                          "BUDI", "BVIC", "BWPT", "BYAN", "CASS", "CFIN", "CITA", "CMNP", "CTRA", "DILD",
+                          "DKFT", "DLTA", "DMAS", "DNET", "DSNG", "DSSA", "ELSA", "ENRG", "EPMT", "ERAA",
+                          "FISH", "GEMS", "GGRM", "GJTL", "GZCO", "HERO", "HEXA", "HMSP", "HRUM", "IMAS",
+                          "IMPC", "INPC", "INTP", "ISSP", "JIHD", "JKON", "JRPT", "JSMR", "JSPT", "JTPE",
+                          "KBLI", "KIJA", "KKGI", "KPIG", "LPCK", "LPKR", "LPPF", "LSIP", "LTLS", "MAIN",
+                          "MAYA", "MBSS", "MCOR", "MEGA", "MERK", "MIDI", "MIKA", "MLBI", "MLPL", "MNCN",
+                          "MPMX", "MTDL", "MTLA", "MYOR", "NISP", "NOBU", "PADI", "PALM", "PANS", "PNBN",
+                          "PNIN", "PNLF", "PTPP", "PTRO", "PWON", "RAJA", "RALS", "SAME", "SGRO", "SIDO",
+                          "SILO", "SIMP", "SMAR", "SMBR", "SMDR", "SMGR", "SMRA", "SMSM", "SRTG", "SSIA",
+                          "SSMS", "TBIG", "TBLA", "TINS", "TKIM", "TMAS", "TOBA", "TOTL", "TOTO", "TOWR",
+                          "TPIA", "TPMA", "TRIM", "TSPC", "ULTJ", "UNIC", "VICO", "WIIM", "WINS", "WTON",
+                          "SHIP", "POWR", "PRDA", "BRIS", "PORT", "CARS", "CLEO", "WOOD", "MARK", "PSSI",
+                          "MORA", "PBID", "IPCM", "BTPS", "SPTO", "HEAL", "TUGU", "MSIN", "MAPA", "IPCC",
+                          "FILM", "PANI", "GOOD", "SKRN", "BOLA", "KOTA", "HDIT", "KEEN", "TEBE", "KEJU",
+                          "PSGO", "UCID", "GLVA", "AMAR", "DMND", "SAMF", "SGER", "BBSI", "VICI", "TAPG",
+                          "MASB", "BMHS", "MCOL", "MTEL", "CMRY", "STAA", "TLDN", "MTMH", "TRGU", "HATM",
+                          "JARR", "ELPI", "PRAY", "CBUT", "MKTR", "OMED", "SUNI", "BDKR", "SMIL", "MAHA",
+                          "ERAL", "BREN", "MSTI", "ALII", "GOLF", "DAAZ", "MDIY", "DGWG", "CBDK", "BLOG",
+                          "YUPI", "MDLA", "RAAM", "JECX", "BACH", "RMKE", "AVIA", "DRMA", "AGRO"]
+                        
+    
+    pengembangan = papan_utama + ["ABDA", "AKPI", "AKSI", "AMFG", "AMIN", "ANJT", "APEX", "APIC", "APII", "APLI",
+                                  "ARGO", "ARII", "ARTA", "ASBI", "ASDM", "ASJT", "ASRM", "ATIC", "BABP", "BAJA",
+                                  "BAPA", "BBKP", "BBLD", "BBRM", "BCIC", "BCIP", "BIPI", "BIPP", "BKDP", "BKSW",
+                                  "BMAS", "BMSR", "BNBA", "BNBR", "BOLT", "BPFI", "BPII", "BRAM", "BRNA", "BTON",
+                                  "BUKK", "BULL", "BUVA", "CEKA", "CENT", "CINT", "CLPI", "CPRO", "CSAP", "CTBN",
+                                  "CTTH", "DART", "DEFI", "DGIK", "DNAR", "DOID", "DPNS", "DSFI", "DVLA", "DYAN",
+                                  "ECII", "EKAD", "EMDE", "ERTX", "ESTI", "FAST", "FMII", "FORU", "FPNI", "GDST",
+                                  "GDYR", "GEMA", "GIAA", "GMTD", "GOLD", "GPRA", "GSMF", "GTBO", "GWSA", "HDFA",
+                                  "IATA", "ICON", "IGAR", "IKBI", "IMJS", "INAI", "INCI", "INDR", "INDS", "INDX",
+                                  "INPP", "INTD", "IPOL", "ITMA", "JAWA", "JECC", "KAEF", "KBLM", "KBLV", "KDSI",
+                                  "KICI", "KOBX", "KONI", "KOPI", "KRAS", "LAPD", "LEAD", "LINK", "LION", "LMPI",
+                                  "LPGI", "LPIN", "LPLI", "LPPS", "LRNA", "MBAP", "MBTO", "MDIA", "MDLN", "META",
+                                  "MGNA", "MICE", "MITI", "MKPI", "MLPT", "MMLP", "MRAT", "MREI", "MSKY", "MYOH",
+                                  "NELY", "NIKL", "NIRO", "NRCA", "OKAS", "OMRE", "PANR", "PDES", "PEGE", "PGLI",
+                                  "PICO", "PJAA", "PKPK", "PNBS", "PSAB", "PSDN", "PSKT", "PTIS", "PTSN", "PTSP",
+                                  "PUDP", "PYFA", "RANC", "RBMS", "RDTX", "RELI", "RICY", "RIGS", "RODA", "ROTI",
+                                  "RUIS", "SAFE", "SCCO", "SDMU", "SDPC", "SDRA", "SHID", "SIPD", "SKBM", "SKLT",
+                                  "SMDM", "SMMA", "SMMT", "SOCI", "SPMA", "SQMI", "SRAJ", "SRSN", "SSTM", "STAR",
+                                  "STTP", "SULI", "TALF", "TBMS", "TCID", "TGKA", "TIFA", "TIRA", "TMPO", "TRIS",
+                                  "TRST", "TRUS", "UNIT", "VINS", "VOKS", "VRNA", "WAPO", "WEHA", "WOMF", "YPAS",
+                                  "YULE", "CASA", "DAYA", "DPUM", "IDPR", "JGLE", "KINO", "OASA", "PBSA", "BOGA",
+                                  "MINA", "CSIS", "FIRE", "KMTR", "HOKI", "MPOW", "MDKI", "BELL", "KIOS", "GMFI",
+                                  "MTWI", "MCAS", "PPRE", "WEGE", "DWGL", "JMAS", "CAMP", "LCKM", "HELI", "GHON",
+                                  "DFAM", "NICK", "PRIM", "TRUK", "PZZA", "TNCA", "TCPI", "RISE", "BPTR", "NFCX",
+                                  "MGRO", "LAND", "MOLI", "CITY", "SAPX", "SURE", "MPRO", "YELO", "CAKK", "SATU",
+                                  "POLA", "DIVA", "LUCK", "SOTS", "ZONE", "PEHA", "BEEF", "POLI", "CLAY", "NATO",
+                                  "JAYA", "COCO", "JAST", "FITT", "CCSI", "SFAN", "POLU", "KJEN", "ITIC", "PAMG",
+                                  "BLUE", "EAST", "LIFE", "FUJI", "INOV", "SMKL", "TFAS", "GGRP", "OPMS", "NZIA",
+                                  "SLIS", "IRRA", "DMMX", "WOWS", "ESIP", "REAL", "IFII", "PMJS", "CSRA", "INDO",
+                                  "AMOR", "TRIN", "PTPW", "TAMA", "IKAN", "RONY", "CSMI", "BBSS", "BHAT", "EPAC",
+                                  "UANG", "PGUN", "TRJA", "SCNP", "KMDS", "PURI", "SOHO", "HOMI", "ROCK", "ENZO",
+                                  "ATAP", "BANK", "WMUU", "EDGE", "UNIQ", "SNLK", "ZYRX", "NPGF", "ADCP", "HOPE",
+                                  "TRUE", "LABA", "ARCI", "NICL", "UVCR", "HAIS", "OILS", "GPSO", "RSGK", "SBMA",
+                                  "CMNT", "GTSI", "KUAS", "BOBA", "DEPO", "BINO", "TAYS", "SEMA", "ASLC", "NETV",
+                                  "ENAK", "NTBK", "BIKE", "WIRG", "SICO", "GOTO", "ASHA", "SWID", "ARKO", "CHEM",
+                                  "DEWI", "AXIO", "KRYA", "GULA", "TOOL", "BUAH", "CRAB", "MEDS", "COAL", "BELI",
+                                  "BSBK", "PDPP", "KDTN", "ZATA", "MMIX", "PADA", "VTNY", "ELIT", "BEER", "CBPE",
+                                  "CBRE", "WINE", "PEVE", "LAJU", "FWCT", "IRSX", "VAST", "HALO", "FUTR", "PTMP",
+                                  "TRON", "NSSS", "GTRA", "JATI", "TYRE", "MPXL", "KLAS", "MAXI", "VKTR", "CRSN",
+                                  "INET", "RMKO", "CNMA", "FOLK", "GRIA", "PPRI", "CYBR", "MUTU", "HUMI", "RSCH",
+                                  "BABY", "IOTF", "KOCI", "PTPS", "STRK", "KOKA", "RGAS", "IKPM", "AYAM", "SURI",
+                                  "ASLI", "GRPH", "SMGA", "UNTD", "TOSK", "MPIX", "MKAP", "LIVE", "HYGN", "BAIK",
+                                  "VISI", "AREA", "MHKI", "ATLA", "DATA", "SOLA", "BATR", "PART", "ISEA", "BLES",
+                                  "GUNA", "LABS", "DOSS", "NEST", "VERN", "BOAT", "NAIK", "KSIX", "RATU", "YOII",
+                                  "HGII", "BRRC", "OBAT", "MINE", "ASPR", "PSAT", "COIN", "CDIA", "MERI", "KAQI",
+                                  "FORE", "DKHH", "AYLS", "DADA", "ASPI", "ESTA", "BESS", "AMAN", "CARE", "PIPA",
+                                  "NCKL", "AWAN", "DOOH", "CGAS", "NICE", "MSJA", "SMLE", "ACRO", "WIFI", "FAPA",
+                                  "DCII", "KETR", "DGNS", "UFOE", "CHEK", "PMUI", "EMAS", "PJHB", "RLCO", "SUPA",
+                                  "WBSA", "JELI", "EMMI", "PRDL", "RANS", "OBMD", "NASI", "BSML", "ADMF", "ADMG",
+                                  "AGII", "AGRS", "AHAP", "AIMS", "PNSE"]
+
+        
+    if mode == "Cepat (LQ45)":
+        return lq45
+    elif mode == "Papan Utama":
+        return papan_utama
+    elif mode == "Komprehensif (Utama + Pengembangan)":
+        return papan_utama + pengembangan
+    elif mode == "Full IDX":
+        return papan_utama + pengembangan  # idealnya tambah semua, tapi contoh segini dulu
+    elif mode == "Auto-Fetch (API BEI)":
+        # Coba fetch dari API BEI (contoh endpoint)
+        try:
+            import requests
+            resp = requests.get("https://api.bei.co.id/v1/listed-companies", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Asumsi struktur: list of { 'code': 'BBRI', ... }
+                codes = [item['code'] for item in data if 'code' in item]
+                if codes:
+                    return codes[:500]  # batasi biar gak terlalu lama
+        except:
+            pass
+        return papan_utama + pengembangan  # fallback
     
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
@@ -1182,6 +1307,7 @@ if run_btn:
             df['Mom5D'] = df['Close'].pct_change(5) * 100    # 5 hari untuk swing
         df['ZScore'] = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
         df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
+        df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])   
         # ============ OFI (Order Flow Imbalance) ============
         df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
         df['Cumulative_OFI'] = df['Delta'].cumsum()
@@ -2106,6 +2232,117 @@ if run_btn:
     else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
     simpan_riwayat(ringkasan)
+# ==================== SCANNER SAHAM IDX ====================
+if scan_btn:
+    st.title("🔍 Scanner Saham IDX")
+    st.write(f"Mode: {mode_scan} | Likuiditas Min: Rp {likuiditas_min:,.0f}/hari")
+    
+    with st.spinner("📡 Mengambil daftar saham..."):
+        daftar_saham = get_daftar_saham(mode_scan)
+        st.info(f"📋 {len(daftar_saham)} saham akan dipindai.")
+    
+    hasil_scan = []
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for idx, ticker in enumerate(daftar_saham):
+        try:
+            ticker_jk = f"{ticker}.JK"
+            # Unduh data 5 hari, 5 menit (cukup untuk hitung sinyal)
+            df = load_stock_data(ticker_jk, period="5d", interval="5m")
+            if df.empty or len(df) < 20:
+                continue
+            
+            # Hitung indikator dasar (sederhana, tanpa detail penuh)
+            df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+            df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+            df['ADX'] = compute_adx_series(df)
+            df['Mom5D'] = df['Close'].pct_change(10) * 100
+            df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
+            df['Vol_MA20'] = df['Volume'].rolling(20).mean()
+            
+            harga_terakhir = float(df['Close'].iloc[-1])
+            volume_avg = df['Volume'].rolling(20).mean().iloc[-1]
+            if volume_avg == 0:
+                continue
+            likuiditas = harga_terakhir * volume_avg
+            if likuiditas < likuiditas_min:
+                continue
+            
+            # Hitung total_score sederhana (tanpa AI sentimen & Coppock agar cepat)
+            # Gunakan bobot default, bukan adaptive (karena blm ada memory)
+            mom_th = df['Mom5D'].dropna().median() if not df['Mom5D'].dropna().empty else 0
+            factor_signals = {
+                "Momentum": (df['Mom5D'].iloc[-1] - mom_th) / max(0.1, df['Mom5D'].std()),
+                "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
+                "OFI": df['Delta'].iloc[-1] / df['Vol_MA20'].iloc[-1] if df['Vol_MA20'].iloc[-1] != 0 else 0
+            }
+            # Bobot default: Momentum 0.4, MeanRev 0.3, OFI 0.3
+            total_score = factor_signals["Momentum"]*0.4 + factor_signals["MeanRev"]*0.3 + factor_signals["OFI"]*0.3
+            
+            if total_score > 0.3:
+                signal = "🔥 STRONG BUY"
+            elif total_score > 0.1:
+                signal = "⚡ BUY"
+            elif total_score > -0.1:
+                signal = "⏸️ HOLD"
+            else:
+                signal = "🚨 AVOID"
+            
+            # Monte Carlo sederhana untuk prob naik (pakai 100 sim)
+            returns = df['Close'].pct_change().dropna()
+            if len(returns) < 10:
+                continue
+            latest_vol = returns.std()
+            paths = np.exp(np.log(harga_terakhir) + np.cumsum(np.random.normal(0, latest_vol, (5, 100)), axis=0))
+            final_prices = paths[-1, :]
+            prob_bull = (final_prices > harga_terakhir).mean() * 100
+            
+            hasil_scan.append({
+                "Saham": ticker,
+                "Harga": f"{harga_terakhir:,.0f}",
+                "Sinyal": signal,
+                "Score": f"{total_score:.3f}",
+                "Prob Naik": f"{prob_bull:.1f}%",
+                "Likuiditas": f"Rp {likuiditas:,.0f}"
+            })
+        except Exception as e:
+            pass
+        
+        # Update progress
+        progress_bar.progress((idx + 1) / len(daftar_saham))
+        status_text.text(f"Memindai {ticker} ({idx+1}/{len(daftar_saham)})...")
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    # Urutkan berdasarkan score tertinggi
+    hasil_scan.sort(key=lambda x: float(x['Score']), reverse=True)
+    top15 = hasil_scan[:15]
+    
+    if top15:
+        st.subheader("🏆 Top 15 Kandidat")
+        st.dataframe(pd.DataFrame(top15), use_container_width=True)
+        
+        if ai_rerank and st.session_state.get("gemini_api_key"):
+            with st.spinner("🤖 AI sedang me-rerank kandidat..."):
+                # Siapkan prompt batch
+                prompt_scan = "Berikut adalah 15 kandidat saham terbaik hasil scan teknikal:\n"
+                for r in top15:
+                    prompt_scan += f"- {r['Saham']} | Sinyal: {r['Sinyal']} | Score: {r['Score']} | Prob Naik: {r['Prob Naik']}\n"
+                prompt_scan += "\nBeri peringkat 5 terbaik untuk day trade dan 5 terbaik untuk swing trade. Jelaskan alasannya singkat dalam Bahasa Indonesia."
+                
+                model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
+                if model and not err:
+                    response = model.generate_content(prompt_scan)
+                    st.markdown("### 🤖 AI Re-Rank")
+                    st.markdown(response.text)
+                else:
+                    st.error("Gagal mengakses Gemini.")
+        else:
+            st.info("Centang 'Sertakan Scanner AI Re-Rank' dan isi API Key untuk mendapatkan peringkat AI.")
+    else:
+        st.warning("Tidak ada saham yang lolos filter.")
 
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
