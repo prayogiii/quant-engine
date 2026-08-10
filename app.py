@@ -1653,7 +1653,7 @@ if run_btn:
         if "AVOID" in signal:
             extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk <b>take profit sebagian</b> atau <b>keluar seluruhnya</b> untuk mengamankan modal."
         elif "HOLD" in signal:
-            extra = "🔒 Kamu sudah punya posisi. Disarankan **tahan** dan pasang <b>trailing stop</b> di bawah support terdekat."
+            extra = "🔒 Kamu sudah punya posisi. Disarankan <b>tahan</b> dan pasang <b>trailing stop</b> di bawah support terdekat."
         elif "STRONG BUY" in signal or "BUY" in signal:
             extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh <b>entry zone</b>."
         else:
