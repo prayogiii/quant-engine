@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import pytz
 import math
 import google.generativeai as genai
-import request
+import requests
 
 # Google Sheets integration
 import gspread
