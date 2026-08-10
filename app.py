@@ -391,26 +391,22 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
                 factor_signals[k] = float(last_pred[key])
             else:
                 factor_signals[k] = 0.0
-        outcome = actual_data.get('Outcome', '')
-        if outcome == 'Win':
-            actual_return = 1.0
-        elif outcome == 'Loss':
-            actual_return = -1.0
-        else:
-            actual_return = 0.0
-        if actual_data.get('Actual_Close'):
+
+        # Hanya update jika Actual_Close diisi dan valid
+        actual_close_str = actual_data.get('Actual_Close', '')
+        if actual_close_str:
             try:
-                actual_close = float(actual_data['Actual_Close'])
+                actual_close = float(actual_close_str)
                 last_close = float(last_pred['close_price'])
                 if last_close > 0:
                     actual_return = (actual_close - last_close) / last_close
                     actual_return = max(-1.0, min(1.0, actual_return))
+                    update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
             except:
-                pass
-        update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
+                pass  # gagal parse → tidak update
+        # Jika Actual_Close tidak diisi, tidak ada update V12
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
-
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
@@ -1940,18 +1936,21 @@ if run_btn:
         )
         last_pred = load_v12_predictions(ticker_raw)
         if last_pred:
-            last_close = last_pred['close_price']
-            last_signals = {}
-            for k in FACTOR_KEYS:
-                key = f'sig_{k}'
-                if key in last_pred:
-                    last_signals[k] = float(last_pred[key])
-                else:
-                    last_signals[k] = 0.0
-            actual_return = (harga_terakhir - float(last_close)) / float(last_close) if float(last_close) > 0 else 0.0
-            volatility = returns.std()
-            update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
-            st.success(f"✅ **Memory updated!** Actual return sejak prediksi terakhir: {actual_return*100:.2f}%")
+            last_close = float(last_pred['close_price'])
+            if last_close > 0:
+                last_signals = {}
+                for k in FACTOR_KEYS:
+                    key = f'sig_{k}'
+                    if key in last_pred:
+                        last_signals[k] = float(last_pred[key])
+                    else:
+                        last_signals[k] = 0.0
+                actual_return = (harga_terakhir - last_close) / last_close
+                volatility = returns.std()
+                update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
+                st.success(f"✅ Memory updated! Actual return sejak prediksi terakhir: {actual_return*100:.2f}%")
+            else:
+                st.info("ℹ️ Prediksi sebelumnya tidak memiliki close_price yang valid.")
         else:
             st.info("ℹ️ Tidak ada prediksi sebelumnya. Engine akan mulai belajar pada analisis berikutnya.")
 
