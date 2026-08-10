@@ -652,9 +652,6 @@ with st.sidebar:
             conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
             gaya = r.get('Gaya','?')
             gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
-            harga_beli_r = r.get('Harga_Beli', '')
-            if harga_beli_r:
-                st.caption(f"💰 Harga Beli: Rp {harga_beli_r} | Floating: {r.get('Floating_PL', '')}")
             expander_title = f"{r.get('Saham','?')} {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} {gaya_label} Score: {r.get('Score','?')}"
             with st.expander(expander_title):
                 st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}**")
@@ -662,6 +659,9 @@ with st.sidebar:
                 waktu_analisis = r.get('Waktu', '?')
                 if waktu_analisis and waktu_analisis != '?':
                     st.caption(f"🕒 Waktu Analisis: {waktu_analisis}")
+                harga_beli_r = r.get('Harga_Beli', '')
+                if harga_beli_r:
+                    st.caption(f"💰 Harga Beli: Rp {harga_beli_r} | Floating: {r.get('Floating_PL', '')}")
                 st.divider()
             
                 # Coppock full width
