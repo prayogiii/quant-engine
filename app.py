@@ -2574,8 +2574,38 @@ if scan_btn:
     buy_signals = [r for r in hasil_scan if r['techScore'] > 0.05]
     sell_signals = [r for r in hasil_scan if r['techScore'] < -0.05]
 
-    # --- Tampilkan Statistik Cepat ---
-    st.markdown(f"✅ **Berhasil scan:** {len(hasil_scan)}/{total} saham")
+    top_buys = buy_signals[:10]
+    top_sells = sell_signals[:3]
+
+    # Simpan hasil scan ke session_state agar tidak hilang saat re-run
+    st.session_state.scan_results = {
+        'buy_signals': buy_signals,
+        'sell_signals': sell_signals,
+        'top_buys': top_buys,
+        'top_sells': top_sells,
+        'total': total,
+        'hasil_scan_count': len(hasil_scan),
+        'daftar_saham_count': len(daftar_saham)
+    }
+
+    # Setelah menyimpan, stop agar tidak lanjut ke tampilan di bawah
+    st.stop()
+
+# ==================== TAMPILAN HASIL SCAN (DARI SESSION STATE) ====================
+if st.session_state.get('scan_results'):
+    sr = st.session_state.scan_results
+    buy_signals  = sr['buy_signals']
+    sell_signals = sr['sell_signals']
+    top_buys     = sr['top_buys']
+    top_sells    = sr['top_sells']
+    total        = sr['total']
+    hasil_scan_count = sr['hasil_scan_count']
+    daftar_saham_count = sr['daftar_saham_count']
+
+    st.title("🔍 Scanner Saham IDX (V12 Tech Score)")
+    st.write(f"Mode: {mode_scan} | Likuiditas Min: Rp {likuiditas_min:,.0f}/hari")
+
+    st.markdown(f"✅ **Berhasil scan:** {hasil_scan_count}/{daftar_saham_count} saham")
     st.markdown(f"📈 Kandidat Beli: {len(buy_signals)} | 📉 Kandidat Jual: {len(sell_signals)}")
 
     # ==================== TAMPILAN UTAMA: TOP 10 BUY & TOP 3 SELL ====================
@@ -2585,8 +2615,6 @@ if scan_btn:
     with col_sell:
         st.subheader(f"🔻 TOP {min(3, len(sell_signals))} RELATIF TERLEMAH - Jual")
 
-    top_buys = buy_signals[:10]
-    top_sells = sell_signals[:3]
     # ==================== AI RE-RANK (ditingkatkan) ====================
     if ai_rerank and st.session_state.get("gemini_api_key"):
         with st.spinner("🤖 AI memverifikasi 15 kandidat (1 panggilan batch)..."):
@@ -2741,6 +2769,7 @@ if scan_btn:
                 st.divider()
     else:
         st.caption("(Tidak ada kandidat Jual yang memenuhi threshold)")
+
     # ==================== PERKUAT CROSS‑CHECK DENGAN AI (OPSIONAL) ====================
     if buy_signals:   # hanya tampil jika ada kandidat Beli
         st.markdown("---")
