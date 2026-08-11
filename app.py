@@ -2596,9 +2596,8 @@ if scan_btn:
             else:
                 # Prompt untuk verifikasi (seperti Kotlin)
                 prompt = (
-                    "Berikut hasil scan teknikal 15 saham teratas. Verifikasi apakah sinyal BUY "
-                    "didukung sentimen berita & makro terkini. Untuk setiap saham, beri respons HANYA JSON array MENTAH. "
-                    "JANGAN gunakan markdown formatting (```json atau ```). HANYA teks JSON polos.\n"
+                    "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita terkini. "
+                    "KELUARKAN HANYA JSON array, TANPA teks pembuka, analisis, atau catatan apapun. "
                     "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"confidence_boost\": 0.0-0.15, \"reason\": \"singkat\"}]\n\n"
                 )
                 for r in candidates:
@@ -2613,20 +2612,27 @@ if scan_btn:
                     try:
                         response = model.generate_content(prompt)
                         raw = response.text.strip()
-                        # Cari JSON array pertama di dalam respons
-                        match = re.search(r'\[.*\]', raw, re.DOTALL)
-                        if match:
+
+                        # Coba cari JSON array di akhir respons (indeks '[' terakhir)
+                        start_idx = raw.rfind('[')
+                        ai_data = []
+                        if start_idx != -1:
+                            # Ambil dari '[' terakhir sampai akhir, lalu bersihkan trailing whitespace
+                            json_str = raw[start_idx:].strip()
+                            # Hapus kemungkinan markdown fence jika masih ada
+                            if json_str.startswith("```json"):
+                                json_str = json_str[7:]
+                            if json_str.endswith("```"):
+                                json_str = json_str[:-3]
                             try:
-                                ai_data = json.loads(match.group())
-                            except json.JSONDecodeError as e:
-                                st.error(f"Gagal parse JSON dari AI: {e}")
-                                # Opsional: tampilkan raw response untuk debugging (hapus setelah yakin berfungsi)
-                                with st.expander("🔎 Debug: Respons Mentah AI"):
+                                ai_data = json.loads(json_str)
+                            except json.JSONDecodeError:
+                                st.error("Gagal parse JSON dari akhir respons. Menampilkan debug...")
+                                with st.expander("🔎 Debug: Raw Response"):
                                     st.code(raw)
-                                ai_data = []
                         else:
-                            st.error("Respons AI tidak mengandung JSON array. Pastikan prompt meminta JSON tanpa markdown.")
-                            with st.expander("🔎 Debug: Respons Mentah AI"):
+                            st.error("Tidak ditemukan array JSON dalam respons AI.")
+                            with st.expander("🔎 Debug: Raw Response"):
                                 st.code(raw)
                             ai_data = []
 
@@ -2748,11 +2754,9 @@ if scan_btn:
                         # Ambil maks 15 kandidat teratas
                         candidates = buy_signals[:15]
                         prompt = (
-                            "Berikut daftar saham hasil scan teknikal. "
-                            "Tambahkan analisis singkat sentimen berita terbaru untuk setiap saham (1-2 kalimat) "
-                            "dan beri skor sentimen -1 (sangat negatif) hingga +1 (sangat positif). "
-                            "Respons HANYA dalam format JSON array:\n"
-                            '[{"ticker": "BBRI", "sentiment_score": 0.7, "note": "Berita positif tentang laba"}]\n\n'
+                            "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita terkini. "
+                            "KELUARKAN HANYA JSON array, TANPA teks pembuka, analisis, atau catatan apapun. "
+                            "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"confidence_boost\": 0.0-0.15, \"reason\": \"singkat\"}]\n\n"
                         )
                         for r in candidates:
                             prompt += f"{r['ticker']} | Sinyal: {r['signal']} | Tech Score: {r['techScore']:.3f}\n"
@@ -2762,9 +2766,24 @@ if scan_btn:
                             try:
                                 response = model.generate_content(prompt)
                                 raw = response.text.strip()
-                                if raw.startswith("```json"): raw = raw[7:]
-                                if raw.endswith("```"): raw = raw[:-3]
-                                sentiments = json.loads(raw.strip())
+                                start_idx = raw.rfind('[')
+                                sentiments = []
+                                if start_idx != -1:
+                                    json_str = raw[start_idx:].strip()
+                                    if json_str.startswith("```json"):
+                                        json_str = json_str[7:]
+                                    if json_str.endswith("```"):
+                                        json_str = json_str[:-3]
+                                    try:
+                                        sentiments = json.loads(json_str)
+                                    except json.JSONDecodeError:
+                                        st.error("Gagal parse JSON dari akhir respons.")
+                                        with st.expander("🔎 Debug: Raw Response"):
+                                            st.code(raw)
+                                else:
+                                    st.error("Tidak ditemukan array JSON dalam respons AI.")
+                                    with st.expander("🔎 Debug: Raw Response"):
+                                        st.code(raw)
 
                                 # Tampilkan hasil cross-check dalam tabel
                                 cross_data = []
