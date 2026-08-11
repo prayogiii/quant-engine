@@ -14,6 +14,7 @@ import pytz
 import math
 import google.generativeai as genai
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Google Sheets integration
 import gspread
@@ -211,8 +212,7 @@ def coppock_curve(prices, rP1=14, rP2=11, wP=10):
         return vals[-1]
     curr = wma(combined,wP)
     prev = wma(combined[:-1],wP) if len(combined)>wP else 0.0
-    return curr,prev
-    
+    return curr,prev    
 def hitung_bars_remaining(now_jkt, actual_interval, bars_per_day_map):
     h, m = now_jkt.hour, now_jkt.minute
     interval_minutes_map = {"5m": 5, "15m": 15, "30m": 30, "60m": 60}
@@ -1156,9 +1156,9 @@ def get_realtime_price(ticker):
 
 def cek_kesegaran_data(df_ihsg_preview, now_jkt, max_lag_minutes=20):
     """Return (is_stale, lag_minutes)."""
-    if df.empty:
+    if df_ihsg_preview.empty:
         return True, None
-    last_bar_time = df.index[-1]
+    last_bar_time = df_ihsg_preview.index[-1]
     if last_bar_time.tzinfo is None:
         last_bar_time = pytz.timezone("Asia/Jakarta").localize(last_bar_time)
     else:
@@ -1254,7 +1254,14 @@ def estimate_theta_ou(close_series):
     coeff = np.linalg.lstsq(X, y, rcond=None)[0]
     theta = -coeff[1] if coeff[1]<0 else 0.05
     return theta
-
+def robust_std(series):
+    """Robust standard deviation berbasis MAD (Median Absolute Deviation)"""
+    arr = np.array(series)
+    if len(arr) < 4:
+        return np.std(arr, ddof=0) if len(arr) > 1 else 0.001
+    median = np.median(arr)
+    mad = np.median(np.abs(arr - median))
+    return mad * 1.4826
 REGIME_INFO = {
     "Strong Bullish 🚀": "Tren naik kuat dengan momentum tinggi.",
     "Bullish 📈": "Tren naik stabil. Kondisi sehat untuk akumulasi.",
@@ -1269,6 +1276,216 @@ REGIME_INFO = {
     "Sideways Bias Turun ↘️": "Sideways cenderung turun.",
     "Sideways Normal ↔️": "Sideways moderat, tunggu katalis."
 }
+def score_stock_tech(df_stock, ticker, ihsg_data):
+    """
+    Menghitung skor teknikal + metrik lengkap untuk scanner V12.
+    Mengembalikan dictionary hasil atau None jika data tidak cukup.
+    """
+    try:
+        closes = df_stock['Close'].values
+        highs = df_stock['High'].values
+        lows = df_stock['Low'].values
+        volumes = df_stock['Volume'].values
+        last_price = float(closes[-1])
+        if last_price <= 0:
+            return None
+
+        ihsg_closes = ihsg_data['Close'].values
+        if len(closes) < 65 or len(ihsg_closes) < 65:
+            return None
+
+        # Gunakan 60 bar terakhir untuk perhitungan
+        n = min(60, len(closes) - 1, len(ihsg_closes) - 1)
+        s_adj = closes[-n-1:]
+        i_adj = ihsg_closes[-n-1:]
+        sT = len(s_adj) - 1
+        iT = len(i_adj) - 1
+        if sT < 20 or iT < 20:
+            return None
+
+        s_ret = np.diff(s_adj) / s_adj[:-1]
+        i_ret = np.diff(i_adj) / i_adj[:-1]
+
+        # --- Beta & IHSG return 5 hari ---
+        i_ret5 = (i_adj[iT] - i_adj[iT-5]) / i_adj[iT-5] if iT >= 5 else 0.0
+        cov = np.cov(s_ret[:len(i_ret)], i_ret[:len(s_ret)])[0,1]
+        var_i = np.var(i_ret[:len(s_ret)])
+        beta = (cov / var_i).clip(-3, 3) if var_i > 1e-8 else 1.0
+        beta_norm = np.clip(beta * i_ret5 / 0.05, -1, 1)
+
+        # --- Momentum combo (3/5/10) ---
+        mom3 = (s_adj[sT] - s_adj[sT-3]) / s_adj[sT-3] if sT >= 3 else 0.0
+        mom5 = (s_adj[sT] - s_adj[sT-5]) / s_adj[sT-5] if sT >= 5 else 0.0
+        mom10 = (s_adj[sT] - s_adj[sT-10]) / s_adj[sT-10] if sT >= 10 else 0.0
+        mom_combo = mom3*0.50 + mom5*0.30 + mom10*0.20
+        mom_norm = np.clip(mom_combo / 0.05, -1, 1)
+
+        # --- Coppock Curve ---
+        copp_std, copp_prev = coppock_curve(s_adj, 14, 11, 10)
+        copp_fast, copp_fast_prev = coppock_curve(s_adj, 6, 4, 5)
+        copp_rising = copp_std > copp_prev
+        copp_fast_rising = copp_fast > copp_fast_prev
+        is_turning_up = copp_rising and copp_prev <= 0.0
+        is_turning_down = not copp_rising and copp_prev >= 0.0
+        fast_align = 1.08 if (copp_fast_rising == copp_rising) else 0.92
+
+        if is_turning_up:
+            copp_dir_base = 1.0
+        elif copp_std > 0 and copp_rising:
+            copp_dir_base = 0.70
+        elif copp_std <= 0 and copp_rising:
+            copp_dir_base = 0.40
+        elif is_turning_down:
+            copp_dir_base = -1.0
+        elif copp_std > 0 and not copp_rising:
+            copp_dir_base = -0.30
+        else:
+            copp_dir_base = -0.70
+        copp_norm = np.clip(copp_dir_base * fast_align, -1, 1)
+
+        # Label Coppock
+        if is_turning_up:
+            copp_label = "🔼 Turning Up"
+        elif copp_std > 0 and copp_rising:
+            copp_label = "↑ Rising+"
+        elif copp_std <= 0 and copp_rising:
+            copp_label = "↑ Recovering"
+        elif is_turning_down:
+            copp_label = "🔽 Turning Down"
+        else:
+            copp_label = "↓ Bearish"
+
+        # --- Mean Reversion (Z-Score) ---
+        sigma20 = robust_std(s_ret[-20:])
+        sma20 = np.mean(s_adj[-20:])
+        z_score_val = (last_price - sma20) / (sigma20 * sma20 + 1e-9)
+        mr_norm = np.clip(-z_score_val / 0.05, -1, 1)
+
+        # --- RSI ---
+        rsi_ch = s_ret[-14:]
+        gains = np.mean(rsi_ch[rsi_ch > 0]) if np.any(rsi_ch > 0) else 0.0
+        losses = -np.mean(rsi_ch[rsi_ch < 0]) if np.any(rsi_ch < 0) else 1e-6
+        rsi_val = 100.0 - (100.0 / (1.0 + gains / (losses + 1e-9)))
+        if rsi_val < 25: rsi_norm = 0.90
+        elif rsi_val < 35: rsi_norm = 0.55
+        elif rsi_val < 45: rsi_norm = 0.20
+        elif rsi_val < 55: rsi_norm = -0.10
+        elif rsi_val < 65: rsi_norm = -0.35
+        elif rsi_val < 75: rsi_norm = -0.55
+        else: rsi_norm = -0.80
+
+        # --- Volume Surge ---
+        vol_ma20 = np.mean(volumes[-20:]) if len(volumes) >= 20 else volumes[-20:].mean()
+        vol5 = np.mean(volumes[-5:]) if len(volumes) >= 5 else 0
+        vol_surge = np.clip((vol5 / (vol_ma20 + 1) - 1.0), -1, 1)
+
+        # --- Breakout bonus ---
+        res20 = np.max(highs[-21:-1]) if len(highs) >= 21 else np.max(highs)
+        breakout_bonus = 0.10 if (last_price > res20 * 0.995 and vol_surge > 0.3) else 0.0
+
+        # --- Tech Score ---
+        tech_score = (mom_norm*0.30 + copp_norm*0.28 + beta_norm*0.17 +
+                      mr_norm*0.10 + vol_surge*0.08 + rsi_norm*0.07 +
+                      breakout_bonus)
+        tech_score = np.clip(tech_score, -1.0, 1.0)
+
+        # --- Sinyal ---
+        if tech_score > 0.42: signal = "STRONG BUY ▲▲"
+        elif tech_score > 0.18: signal = "BUY ▲"
+        elif tech_score > 0.05: signal = "WEAK BUY ▲"
+        elif tech_score < -0.42: signal = "STRONG SELL ▼▼"
+        elif tech_score < -0.18: signal = "SELL ▼"
+        else: signal = "NEUTRAL →"
+
+        # --- Regime ---
+        ema20_ihsg = pd.Series(i_adj).ewm(span=20, adjust=False).mean().iloc[-1]
+        sma20_ihsg = np.mean(i_adj[-20:])
+        risk_on = ema20_ihsg > sma20_ihsg and i_ret5 > 0
+        fast_vc = np.std(s_ret[-3:]) / (np.std(s_ret[-20:]) + 1e-9)
+        if not risk_on and fast_vc >= 1.2: regime = "PANIC"
+        elif risk_on and fast_vc >= 1.0: regime = "VOL UP"
+        elif risk_on: regime = "BULLISH"
+        else: regime = "BEARISH"
+
+        # --- Estimasi return & TP/SL ---
+        alpha = np.mean(s_ret) - beta * np.mean(i_ret)
+        mu_est = np.clip(beta * i_ret5 + alpha + mom_combo * 0.15, -0.04, 0.04)
+        tp_est = last_price * (1 + mu_est + 0.6 * sigma20)
+        sl_est = last_price * (1 + mu_est - 0.5 * sigma20)
+
+        # --- Metrik tambahan ---
+        # Bollinger %B
+        std20 = np.std(s_adj[-20:])
+        upper_bb = sma20 + 2*std20
+        lower_bb = sma20 - 2*std20
+        bb_pct = np.clip((last_price - lower_bb) / (upper_bb - lower_bb + 1e-9), 0, 1)
+
+        # Trend Consistency
+        ema20 = pd.Series(closes).ewm(span=20, adjust=False).mean().iloc[-1]
+        ema50 = pd.Series(closes).ewm(span=50, adjust=False).mean().iloc[-1] if len(closes) >= 50 else ema20
+        trend_searah = 0
+        if len(closes) >= 6:
+            for i in range(1, 6):
+                if ((closes[-i] > closes[-i-1]) and (ema20 > ema50)) or \
+                   ((closes[-i] < closes[-i-1]) and (ema20 < ema50)):
+                    trend_searah += 1
+            trend_consistency = trend_searah / 5 * 100
+        else:
+            trend_consistency = 50.0
+
+        # Entry Zone sederhana (berbasis pivot)
+        pivot = (highs[-1] + lows[-1] + closes[-1]) / 3.0
+        s1 = 2 * pivot - highs[-1]
+        entry_low = min(s1, last_price * (1 - sigma20))
+        entry_high = last_price
+        if entry_low > entry_high:
+            entry_low, entry_high = entry_high, entry_low
+
+        # Likuiditas
+        avg_value = np.mean(volumes[-20:] * closes[-20:])
+        if avg_value >= 1e9:
+            likuiditas_str = f"Rp {avg_value/1e9:.2f} M/hari"
+        elif avg_value >= 1e6:
+            likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt/hari"
+        else:
+            likuiditas_str = f"Rp {avg_value:,.0f}"
+
+        # Risk/Reward
+        risk = last_price - sl_est
+        reward = tp_est - last_price
+        rrr = reward / risk if risk > 0 else 0.0
+
+        # Confidence
+        confidence = min(0.99, 0.5 + abs(tech_score) * 0.5)
+
+        return {
+            "ticker": ticker,
+            "techScore": tech_score,
+            "signal": signal,
+            "muEst": mu_est,
+            "coppockLabel": copp_label,
+            "lastPrice": last_price,
+            "tpEst": tp_est,
+            "slEst": sl_est,
+            "regime": regime,
+            "rsi": rsi_val,
+            "beta": beta,
+            "momScore": mom_combo,
+            "isCoppockTurningUp": is_turning_up,
+            "volSurge": vol_surge,
+            "zScore": z_score_val,
+            "bbPct": bb_pct,
+            "trendConsistency": trend_consistency,
+            "entryLow": entry_low,
+            "entryHigh": entry_high,
+            "likuiditas": likuiditas_str,
+            "rrr": rrr,
+            "confidence": confidence
+        }
+
+    except Exception as e:
+        # st.write(f"Error scoring {ticker}: {e}")  # untuk debugging
+        return None
 def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
     base = REGIME_INFO.get(regime, "Rezim tidak terdefinisi.")
     notes = []
@@ -2276,120 +2493,234 @@ if run_btn:
     else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
 
     simpan_riwayat(ringkasan)
-# ==================== SCANNER SAHAM IDX ====================
+# ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
 if scan_btn:
-    st.title("🔍 Scanner Saham IDX")
+    st.title("🔍 Scanner Saham IDX (V12 Tech Score)")
     st.write(f"Mode: {mode_scan} | Likuiditas Min: Rp {likuiditas_min:,.0f}/hari")
-    
+
     with st.spinner("📡 Mengambil daftar saham..."):
         daftar_saham = get_daftar_saham(mode_scan)
         st.info(f"📋 {len(daftar_saham)} saham akan dipindai.")
-    
-    hasil_scan = []
+
+    # Ambil data IHSG sekali saja untuk semua saham (perlu 6 bulan agar Coppock akurat)
+    ihsg_data = load_ihsg_data(period="6mo", interval="1d")
+    if ihsg_data.empty:
+        st.error("❌ Gagal mengambil data IHSG. Pastikan koneksi internet stabil.")
+        st.stop()
+
+    # --- Tombol batal scan (dengan session state) ---
+    if "cancel_scan" not in st.session_state:
+        st.session_state.cancel_scan = False
+
+    cancel_col, _ = st.columns([1, 5])
+    with cancel_col:
+        if st.button("⏹️ Batalkan Scan"):
+            st.session_state.cancel_scan = True
+
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
-    for idx, ticker in enumerate(daftar_saham):
+    hasil_scan = []
+
+    # --- Fungsi worker per saham (menggunakan score_stock_tech) ---
+    def process_ticker(ticker):
         try:
             ticker_jk = f"{ticker}.JK"
-            # Unduh data 5 hari, 5 menit (cukup untuk hitung sinyal)
-            df = load_stock_data(ticker_jk, period="5d", interval="5m")
-            if df.empty or len(df) < 20:
-                continue
-            
-            # Hitung indikator dasar (sederhana, tanpa detail penuh)
-            df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-            df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-            df['ADX'] = compute_adx_series(df)
-            df['Mom5D'] = df['Close'].pct_change(10) * 100
-            df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
-            df['Vol_MA20'] = df['Volume'].rolling(20).mean()
-            df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
-            harga_terakhir = float(df['Close'].iloc[-1])
-            volume_avg = df['Volume'].rolling(20).mean().iloc[-1]
-            if volume_avg == 0:
-                continue
-            likuiditas = harga_terakhir * volume_avg
-            if likuiditas < likuiditas_min:
-                continue
-            
-            # Hitung total_score sederhana (tanpa AI sentimen & Coppock agar cepat)
-            # Gunakan bobot default, bukan adaptive (karena blm ada memory)
-            mom_th = df['Mom5D'].dropna().median() if not df['Mom5D'].dropna().empty else 0
-            factor_signals = {
-                "Momentum": (df['Mom5D'].iloc[-1] - mom_th) / max(0.1, df['Mom5D'].std()),
-                "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
-                "OFI": df['Delta'].iloc[-1] / df['Vol_MA20'].iloc[-1] if df['Vol_MA20'].iloc[-1] != 0 else 0
-            }
-            # Bobot default: Momentum 0.4, MeanRev 0.3, OFI 0.3
-            total_score = factor_signals["Momentum"]*0.4 + factor_signals["MeanRev"]*0.3 + factor_signals["OFI"]*0.3
-            
-            if total_score > 0.3:
-                signal = "🔥 STRONG BUY"
-            elif total_score > 0.1:
-                signal = "⚡ BUY"
-            elif total_score > -0.1:
-                signal = "⏸️ HOLD"
-            else:
-                signal = "🚨 AVOID"
-            
-            # Monte Carlo sederhana untuk prob naik (pakai 100 sim)
-            returns = df['Close'].pct_change().dropna()
-            if len(returns) < 10:
-                continue
-            latest_vol = returns.std()
-            paths = np.exp(np.log(harga_terakhir) + np.cumsum(np.random.normal(0, latest_vol, (5, 100)), axis=0))
-            final_prices = paths[-1, :]
-            prob_bull = (final_prices > harga_terakhir).mean() * 100
-            
-            hasil_scan.append({
-                "Saham": ticker,
-                "Harga": f"{harga_terakhir:,.0f}",
-                "Sinyal": signal,
-                "Score": f"{total_score:.3f}",
-                "Prob Naik": f"{prob_bull:.1f}%",
-                "Likuiditas": f"Rp {likuiditas:,.0f}"
-            })
-        except Exception as e:
-            pass
-        
-        # Update progress
-        progress_bar.progress((idx + 1) / len(daftar_saham))
-        status_text.text(f"Memindai {ticker} ({idx+1}/{len(daftar_saham)})...")
-    
+            df = load_stock_data(ticker_jk, period="6mo", interval="1d")
+            if df.empty or len(df) < 65:
+                return None
+            # Filter likuiditas: volume rata2 20 hari * harga terakhir
+            if 'Volume' in df.columns and len(df) >= 20:
+                avg_vol = df['Volume'].rolling(20).mean().iloc[-1]
+                last_price = float(df['Close'].iloc[-1])
+                if avg_vol * last_price < likuiditas_min:
+                    return None
+            # Panggil scoring teknikal (adaptasi Kotlin)
+            return score_stock_tech(df, ticker, ihsg_data)
+        except:
+            return None
+
+    total = len(daftar_saham)
+    max_workers = 4  # batasi koneksi paralel agar tidak di-banned Yahoo
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_ticker = {executor.submit(process_ticker, t): t for t in daftar_saham}
+        completed = 0
+        for future in as_completed(future_to_ticker):
+            if st.session_state.cancel_scan:
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
+            res = future.result()
+            if res is not None:
+                hasil_scan.append(res)
+            completed += 1
+            progress_bar.progress(completed / total)
+            status_text.text(f"Memindai {future_to_ticker[future]} ({completed}/{total})...")
+
+    if st.session_state.cancel_scan:
+        st.warning("Scan dibatalkan oleh pengguna.")
+        st.stop()
+
     progress_bar.empty()
     status_text.empty()
-    
-    # Urutkan berdasarkan score tertinggi
-    hasil_scan.sort(key=lambda x: float(x['Score']), reverse=True)
-    top15 = hasil_scan[:15]
-    
-    if top15:
-        st.subheader("🏆 Top 15 Kandidat")
-        df_top15 = pd.DataFrame(top15)
-        df_top15.index = range(1, len(df_top15) + 1)
-        st.dataframe(df_top15, use_container_width=True)
-        
-        if ai_rerank and st.session_state.get("gemini_api_key"):
-            with st.spinner("🤖 AI sedang me-rerank kandidat..."):
-                # Siapkan prompt batch
-                prompt_scan = "Berikut adalah 15 kandidat saham terbaik hasil scan teknikal:\n"
-                for r in top15:
-                    prompt_scan += f"- {r['Saham']} | Sinyal: {r['Sinyal']} | Score: {r['Score']} | Prob Naik: {r['Prob Naik']}\n"
-                prompt_scan += "\nBeri peringkat 5 terbaik untuk day trade dan 5 terbaik untuk swing trade. Jelaskan alasannya singkat dalam Bahasa Indonesia."
-                
+
+    if not hasil_scan:
+        st.warning("Tidak ada saham yang lolos filter likuiditas atau data tidak lengkap.")
+        st.stop()
+
+    # Urutkan berdasarkan techScore
+    hasil_scan.sort(key=lambda x: x['techScore'], reverse=True)
+
+    # --- Pisahkan Beli dan Jual ---
+    buy_signals = [r for r in hasil_scan if r['techScore'] > 0.05]
+    sell_signals = [r for r in hasil_scan if r['techScore'] < -0.05]
+
+    # --- Tampilkan Statistik Cepat ---
+    st.markdown(f"✅ **Berhasil scan:** {len(hasil_scan)}/{total} saham")
+    st.markdown(f"📈 Kandidat Beli: {len(buy_signals)} | 📉 Kandidat Jual: {len(sell_signals)}")
+
+    # ==================== TAMPILAN UTAMA: TOP 10 BUY & TOP 3 SELL ====================
+    col_buy, col_sell = st.columns([3, 1])
+    with col_buy:
+        st.subheader(f"🏆 TOP {min(10, len(buy_signals))} RELATIF TERKUAT - Beli")
+    with col_sell:
+        st.subheader(f"🔻 TOP {min(3, len(sell_signals))} RELATIF TERLEMAH - Jual")
+
+    top_buys = buy_signals[:10]
+    top_sells = sell_signals[:3]
+    # ==================== AI RE-RANK (ditingkatkan) ====================
+    if ai_rerank and st.session_state.get("gemini_api_key"):
+        with st.spinner("🤖 AI memverifikasi 15 kandidat (1 panggilan batch)..."):
+            candidates = buy_signals[:15]
+            if not candidates:
+                st.info("Tidak ada kandidat Beli untuk diverifikasi AI.")
+            else:
+                # Prompt untuk verifikasi (seperti Kotlin)
+                prompt = (
+                    "Berikut hasil scan teknikal 15 saham teratas. Verifikasi apakah sinyal BUY "
+                    "didukung sentimen berita & makro terkini. Untuk setiap saham, beri respons HANYA JSON array:\n"
+                    '[{"ticker": "BBRI", "confirm": true, "confidence_boost": 0.0-0.15, "reason": "singkat"}]\n'
+                    "Jangan tambahkan teks lain.\n\n"
+                )
+                for r in candidates:
+                    prompt += (
+                        f"{r['ticker']} | Signal: {r['signal']} | Tech Score: {r['techScore']:.3f} | "
+                        f"Coppock: {r['coppockLabel']} | Est Return: {r['muEst']*100:.2f}% | "
+                        f"Vol Surge: {r['volSurge']*100:.0f}% | RSI: {r['rsi']:.1f} | "
+                        f"Z-Score: {r['zScore']:.2f} | Regime: {r['regime']}\n"
+                    )
                 model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
                 if model and not err:
-                    response = model.generate_content(prompt_scan)
-                    st.markdown("### 🤖 AI Re-Rank")
-                    st.markdown(response.text)
-                else:
-                    st.error("Gagal mengakses Gemini.")
-        else:
-            st.info("Centang 'Sertakan Scanner AI Re-Rank' dan isi API Key untuk mendapatkan peringkat AI.")
-    else:
-        st.warning("Tidak ada saham yang lolos filter.")
+                    try:
+                        response = model.generate_content(prompt)
+                        raw = response.text.strip()
+                        # Bersihkan kemungkinan markdown fence
+                        if raw.startswith("```json"): raw = raw[7:]
+                        if raw.endswith("```"): raw = raw[:-3]
+                        ai_data = json.loads(raw.strip())
 
+                        ai_confirmed = 0
+                        ai_upgraded = 0
+                        for item in ai_data:
+                            ticker = item.get("ticker", "").upper()
+                            for r in candidates:
+                                if r['ticker'] == ticker:
+                                    r['ai_confirm'] = item.get('confirm', False)
+                                    r['ai_reason'] = item.get('reason', '')
+                                    boost = item.get('confidence_boost', 0.0)
+                                    r['ai_boost'] = boost
+                                    r['hybrid_score'] = r['techScore'] + boost
+                                    if r['ai_confirm']:
+                                        ai_confirmed += 1
+                                        if boost > 0.01:
+                                            ai_upgraded += 1
+                                    break
+
+                        # Pesan sukses
+                        msg = f"🤖 AI Re‑Rank selesai: **{ai_confirmed}** saham dikonfirmasi"
+                        if ai_upgraded > 0:
+                            msg += f", **{ai_upgraded}** naik peringkat karena AI"
+                        st.success(msg)
+
+                        # Opsional: tampilkan tabel AI
+                        with st.expander("📋 Lihat Detail AI Re‑Rank"):
+                            ai_table = []
+                            for r in candidates:
+                                if r.get('ai_confirm') is not None:
+                                    ai_table.append({
+                                        "Ticker": r['ticker'],
+                                        "Tech Score": f"{r['techScore']:.3f}",
+                                        "Hybrid Score": f"{r.get('hybrid_score', r['techScore']):.3f}",
+                                        "AI Boost": f"{r.get('ai_boost', 0):.3f}",
+                                        "AI Confirm": "✅" if r['ai_confirm'] else "❌",
+                                        "Reason": r.get('ai_reason', '')
+                                    })
+                            if ai_table:
+                                st.dataframe(pd.DataFrame(ai_table), use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Gagal memproses respons AI: {e}")
+                else:
+                    st.error("Gagal mengakses Gemini untuk AI Re‑Rank.")
+    elif ai_rerank:
+        st.info("Isi API Key Gemini di sidebar untuk mengaktifkan AI Re‑Rank.")
+
+    # ---------- Kartu BUY (mirip UI Kotlin) ----------
+    for idx, r in enumerate(top_buys):
+        rank = idx + 1
+        with st.container():
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                badge = ["🥇", "🥈", "🥉"][idx] if idx < 3 else f"#{rank}"
+                st.markdown(f"### {badge} {r['ticker']}  —  **{r['signal']}**")
+            with col2:
+                st.metric("Harga", f"Rp {r['lastPrice']:,.0f}")
+
+            # Bar skor + badge konfirmasi AI (jika ada)
+            bar_len = int(abs(r['techScore']) * 10)
+            bar_str = "█" * bar_len + "░" * (10 - bar_len)
+            score_text = f"Tech Score: **{r['techScore']:.3f}**  {bar_str}"
+            if r.get('ai_confirm'):
+                score_text += f"  |  Hybrid: **{r.get('hybrid_score', r['techScore']):.3f}**"
+                st.markdown("☑️ **Dikonfirmasi Tech + Scanner AI Re‑Rank**")
+            st.caption(score_text)
+
+            with st.expander("🔎 Detail Indikator"):
+                # Baris 1
+                ca, cb, cc = st.columns(3)
+                ca.metric("Coppock", r['coppockLabel'])
+                cb.metric("Est. Return", f"{r['muEst']*100:.2f}%")
+                cc.metric("Regime", r['regime'])
+                # Baris 2
+                ca.metric("Confidence", f"{r['confidence']*100:.0f}%")
+                cb.metric("Risk‑Adj (RRR)", f"{r['rrr']:.2f}")
+                cc.metric("Likuiditas", r['likuiditas'])
+                # Baris 3
+                ca.metric("Est. TP Besok", f"Rp {r['tpEst']:,.0f}")
+                cb.metric("Est. SL Besok", f"Rp {r['slEst']:,.0f}")
+                cc.metric("Zona Entry", f"Rp {r['entryLow']:,.0f}-{r['entryHigh']:,.0f}")
+                # Baris 4
+                ca.metric("RSI-14", f"{r['rsi']:.1f}")
+                cb.metric("Volume Surge", f"{r['volSurge']*100:.0f}%")
+                cc.metric("Z‑Score", f"{r['zScore']:.2f}σ")
+                # Baris 5
+                ca.metric("Bollinger %B", f"{r['bbPct']:.2f}")
+                cb.metric("Trend Consistency", f"{r['trendConsistency']:.0f}%")
+                cc.metric("Beta | Mom", f"{r['beta']:.2f}β | {r['momScore']*100:.2f}%")
+                if r['isCoppockTurningUp']:
+                    st.info("⚡ **Coppock Turning Up** — Sinyal akumulasi terkuat!")
+                if r.get('ai_reason'):
+                    st.caption(f"🧠 AI Reason: {r['ai_reason']}")
+            st.divider()
+
+    # ---------- Kartu SELL (ringkas) ----------
+    if top_sells:
+        with st.container():
+            for idx, r in enumerate(top_sells):
+                rank = idx + 1
+                st.markdown(f"#{rank} **{r['ticker']}** — {r['signal']} | Harga: Rp {r['lastPrice']:,.0f}")
+                st.caption(f"Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Regime: {r['regime']}")
+                st.divider()
+    else:
+        st.caption("(Tidak ada kandidat Jual yang memenuhi threshold)")
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
     st.title("📊 Quant & Risk Engine Pro")
