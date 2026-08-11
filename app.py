@@ -1191,7 +1191,14 @@ def get_google_news_rss(query_str, num=5):
         return news, None
     except Exception as e:
         return [], str(e)
-
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_headlines_for_ticker(ticker):
+    """Ambil maks 3 judul berita terbaru dari Google News RSS."""
+    try:
+        news, _ = get_google_news_rss(f"{ticker} saham", num=3)
+        return [n['title'] for n in news] if news else ["(tidak ada berita terbaru)"]
+    except:
+        return ["(gagal mengambil berita)"]
 def get_ipot_news(query, num=5):
     """Ambil berita dari Ipotnews berdasarkan kata kunci."""
     try:
@@ -2615,39 +2622,45 @@ if st.session_state.get('scan_results'):
     with col_sell:
         st.subheader(f"🔻 TOP {min(3, len(sell_signals))} RELATIF TERLEMAH - Jual")
 
-    # ==================== AI RE-RANK (ditingkatkan) ====================
+    # ==================== AI RE-RANK (ditingkatkan) ===================
     if ai_rerank and st.session_state.get("gemini_api_key"):
         with st.spinner("🤖 AI memverifikasi 15 kandidat (1 panggilan batch)..."):
             candidates = buy_signals[:15]
             if not candidates:
                 st.info("Tidak ada kandidat Beli untuk diverifikasi AI.")
             else:
-                # Prompt untuk verifikasi (seperti Kotlin)
+                # Kumpulkan berita terbaru untuk setiap kandidat
+                headlines_map = {}
+                for r in candidates:
+                    headlines_map[r['ticker']] = get_headlines_for_ticker(r['ticker'])
+
+                # Prompt dengan berita aktual
                 prompt = (
-                    "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita terkini. "
+                    "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita TERBARU yang saya berikan untuk setiap saham. "
                     "KELUARKAN HANYA JSON array, TANPA teks pembuka, analisis, atau catatan apapun. "
-                    "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"confidence_boost\": 0.0-0.15, \"reason\": \"singkat\"}]\n\n"
+                    "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"confidence_boost\": 0.0-0.15, \"reason\": \"singkat berdasarkan berita\"}]\n\n"
                 )
                 for r in candidates:
+                    tick = r['ticker']
+                    headlines = headlines_map.get(tick, ["(tidak ada berita)"])
                     prompt += (
-                        f"{r['ticker']} | Signal: {r['signal']} | Tech Score: {r['techScore']:.3f} | "
+                        f"{tick} | Signal: {r['signal']} | Tech Score: {r['techScore']:.3f} | "
                         f"Coppock: {r['coppockLabel']} | Est Return: {r['muEst']*100:.2f}% | "
                         f"Vol Surge: {r['volSurge']*100:.0f}% | RSI: {r['rsi']:.1f} | "
-                        f"Z-Score: {r['zScore']:.2f} | Regime: {r['regime']}\n"
+                        f"Z-Score: {r['zScore']:.2f} | Regime: {r['regime']} | "
+                        f"Berita: {'; '.join(headlines)}\n"
                     )
+
                 model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
                 if model and not err:
                     try:
                         response = model.generate_content(prompt)
                         raw = response.text.strip()
 
-                        # Coba cari JSON array di akhir respons (indeks '[' terakhir)
                         start_idx = raw.rfind('[')
                         ai_data = []
                         if start_idx != -1:
-                            # Ambil dari '[' terakhir sampai akhir, lalu bersihkan trailing whitespace
                             json_str = raw[start_idx:].strip()
-                            # Hapus kemungkinan markdown fence jika masih ada
                             if json_str.startswith("```json"):
                                 json_str = json_str[7:]
                             if json_str.endswith("```"):
@@ -2681,13 +2694,11 @@ if st.session_state.get('scan_results'):
                                             ai_upgraded += 1
                                     break
 
-                        # Pesan sukses
                         msg = f"🤖 AI Re‑Rank selesai: **{ai_confirmed}** saham dikonfirmasi"
                         if ai_upgraded > 0:
                             msg += f", **{ai_upgraded}** naik peringkat karena AI"
                         st.success(msg)
 
-                        # Opsional: tampilkan tabel AI
                         with st.expander("📋 Lihat Detail AI Re‑Rank"):
                             ai_table = []
                             for r in candidates:
@@ -2779,16 +2790,22 @@ if st.session_state.get('scan_results'):
                 if not st.session_state.get("gemini_api_key"):
                     st.error("API Key Gemini diperlukan.")
                 else:
-                    with st.spinner("🧠 Menganalisis sentimen berita untuk memperkuat sinyal..."):
-                        # Ambil maks 15 kandidat teratas
+                    with st.spinner("🧠 Mengambil berita terbaru & menganalisis sentimen..."):
                         candidates = buy_signals[:15]
+                        # Ambil headline
+                        headlines_map = {}
+                        for r in candidates:
+                            headlines_map[r['ticker']] = get_headlines_for_ticker(r['ticker'])
+
                         prompt = (
-                            "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita terkini. "
-                            "KELUARKAN HANYA JSON array, TANPA teks pembuka, analisis, atau catatan apapun. "
-                            "Format: [{\"ticker\": \"BBRI\", \"sentiment_score\": 0.0 (skala -1..1), \"note\": \"singkat\"}]\n\n"
+                            "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita TERBARU yang saya berikan. "
+                            "KELUARKAN HANYA JSON array, TANPA teks lain. "
+                            "Format: [{\"ticker\": \"BBRI\", \"sentiment_score\": 0.0 (skala -1..1), \"note\": \"singkat berdasarkan berita\"}]\n\n"
                         )
                         for r in candidates:
-                            prompt += f"{r['ticker']} | Sinyal: {r['signal']} | Tech Score: {r['techScore']:.3f}\n"
+                            tick = r['ticker']
+                            headlines = headlines_map.get(tick, ["(tidak ada berita)"])
+                            prompt += f"{tick} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Berita: {'; '.join(headlines)}\n"
 
                         model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
                         if model and not err:
@@ -2799,10 +2816,8 @@ if st.session_state.get('scan_results'):
                                 sentiments = []
                                 if start_idx != -1:
                                     json_str = raw[start_idx:].strip()
-                                    if json_str.startswith("```json"):
-                                        json_str = json_str[7:]
-                                    if json_str.endswith("```"):
-                                        json_str = json_str[:-3]
+                                    if json_str.startswith("```json"): json_str = json_str[7:]
+                                    if json_str.endswith("```"): json_str = json_str[:-3]
                                     try:
                                         sentiments = json.loads(json_str)
                                     except json.JSONDecodeError:
@@ -2814,17 +2829,16 @@ if st.session_state.get('scan_results'):
                                     with st.expander("🔎 Debug: Raw Response"):
                                         st.code(raw)
 
-                                # --- Tampilkan hasil cross‑check dalam format perbandingan ---
+                                # --- Tampilkan hasil cross‑check ---
                                 st.success("✅ Cross‑Check Sentimen AI berhasil!")
                                 st.markdown("### 🧠 AI-Enhanced Cross-Check")
                                 st.caption(
                                     "Quick Technical Cross-Check (7 faktor) + sentimen berita AI "
-                                    "(1 panggilan Gemini dibatch untuk Beli, 1 lagi untuk Jual) "
+                                    "(berita terbaru dari Google News) "
                                     "= 8 dari 9 faktor Single Quant. "
                                     "MASIH bukan Single Quant penuh. Broker Summary tetap perlu input manual per-saham."
                                 )
 
-                                # --- TOP BELI ---
                                 st.markdown("**TOP BELI**")
                                 for item in sentiments:
                                     ticker = item.get("ticker", "").upper()
@@ -2834,29 +2848,31 @@ if st.session_state.get('scan_results'):
                                     est_return = stock['muEst'] * 100
                                     sent_score = item.get("sentiment_score", 0.0)
                                     al_enhanced = sent_score * 100
-                                    tech_signal = "Beli"
                                     status = "☑️ Sejalan" if sent_score > 0 else "⛔ Berlawanan"
                                     note = item.get("note", "")
                                     st.markdown(f"""
                                     **{ticker}** {status}  
-                                    Scanner: {tech_signal} (Est. Return {est_return:.2f}%) vs AI-Enhanced: {al_enhanced:.2f}% sentimen: {note}
+                                    Scanner: Beli (Est. Return {est_return:.2f}%) vs AI-Enhanced: {al_enhanced:.2f}% sentimen: {note}
                                     """)
 
-                                # --- TOP JUAL ---
-                                # Ambil kandidat Jual dari session_state (maks 3)
+                                # --- TOP JUAL (dengan berita juga) ---
                                 sell_signals_list = sr.get('sell_signals', [])
                                 top_sell_candidates = sell_signals_list[:3]
                                 if top_sell_candidates:
                                     st.markdown("**TOP JUAL**")
-                                    # Prompt untuk verifikasi JUAL
+                                    headlines_sell = {}
+                                    for r in top_sell_candidates:
+                                        headlines_sell[r['ticker']] = get_headlines_for_ticker(r['ticker'])
+
                                     sell_prompt = (
-                                        "Berikut hasil scan teknikal 3 saham teratas yang disarankan JUAL. "
-                                        "Verifikasi apakah sinyal JUAL didukung sentimen berita & makro terkini. "
-                                        "KELUARKAN HANYA JSON array, TANPA teks pembuka, analisis, atau catatan apapun. "
-                                        "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"sentiment_score\": -0.5 sampai 0.5, \"note\": \"singkat\"}]\n\n"
+                                        "Berikut hasil scan teknikal 3 saham dengan sinyal JUAL. "
+                                        "Verifikasi sentimen berita TERBARU yang saya berikan. "
+                                        "KELUARKAN HANYA JSON array: [{\"ticker\": \"BBRI\", \"sentiment_score\": -0.5..0.5, \"note\": \"singkat\"}]\n\n"
                                     )
                                     for r in top_sell_candidates:
-                                        sell_prompt += f"{r['ticker']} | Signal: {r['signal']} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}%\n"
+                                        tick = r['ticker']
+                                        headlines = headlines_sell.get(tick, ["(tidak ada berita)"])
+                                        sell_prompt += f"{tick} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Berita: {'; '.join(headlines)}\n"
 
                                     model_s, err_s = dapatkan_model_gemini(st.session_state.gemini_api_key)
                                     if model_s and not err_s:
@@ -2886,12 +2902,11 @@ if st.session_state.get('scan_results'):
                                         est_return = stock['muEst'] * 100
                                         sent_score = item.get("sentiment_score", 0.0)
                                         al_enhanced = sent_score * 100
-                                        tech_signal = "Jual"
                                         status = "☑️ Sejalan" if sent_score < 0 else "⛔ Berlawanan"
                                         note = item.get("note", "")
                                         st.markdown(f"""
                                         **{ticker}** {status}  
-                                        Scanner: {tech_signal} (Est. Return {est_return:.2f}%) vs AI-Enhanced: {al_enhanced:.2f}% sentimen: {note}
+                                        Scanner: Jual (Est. Return {est_return:.2f}%) vs AI-Enhanced: {al_enhanced:.2f}% sentimen: {note}
                                         """)
                                 else:
                                     st.caption("(Tidak ada kandidat Jual)")
