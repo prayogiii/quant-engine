@@ -2655,7 +2655,9 @@ if scan_btn:
                                         "Reason": r.get('ai_reason', '')
                                     })
                             if ai_table:
-                                st.dataframe(pd.DataFrame(ai_table), use_container_width=True)
+                                df_ai = pd.DataFrame(ai_table)
+                                df_ai.index = range(1, len(df_ai) + 1)
+                                st.dataframe(df_ai, use_container_width=True)
                     except Exception as e:
                         st.error(f"Gagal memproses respons AI: {e}")
                 else:
@@ -2721,6 +2723,59 @@ if scan_btn:
                 st.divider()
     else:
         st.caption("(Tidak ada kandidat Jual yang memenuhi threshold)")
+    # ==================== PERKUAT CROSS‑CHECK DENGAN AI (OPSIONAL) ====================
+    if buy_signals:   # hanya tampil jika ada kandidat Beli
+        st.markdown("---")
+        reinforce_col, _ = st.columns([1, 3])
+        with reinforce_col:
+            if st.button("🛡️ Perkuat Cross‑Check dgn Sentimen AI (tambahan)", key="reinforce_ai"):
+                if not st.session_state.get("gemini_api_key"):
+                    st.error("API Key Gemini diperlukan.")
+                else:
+                    with st.spinner("🧠 Menganalisis sentimen berita untuk memperkuat sinyal..."):
+                        # Ambil maks 15 kandidat teratas
+                        candidates = buy_signals[:15]
+                        prompt = (
+                            "Berikut daftar saham hasil scan teknikal. "
+                            "Tambahkan analisis singkat sentimen berita terbaru untuk setiap saham (1-2 kalimat) "
+                            "dan beri skor sentimen -1 (sangat negatif) hingga +1 (sangat positif). "
+                            "Respons HANYA dalam format JSON array:\n"
+                            '[{"ticker": "BBRI", "sentiment_score": 0.7, "note": "Berita positif tentang laba"}]\n\n'
+                        )
+                        for r in candidates:
+                            prompt += f"{r['ticker']} | Sinyal: {r['signal']} | Tech Score: {r['techScore']:.3f}\n"
+
+                        model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
+                        if model and not err:
+                            try:
+                                response = model.generate_content(prompt)
+                                raw = response.text.strip()
+                                if raw.startswith("```json"): raw = raw[7:]
+                                if raw.endswith("```"): raw = raw[:-3]
+                                sentiments = json.loads(raw.strip())
+
+                                # Tampilkan hasil cross-check dalam tabel
+                                cross_data = []
+                                for item in sentiments:
+                                    ticker = item.get("ticker", "").upper()
+                                    # cari di candidates untuk mendapatkan tech score
+                                    tech = next((r['techScore'] for r in candidates if r['ticker'] == ticker), 0)
+                                    sent_score = item.get("sentiment_score", 0)
+                                    cross_data.append({
+                                        "Ticker": ticker,
+                                        "Tech Score": f"{tech:.3f}",
+                                        "Sentiment Score": f"{sent_score:+.2f}",
+                                        "Catatan": item.get("note", "")
+                                    })
+                                if cross_data:
+                                    df_cross = pd.DataFrame(cross_data)
+                                    df_cross.index = range(1, len(df_cross) + 1)
+                                    st.success("✅ Cross‑Check Sentimen AI berhasil!")
+                                    st.dataframe(df_cross, use_container_width=True)
+                            except Exception as e:
+                                st.error(f"Gagal memproses respons AI: {e}")
+                        else:
+                            st.error("Gagal mengakses Gemini.")
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
     st.title("📊 Quant & Risk Engine Pro")
