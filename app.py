@@ -2785,7 +2785,7 @@ if st.session_state.get('scan_results'):
                         prompt = (
                             "Berikut hasil scan teknikal 15 saham. Verifikasi sinyal BUY dengan sentimen berita terkini. "
                             "KELUARKAN HANYA JSON array, TANPA teks pembuka, analisis, atau catatan apapun. "
-                            "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"confidence_boost\": 0.0-0.15, \"reason\": \"singkat\"}]\n\n"
+                            "Format: [{\"ticker\": \"BBRI\", \"sentiment_score\": 0.0 (skala -1..1), \"note\": \"singkat\"}]\n\n"
                         )
                         for r in candidates:
                             prompt += f"{r['ticker']} | Sinyal: {r['signal']} | Tech Score: {r['techScore']:.3f}\n"
