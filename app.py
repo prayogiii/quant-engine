@@ -2597,9 +2597,9 @@ if scan_btn:
                 # Prompt untuk verifikasi (seperti Kotlin)
                 prompt = (
                     "Berikut hasil scan teknikal 15 saham teratas. Verifikasi apakah sinyal BUY "
-                    "didukung sentimen berita & makro terkini. Untuk setiap saham, beri respons HANYA JSON array:\n"
-                    '[{"ticker": "BBRI", "confirm": true, "confidence_boost": 0.0-0.15, "reason": "singkat"}]\n'
-                    "Jangan tambahkan teks lain.\n\n"
+                    "didukung sentimen berita & makro terkini. Untuk setiap saham, beri respons HANYA JSON array MENTAH. "
+                    "JANGAN gunakan markdown formatting (```json atau ```). HANYA teks JSON polos.\n"
+                    "Format: [{\"ticker\": \"BBRI\", \"confirm\": true, \"confidence_boost\": 0.0-0.15, \"reason\": \"singkat\"}]\n\n"
                 )
                 for r in candidates:
                     prompt += (
@@ -2613,10 +2613,22 @@ if scan_btn:
                     try:
                         response = model.generate_content(prompt)
                         raw = response.text.strip()
-                        # Bersihkan kemungkinan markdown fence
-                        if raw.startswith("```json"): raw = raw[7:]
-                        if raw.endswith("```"): raw = raw[:-3]
-                        ai_data = json.loads(raw.strip())
+                        # Cari JSON array pertama di dalam respons
+                        match = re.search(r'\[.*\]', raw, re.DOTALL)
+                        if match:
+                            try:
+                                ai_data = json.loads(match.group())
+                            except json.JSONDecodeError as e:
+                                st.error(f"Gagal parse JSON dari AI: {e}")
+                                # Opsional: tampilkan raw response untuk debugging (hapus setelah yakin berfungsi)
+                                with st.expander("🔎 Debug: Respons Mentah AI"):
+                                    st.code(raw)
+                                ai_data = []
+                        else:
+                            st.error("Respons AI tidak mengandung JSON array. Pastikan prompt meminta JSON tanpa markdown.")
+                            with st.expander("🔎 Debug: Respons Mentah AI"):
+                                st.code(raw)
+                            ai_data = []
 
                         ai_confirmed = 0
                         ai_upgraded = 0
