@@ -1179,7 +1179,7 @@ def get_daftar_saham(mode):
         if codes:
             return codes[:500]   # batasi agar scan tidak terlalu lama
         # fallback jika API gagal
-        return papan_utama + pengembangan
+        return pengembangan
     
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
