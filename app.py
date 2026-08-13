@@ -2634,11 +2634,11 @@ if scan_btn:
 
     # --- Pisahkan Beli dan Jual ---
     buy_signals = [r for r in hasil_scan if r['techScore'] > 0.05]
-    top_sells = sell_signals[-3:][::-1] if len(sell_signals) >= 3 else sell_signals[::-1]
-
+    sell_signals = [r for r in hasil_scan if r['techScore'] < -0.05]
+    # Ambil 10 saham terkuat untuk Beli
     top_buys = buy_signals[:10]
-    top_sells = sell_signals[:3]
-
+    # Ambil 3 saham terlemah (techScore paling negatif) untuk Jual
+    top_sells = sorted(sell_signals, key=lambda x: x['techScore'])[:3]
     # Simpan hasil scan ke session_state agar tidak hilang saat re-run
     st.session_state.scan_results = {
         'buy_signals': buy_signals,
