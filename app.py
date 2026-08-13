@@ -2856,8 +2856,9 @@ if st.session_state.get('scan_results'):
                     with st.spinner("🧠 Mengambil berita terbaru & menganalisis sentimen..."):
                         # Gunakan top_buys yang sudah tampil (maksimal 10)
                         candidates = sr.get('top_buys', [])
-                        if not candidates:
-                            st.warning("Tidak ada kandidat Beli yang tersimpan.")
+                        top_sell_candidates = sr.get('top_sells', [])
+                        if not candidates and not top_sell_candidates:
+                            st.warning("Tidak ada kandidat untuk dianalisis.")
                             st.stop()
                         # Ambil headline
                         headlines_map = {}
