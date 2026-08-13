@@ -102,7 +102,7 @@ def init_sheets():
             if ws.col_count < 9:
                 ws.add_cols(9 - ws.col_count)
         if "riwayat_actual" not in existing:
-            sheet.add_worksheet("riwayat_actual", rows=100, cols=6)
+            sheet.add_worksheet("riwayat_actual", rows=100, cols=7)
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -331,7 +331,8 @@ def muat_riwayat_actual():
                     'Actual_High': row.get('Actual_High', ''),
                     'Actual_Low': row.get('Actual_Low', ''),
                     'Actual_Close': row.get('Actual_Close', ''),
-                    'Outcome': row.get('Outcome', '')
+                    'Outcome': row.get('Outcome', ''),
+                    'Entry_Miss': row.get('Entry_Miss', '')
                 }
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
@@ -357,7 +358,7 @@ def simpan_riwayat_actual(waktu, saham, actual_data):
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
-        headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome']
+        headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome', 'Entry_Miss']
         row_index = None
         for i, row in enumerate(records):
             if row.get('Waktu') == waktu and row.get('Saham') == saham:
@@ -367,9 +368,10 @@ def simpan_riwayat_actual(waktu, saham, actual_data):
                    actual_data.get('Actual_High', ''),
                    actual_data.get('Actual_Low', ''),
                    actual_data.get('Actual_Close', ''),
-                   actual_data.get('Outcome', '')]
+                   actual_data.get('Outcome', ''),
+                   actual_data.get('Entry_Miss', '')]
         if row_index:
-            sheet.update(f'A{row_index}:F{row_index}', [new_row], value_input_option='RAW')
+            sheet.update(f'A{row_index}:G{row_index}', [new_row], value_input_option='RAW')
         else:
             if not records:
                 sheet.insert_row(headers, 1)
@@ -409,49 +411,67 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 # ====================== API IDX ======================
-def fetch_idx_stock_list():
+def fetch_idx_stock_list(exchange_boards=None):
     """
-    Mengambil daftar kode saham dari API resmi IDX.
-    Mengembalikan list kode (string) atau None jika gagal.
+    Ambil daftar kode saham dari API BEI.
+    exchange_boards: list string board, mis. ["Main", "Development", "Acceleration"].
+                     None atau [] berarti ambil semua (tanpa filter board).
+    Return list kode unik (uppercase) atau None jika gagal.
     """
-    endpoints = [
-        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?start=0&length=9999&exchangeBoard=&industry=&subIndustry=&search=",
-        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?language=id-id&start=0&length=9999"
-    ]
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham/"
-    }
+    # Normalisasi parameter
+    if exchange_boards is None:
+        exchange_boards = [""]
+    elif not exchange_boards:
+        exchange_boards = [""]
 
-    for url in endpoints:
+    all_codes = []
+    seen = set()
+    for board in exchange_boards:
+        url = (
+            "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList"
+            f"?start=0&length=9999&exchangeBoard={board}&industry=&subIndustry=&search="
+        )
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham/"
+        }
         try:
             resp = requests.get(url, headers=headers, timeout=25)
             if resp.status_code != 200:
                 continue
-
             data = resp.json()
+
+            # Normalisasi data ke list of dict dengan key 'code'
+            items = []
             if isinstance(data, list):
-                return [item['code'] for item in data if 'code' in item]
+                items = data
             elif isinstance(data, dict) and 'data' in data:
-                return [item['code'] for item in data['data'] if 'code' in item]
+                items = data['data']
             else:
-                codes = []
-                def extract_codes(obj):
+                # Coba ekstrak rekursif
+                def extract(obj):
+                    out = []
                     if isinstance(obj, dict):
                         if 'code' in obj:
-                            codes.append(obj['code'])
+                            out.append(obj)
                         for v in obj.values():
-                            extract_codes(v)
+                            out.extend(extract(v))
                     elif isinstance(obj, list):
                         for v in obj:
-                            extract_codes(v)
-                extract_codes(data)
-                if codes:
-                    return codes
+                            out.extend(extract(v))
+                    return out
+                items = extract(data)
+
+            for item in items:
+                code = item.get('code') or item.get('Code')
+                if code and code not in seen:
+                    seen.add(code)
+                    all_codes.append(code.upper())
         except Exception:
             continue
-    return None
+
+    return all_codes if all_codes else None
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
@@ -470,21 +490,34 @@ def dapatkan_model_gemini(api_key):
         return None, "Model gagal digunakan."
     except Exception as e:
         return None, f"Error: {str(e)}"
-
 def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     model, error = dapatkan_model_gemini(api_key)
     if error: return None, error
     riwayat_text = ""
     if riwayat:
-        riwayat_text = "Riwayat analisis sebelumnya:\n"
-        for r in riwayat[:10]:
-            base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
-            ai_insight = r.get("AI_Insight", "").strip()
-            if ai_insight:
-                short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
-                base += f" | AI Insight: {short_insight}"
-            riwayat_text += base + "\n"
-    else: riwayat_text = "Belum ada riwayat sebelumnya."
+    riwayat_text = "Riwayat analisis sebelumnya (termasuk hasil aktual jika tersedia):\n"
+    for r in riwayat[:10]:
+        base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
+        # Tambahkan data aktual
+        if r.get('Actual_High') or r.get('Actual_Outcome'):
+            base += " | Hasil Aktual: "
+            if r.get('Actual_High'):
+                base += f"High={r['Actual_High']}, "
+            if r.get('Actual_Low'):
+                base += f"Low={r['Actual_Low']}, "
+            if r.get('Actual_Close'):
+                base += f"Close={r['Actual_Close']}, "
+            if r.get('Actual_Outcome'):
+                base += f"Outcome={r['Actual_Outcome']}"
+            if r.get('Entry_Miss'):
+                base += " (Entry tidak tersentuh)"
+        ai_insight = r.get("AI_Insight", "").strip()
+        if ai_insight:
+            short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
+            base += f" | AI Insight: {short_insight}"
+        riwayat_text += base + "\n"
+else:
+    riwayat_text = "Belum ada riwayat sebelumnya."
 
     prompt = f"""
 Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
@@ -1125,21 +1158,17 @@ def get_daftar_saham(mode):
     elif mode == "Komprehensif (Utama + Pengembangan)":
         return papan_utama + pengembangan
     elif mode == "Full IDX":
-        return papan_utama + pengembangan  # idealnya tambah semua, tapi contoh segini dulu
+        codes = fetch_idx_stock_list(exchange_boards=["Main", "Development", "Acceleration"])
+        if codes:
+            return codes
+        return papan_utama + pengembangan
     elif mode == "Auto-Fetch (API BEI)":
-        # Coba fetch dari API BEI (contoh endpoint)
-        try:
-            import requests
-            resp = requests.get("https://api.bei.co.id/v1/listed-companies", timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                # Asumsi struktur: list of { 'code': 'BBRI', ... }
-                codes = [item['code'] for item in data if 'code' in item]
-                if codes:
-                    return codes[:500]  # batasi biar gak terlalu lama
-        except:
-            pass
-        return papan_utama + pengembangan  # fallback
+        # Ambil semua saham dari API BEI (resmi)
+        codes = fetch_idx_stock_list()
+        if codes:
+            return codes[:500]   # batasi agar scan tidak terlalu lama
+        # fallback jika API gagal
+        return papan_utama + pengembangan
     
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
@@ -2489,7 +2518,21 @@ if run_btn:
                 "Fundamental_DE": f"{de:.2f}" if de else "N/A",
                 "Status_Posisi": "Sudah memiliki saham" if sudah_beli else "Belum memiliki saham"
             }
-            riwayat_konteks = [r for r in st.session_state.riwayat if r['Saham']==ticker_input][:10]
+            riwayat_konteks = []
+            for r in st.session_state.riwayat:
+                if r['Saham'] == ticker_input:
+                    r_copy = dict(r)                # jangan ubah state asli
+                    key_actual = (r.get('Waktu'), r.get('Saham'))
+                    actual = st.session_state.riwayat_actual.get(key_actual, {})
+                    if actual:
+                        r_copy['Actual_High']   = actual.get('Actual_High', '')
+                        r_copy['Actual_Low']    = actual.get('Actual_Low', '')
+                        r_copy['Actual_Close']  = actual.get('Actual_Close', '')
+                        r_copy['Actual_Outcome']= actual.get('Outcome', '')
+                        r_copy['Entry_Miss']    = actual.get('Entry_Miss', '')
+                    riwayat_konteks.append(r_copy)
+                    if len(riwayat_konteks) >= 10:
+                        break
             hasil_ai, error_ai = analisis_saham_dengan_ai(data_ai, riwayat_konteks, st.session_state.gemini_api_key)
             if not error_ai and hasil_ai:
                 ringkasan["AI_Insight"] = hasil_ai
@@ -2594,10 +2637,6 @@ if scan_btn:
         'hasil_scan_count': len(hasil_scan),
         'daftar_saham_count': len(daftar_saham)
     }
-
-    # Setelah menyimpan, stop agar tidak lanjut ke tampilan di bawah
-    st.stop()
-
 # ==================== TAMPILAN HASIL SCAN (DARI SESSION STATE) ====================
 if st.session_state.get('scan_results'):
     sr = st.session_state.scan_results
