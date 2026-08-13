@@ -759,13 +759,25 @@ with st.sidebar:
                         harga_beli_r = r.get('Harga_Beli', '')
                         if harga_beli_r:
                             st.caption(f"💰 Harga Beli: Rp {harga_beli_r} | Floating: {r.get('Floating_PL', '')}")
-    
+                        # -- Tambahan: Entry, TP, SL agar langsung terlihat saat catat aktual --
+                        entry_zone = r.get('Entry_Zone', '')
+                        tp_range   = r.get('TP_Range', '')
+                        sl_harga   = r.get('SL_Harga', '')
+                        if entry_zone or tp_range or sl_harga:
+                            info_teknis = []
+                            if entry_zone:
+                                info_teknis.append(f"🎯 Entry: {entry_zone}")
+                            if tp_range:
+                                info_teknis.append(f"TP: {tp_range}")
+                            if sl_harga:
+                                # SL_Harga disimpan tanpa "Rp", jadi tambahkan sendiri
+                                info_teknis.append(f"SL: Rp {sl_harga}")
+                            st.caption(" | ".join(info_teknis))
                         # Fitur Catat Actual (ringkas, tanpa expander detail)
                         waktu_key = r.get('Waktu','')
                         saham_key = r.get('Saham','')
                         actual_key = (waktu_key, saham_key)
                         actual_data = st.session_state.riwayat_actual.get(actual_key, None)
-    
                         if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
                             st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
                             if actual_data.get('Entry_Miss') == 'Yes':
@@ -782,7 +794,6 @@ with st.sidebar:
                                 if st.button("🗑️ Hapus", key=f"del_{waktu_key}_{saham_key}"):
                                     hapus_riwayat_item(waktu_key, saham_key)
                                     st.rerun()
-    
                             if st.session_state.get(f"show_{waktu_key}_{saham_key}", False):
                                 with st.form(key=f"form_{waktu_key}_{saham_key}"):
                                     actual_high = st.text_input("Actual High", placeholder="6250")
