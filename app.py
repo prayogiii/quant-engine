@@ -495,29 +495,29 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     if error: return None, error
     riwayat_text = ""
     if riwayat:
-    riwayat_text = "Riwayat analisis sebelumnya (termasuk hasil aktual jika tersedia):\n"
-    for r in riwayat[:10]:
-        base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
-        # Tambahkan data aktual
-        if r.get('Actual_High') or r.get('Actual_Outcome'):
-            base += " | Hasil Aktual: "
-            if r.get('Actual_High'):
-                base += f"High={r['Actual_High']}, "
-            if r.get('Actual_Low'):
-                base += f"Low={r['Actual_Low']}, "
-            if r.get('Actual_Close'):
-                base += f"Close={r['Actual_Close']}, "
-            if r.get('Actual_Outcome'):
-                base += f"Outcome={r['Actual_Outcome']}"
-            if r.get('Entry_Miss'):
-                base += " (Entry tidak tersentuh)"
-        ai_insight = r.get("AI_Insight", "").strip()
-        if ai_insight:
-            short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
-            base += f" | AI Insight: {short_insight}"
-        riwayat_text += base + "\n"
-else:
-    riwayat_text = "Belum ada riwayat sebelumnya."
+        riwayat_text = "Riwayat analisis sebelumnya (termasuk hasil aktual jika tersedia):\n"
+        for r in riwayat[:10]:
+            base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
+            # Tambahkan data aktual
+            if r.get('Actual_High') or r.get('Actual_Outcome'):
+                base += " | Hasil Aktual: "
+                if r.get('Actual_High'):
+                    base += f"High={r['Actual_High']}, "
+                if r.get('Actual_Low'):
+                    base += f"Low={r['Actual_Low']}, "
+                if r.get('Actual_Close'):
+                    base += f"Close={r['Actual_Close']}, "
+                if r.get('Actual_Outcome'):
+                    base += f"Outcome={r['Actual_Outcome']}"
+                if r.get('Entry_Miss'):
+                    base += " (Entry tidak tersentuh)"
+            ai_insight = r.get("AI_Insight", "").strip()
+            if ai_insight:
+                short_insight = (ai_insight[:120] + "...") if len(ai_insight) > 120 else ai_insight
+                base += f" | AI Insight: {short_insight}"
+            riwayat_text += base + "\n"
+    else:
+        riwayat_text = "Belum ada riwayat sebelumnya."
 
     prompt = f"""
 Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
