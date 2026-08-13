@@ -2532,7 +2532,7 @@ if run_btn:
             }
             riwayat_konteks = []
             for r in st.session_state.riwayat:
-                if r['Saham'] == ticker_input:
+                if r['Saham'] == ticker_raw:
                     r_copy = dict(r)                # jangan ubah state asli
                     key_actual = (r.get('Waktu'), r.get('Saham'))
                     actual = st.session_state.riwayat_actual.get(key_actual, {})
