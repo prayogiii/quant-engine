@@ -2632,13 +2632,14 @@ if scan_btn:
     # Urutkan berdasarkan techScore
     hasil_scan.sort(key=lambda x: x['techScore'], reverse=True)
 
-    # --- Pisahkan Beli dan Jual ---
+        # --- Pisahkan Beli dan Jual ---
     buy_signals = [r for r in hasil_scan if r['techScore'] > 0.05]
     sell_signals = [r for r in hasil_scan if r['techScore'] < -0.05]
-    # Ambil 10 saham terkuat untuk Beli
+    # TOP BUY: ambil 10 terkuat (techScore tertinggi)
     top_buys = buy_signals[:10]
-    # Ambil 3 saham terlemah (techScore paling negatif) untuk Jual
-    top_sells = sorted(sell_signals, key=lambda x: x['techScore'])[:3]
+    # TOP SELL: ambil 10 terlemah (techScore paling negatif)
+    # Urutkan sell_signals dari paling negatif ke kurang negatif
+    top_sells = sorted(sell_signals, key=lambda x: x['techScore'])[:10]
     # Simpan hasil scan ke session_state agar tidak hilang saat re-run
     st.session_state.scan_results = {
         'buy_signals': buy_signals,
@@ -2666,12 +2667,14 @@ if st.session_state.get('scan_results'):
     st.markdown(f"✅ **Berhasil scan:** {hasil_scan_count}/{daftar_saham_count} saham")
     st.markdown(f"📈 Kandidat Beli: {len(buy_signals)} | 📉 Kandidat Jual: {len(sell_signals)}")
 
-    # ==================== TAMPILAN UTAMA: TOP 10 BUY & TOP 3 SELL ====================
+    # ==================== TAMPILAN UTAMA: TOP BUY & TOP SELL ====================
     col_buy, col_sell = st.columns([3, 1])
     with col_buy:
-        st.subheader(f"🏆 TOP {min(10, len(buy_signals))} RELATIF TERKUAT - Beli")
+        # Jumlah top_buys bisa berubah (maksimal 10)
+        st.subheader(f"🏆 TOP {len(top_buys)} RELATIF TERKUAT - Beli")
     with col_sell:
-        st.subheader(f"🔻 TOP {min(3, len(sell_signals))} RELATIF TERLEMAH - Jual")
+        # Jumlah top_sells juga adaptif (maksimal 10)
+        st.subheader(f"🔻 TOP {len(top_sells)} RELATIF TERLEMAH - Jual")
 
     # ==================== AI RE-RANK (ditingkatkan) ===================
     if ai_rerank and st.session_state.get("gemini_api_key"):
@@ -2749,7 +2752,16 @@ if st.session_state.get('scan_results'):
                         if ai_upgraded > 0:
                             msg += f", **{ai_upgraded}** naik peringkat karena AI"
                         st.success(msg)
-
+                        # Urutkan ulang buy_signals berdasarkan hybrid_score
+                        if candidates:
+                            for r in candidates:
+                                if 'hybrid_score' not in r:
+                                    r['hybrid_score'] = r['techScore']
+                            buy_signals.sort(key=lambda x: x.get('hybrid_score', x['techScore']), reverse=True)
+                            top_buys = buy_signals[:10]
+                            # Update session_state agar render menggunakan urutan baru
+                            st.session_state.scan_results['buy_signals'] = buy_signals
+                            st.session_state.scan_results['top_buys'] = top_buys
                         with st.expander("📋 Lihat Detail AI Re‑Rank"):
                             ai_table = []
                             for r in candidates:
