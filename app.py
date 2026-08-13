@@ -1156,7 +1156,7 @@ def get_daftar_saham(mode):
     elif mode == "Papan Utama":
         return papan_utama
     elif mode == "Komprehensif (Utama + Pengembangan)":
-        return papan_utama + pengembangan
+        return pengembangan
     elif mode == "Full IDX":
         codes = fetch_idx_stock_list(exchange_boards=["Main", "Development", "Acceleration"])
         if codes:
@@ -1344,8 +1344,9 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
 
         # --- Beta & IHSG return 5 hari ---
         i_ret5 = (i_adj[iT] - i_adj[iT-5]) / i_adj[iT-5] if iT >= 5 else 0.0
-        cov = np.cov(s_ret[:len(i_ret)], i_ret[:len(s_ret)])[0,1]
-        var_i = np.var(i_ret[:len(s_ret)])
+        common_len = min(len(s_ret), len(i_ret))
+        cov = np.cov(s_ret[:common_len], i_ret[:common_len])[0,1]
+        var_i = np.var(i_ret[:common_len])
         beta = (cov / var_i).clip(-3, 3) if var_i > 1e-8 else 1.0
         beta_norm = np.clip(beta * i_ret5 / 0.05, -1, 1)
 
@@ -2622,7 +2623,7 @@ if scan_btn:
 
     # --- Pisahkan Beli dan Jual ---
     buy_signals = [r for r in hasil_scan if r['techScore'] > 0.05]
-    sell_signals = [r for r in hasil_scan if r['techScore'] < -0.05]
+    top_sells = sell_signals[-3:][::-1] if len(sell_signals) >= 3 else sell_signals[::-1]
 
     top_buys = buy_signals[:10]
     top_sells = sell_signals[:3]
