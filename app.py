@@ -2854,7 +2854,11 @@ if st.session_state.get('scan_results'):
                     st.error("API Key Gemini diperlukan.")
                 else:
                     with st.spinner("🧠 Mengambil berita terbaru & menganalisis sentimen..."):
-                        candidates = buy_signals[:15]
+                        # Gunakan top_buys yang sudah tampil (maksimal 10)
+                        candidates = sr.get('top_buys', [])
+                        if not candidates:
+                            st.warning("Tidak ada kandidat Beli yang tersimpan.")
+                            st.stop()
                         # Ambil headline
                         headlines_map = {}
                         for r in candidates:
@@ -2920,7 +2924,6 @@ if st.session_state.get('scan_results'):
 
                                 # --- TOP JUAL (dengan berita juga) ---
                                 sell_signals_list = sr.get('sell_signals', [])
-                                top_sell_candidates = sell_signals_list[:3]
                                 if top_sell_candidates:
                                     st.markdown("**TOP JUAL**")
                                     headlines_sell = {}
