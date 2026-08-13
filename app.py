@@ -1172,7 +1172,7 @@ def get_daftar_saham(mode):
         codes = fetch_idx_stock_list(exchange_boards=["Main", "Development", "Acceleration"])
         if codes:
             return codes
-        return papan_utama + pengembangan
+        return pengembangan
     elif mode == "Auto-Fetch (API BEI)":
         # Ambil semua saham dari API BEI (resmi)
         codes = fetch_idx_stock_list()
