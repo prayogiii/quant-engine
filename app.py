@@ -2756,7 +2756,7 @@ elif scan_btn:
         'hasil_scan_count': len(hasil_scan),
         'daftar_saham_count': len(daftar_saham)
     }
-     st.rerun()
+    st.rerun()
 # ==================== TAMPILAN HASIL SCAN (DARI SESSION STATE) ====================
 if st.session_state.get('scan_results'):
     sr = st.session_state.scan_results
