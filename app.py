@@ -456,23 +456,20 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
 # ====================== API IDX ======================
 @st.cache_data(ttl=86400)   # cache 1 hari
 def fetch_idx_stock_list_exclude_monitoring():
-    """
-    Ambil daftar saham dari API BEI.
-    Kecualikan Papan Pemantauan Khusus (suspensi/bermasalah).
-    """
     excluded_boards = {
         "pemantauankhusus", "pemantauan_khusus", "pemantauankhusus",
         "monitoring", "special_monitoring", "specialmonitoring"
     }
-
     endpoints = [
-        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?start=0&length=9999&exchangeBoard=&industry=&subIndustry=&search=",
-        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?language=id-id&start=0&length=9999"
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?start=0&length=9999",
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?language=id-id&start=0&length=9999",
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?start=0&length=9999&exchangeBoard=&industry=&subIndustry=&search="
     ]
     headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham/"
+        "Referer": "https://www.idx.co.id/",
+        "X-Requested-With": "XMLHttpRequest"
     }
 
     all_codes = []
@@ -482,27 +479,34 @@ def fetch_idx_stock_list_exclude_monitoring():
             resp = requests.get(url, headers=headers, timeout=25)
             if resp.status_code != 200:
                 continue
-            data = resp.json()
+            raw = resp.json()
 
-            items = []
-            if isinstance(data, list):
-                items = data
-            elif isinstance(data, dict) and 'data' in data:
-                items = data['data']
+            # Cari key yang berisi list saham
+            items = None
+            if isinstance(raw, list):
+                items = raw
             else:
-                # Coba ekstrak rekursif
-                def extract(obj):
-                    out = []
-                    if isinstance(obj, dict):
-                        if 'code' in obj:
-                            out.append(obj)
-                        for v in obj.values():
-                            out.extend(extract(v))
-                    elif isinstance(obj, list):
-                        for v in obj:
-                            out.extend(extract(v))
-                    return out
-                items = extract(data)
+                for key in ('data', 'Data', 'result', 'Result', 'results'):
+                    if key in raw:
+                        items = raw[key]
+                        break
+                if items is None:
+                    # Coba ekstrak rekursif
+                    def extract(obj):
+                        out = []
+                        if isinstance(obj, dict):
+                            if 'code' in obj or 'Code' in obj or 'KodeSaham' in obj:
+                                out.append(obj)
+                            for v in obj.values():
+                                out.extend(extract(v))
+                        elif isinstance(obj, list):
+                            for v in obj:
+                                out.extend(extract(v))
+                        return out
+                    items = extract(raw)
+
+            if not items:
+                continue
 
             for item in items:
                 if not isinstance(item, dict):
@@ -511,20 +515,22 @@ def fetch_idx_stock_list_exclude_monitoring():
                 if not code:
                     continue
                 code = str(code).strip().upper()
-                if len(code) > 6:
+                if len(code) > 6 or not code.isalnum():
                     continue
 
                 board = item.get('BoardId') or item.get('Board') or item.get('boardId') or ""
-                board_lower = str(board).lower().replace(" ", "")
+                board_lower = str(board).lower().replace(" ", "").replace("-", "").replace("_", "")
                 if board_lower in excluded_boards:
                     continue
 
                 if code not in seen:
                     seen.add(code)
                     all_codes.append(code)
+
             if len(all_codes) >= 100:
                 break
-        except Exception:
+        except Exception as e:
+            # st.write(f"Error endpoint {url}: {e}")   # debug
             continue
 
     return sorted(all_codes) if all_codes else None
