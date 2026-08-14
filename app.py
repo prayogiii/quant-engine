@@ -1254,8 +1254,12 @@ def get_daftar_saham(mode):
                                   "DCII", "KETR", "DGNS", "UFOE", "CHEK", "PMUI", "EMAS", "PJHB", "RLCO", "SUPA",
                                   "WBSA", "JELI", "EMMI", "PRDL", "RANS", "OBMD", "NASI", "BSML", "ADMF", "ADMG",
                                   "AGII", "AGRS", "AHAP", "AIMS", "PNSE"]
-
-        
+    akselerasi_ekonomi = ["CASH", "SOFA", "PPGL", "PLAN", "LFLO", "LUCY", "MGLV", "IPAC", "FLMC", "RUNS",
+                           "IDEA", "WGSH", "SMKM", "NANO", "IBOS", "OLIV", "RCCC", "AMMS", "EURO", "KLIN",
+                           "NINE", "ISAP", "SOUL", "BMBL", "NAYZ", "PACK", "CHIP", "KING", "HAJJ", "RELF",
+                           "GRPM", "WIDI", "HBAT", "LMAX", "MSIE", "AEGS", "LOPI", "UDNG", "MEJA", "SPRE",
+                           "MANG", "BUKA"]
+    full_idx_static = list(dict.fromkeys(pengembangan + akselerasi_ekonomi))
     if mode == "Cepat (LQ45)":
         return lq45
     elif mode == "Papan Utama":
@@ -1263,18 +1267,17 @@ def get_daftar_saham(mode):
     elif mode == "Komprehensif (Utama + Pengembangan)":
         return pengembangan
     elif mode == "Full IDX":
-        codes = fetch_all_idx_stocks()
-        st.write(f"Full IDX API result: {len(codes) if codes else 0}")
-        if codes:
-            return codes
-        return pengembangan
-    
+        api_codes = fetch_all_idx_stocks()
+        if api_codes:
+            combined = list(dict.fromkeys(api_codes + full_idx_static))
+            return combined
+        return full_idx_static
     elif mode == "Auto-Fetch (API BEI)":
-        codes = fetch_all_idx_stocks()
-        st.write(f"Auto-Fetch API result: {len(codes) if codes else 0}")
-        if codes:
-            return codes[:1000]
-        return pengembangan
+        api_codes = fetch_all_idx_stocks()
+        if api_codes:
+            combined = list(dict.fromkeys(api_codes + full_idx_static))
+            return combined[:1000]
+        return full_idx_static
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
     """Ambil harga real-time terpisah dari bar historis, untuk override kalau bar terakhir stale."""
