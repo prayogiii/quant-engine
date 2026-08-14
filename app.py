@@ -521,9 +521,10 @@ def fetch_all_idx_stocks():
     Mengembalikan list kode unik (uppercase) atau None jika gagal total.
     """
     boards_to_try = [
-        "Main", "Development", "Acceleration",
-        "Special", "Monitoring", "Economy", "Government",
-        "ETF", "REIT", "Infrastructure", "All", "Semua"
+        "Main", "Development", "Acceleration", "Economy", "Ekonomi",
+        "Pemantauan Khusus", "Pemantauan", "Monitoring", "Special",
+        "Government", "ETF", "REIT", "Infrastructure",
+        "All", "Semua", "Utama", "Pengembangan", "Akselerasi"
     ]
     all_codes = []
     seen = set()
@@ -1267,17 +1268,18 @@ def get_daftar_saham(mode):
     elif mode == "Komprehensif (Utama + Pengembangan)":
         return pengembangan
     elif mode == "Full IDX":
-        codes = fetch_idx_stock_list(exchange_boards=["Main", "Development", "Acceleration"])
+        board_include = ["Main", "Development", "Acceleration", "Economy"]
+        codes = fetch_idx_stock_list(exchange_boards=board_include)
         if codes:
             return codes
         return pengembangan
     elif mode == "Auto-Fetch (API BEI)":
-        # Ambil semua saham dari API BEI (resmi) dengan mencoba beberapa board
-        codes = fetch_all_idx_stocks()
-        if codes:
-            return codes[:1000]   # batasi 1000 agar tetap wajar
-        # fallback jika API gagal
-        return pengembangan
+        api_codes = fetch_all_idx_stocks()
+        static_codes = pengembangan  
+        if api_codes:
+            combined = list(dict.fromkeys(api_codes + static_codes))  
+            return combined[:1000]
+        return static_codes
     
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
