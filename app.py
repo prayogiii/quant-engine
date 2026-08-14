@@ -747,7 +747,7 @@ with st.sidebar:
             st.cache_data.clear()
             st.success("Cache dibersihkan!")
     # ==================== SCANNER SAHAM IDX ====================
-    elif scan_btn:
+elif scan_btn:
     st.markdown("---")
     st.subheader("🔍 Scanner Saham IDX")
     mode_scan = st.selectbox(
