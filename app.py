@@ -580,7 +580,9 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Max Drawdown Backtest: {data_saham.get('MaxDD', 'N/A')}
 - Alokasi Kelly Maks: {data_saham.get('Kelly', 'N/A')}%
 - Fundamental: Market Cap: {data_saham.get('Fundamental_MC', 'N/A')}, PER: {data_saham.get('Fundamental_PER', 'N/A')}, PBV: {data_saham.get('Fundamental_PBV', 'N/A')}, ROE: {data_saham.get('Fundamental_ROE', 'N/A')}, D/E: {data_saham.get('Fundamental_DE', 'N/A')}
-
+- Status Posisi: {data_saham.get('Status_Posisi', 'Tidak diketahui')}
+- Harga Beli: {data_saham.get('Harga_Beli', 'Tidak diisi')}
+- Floating P/L: {data_saham.get('Floating_PL', 'N/A')}
 {riwayat_text}
 
 Berdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
@@ -2633,7 +2635,9 @@ if run_btn:
                 "Fundamental_PBV": f"{pbv:.2f}" if pbv else "N/A",
                 "Fundamental_ROE": f"{roe*100:.1f}" if roe else "N/A",
                 "Fundamental_DE": f"{de:.2f}" if de else "N/A",
-                "Status_Posisi": "Sudah memiliki saham" if sudah_beli else "Belum memiliki saham"
+                "Status_Posisi": "Sudah memiliki saham" if sudah_beli else "Belum memiliki saham",
+                "Harga_Beli": f"Rp {harga_beli_float:,.0f}" if harga_beli_float else "Tidak diisi",
+                "Floating_PL": f"{floating_pl_pct:+.2f}%" if floating_pl_pct is not None else "N/A"
             }
             riwayat_konteks = []
             for r in st.session_state.riwayat:
