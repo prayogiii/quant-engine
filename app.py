@@ -515,6 +515,32 @@ def fetch_idx_stock_list(exchange_boards=None):
             continue
 
     return all_codes if all_codes else None
+def fetch_all_idx_stocks():
+    """
+    Ambil daftar saham dari beberapa board BEI dan gabungkan.
+    Mengembalikan list kode unik (uppercase) atau None jika gagal total.
+    """
+    boards_to_try = [
+        "Main", "Development", "Acceleration",
+        "Special", "Monitoring", "Economy", "Government",
+        "ETF", "REIT", "Infrastructure", "All", "Semua"
+    ]
+    all_codes = []
+    seen = set()
+
+    for board in boards_to_try:
+        codes = fetch_idx_stock_list(exchange_boards=[board])
+        if codes:
+            for c in codes:
+                if c not in seen:
+                    seen.add(c)
+                    all_codes.append(c)
+
+    if all_codes:
+        return all_codes
+
+    # Fallback: coba tanpa filter board
+    return fetch_idx_stock_list()
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
@@ -1246,10 +1272,10 @@ def get_daftar_saham(mode):
             return codes
         return pengembangan
     elif mode == "Auto-Fetch (API BEI)":
-        # Ambil semua saham dari API BEI (resmi)
-        codes = fetch_idx_stock_list()
+        # Ambil semua saham dari API BEI (resmi) dengan mencoba beberapa board
+        codes = fetch_all_idx_stocks()
         if codes:
-            return codes[:500]   # batasi agar scan tidak terlalu lama
+            return codes[:1000]   # batasi 1000 agar tetap wajar
         # fallback jika API gagal
         return pengembangan
     
