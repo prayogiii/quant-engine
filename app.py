@@ -161,10 +161,13 @@ def save_v12_prediction(ticker, close_price, factor_signals, entry_low=None, ent
             new_row[f'sig_{k}'] = factor_signals.get(k, 0.0)
 
         headers = list(new_row.keys())   # sekarang 9 kolom
-
-        # ---------- Pastikan jumlah kolom cukup ----------
+                # ---------- Pastikan jumlah kolom cukup ----------
         if ws.col_count < len(headers):
             ws.add_cols(len(headers) - ws.col_count)
+
+        # Selalu tulis ulang header sesuai headers terbaru
+        last_col = chr(64 + len(headers))  # contoh: 11 kolom -> 'K'
+        ws.update(f'A1:{last_col}1', [headers], value_input_option='RAW')
         # -------------------------------------------------
 
         records = ws.get_all_records()
@@ -1906,7 +1909,9 @@ if run_btn:
 
     min_entry_width = 0.5 * atr14_val
     if (entry_high - entry_low) < min_entry_width:
+        entry_low  = max(0, entry_high - min_entry_width)
         entry_high = entry_low + min_entry_width
+        entry_high = min(entry_high, harga_terakhir)
 
     # ---- Belajar dari error entry sebelumnya ----
     mem = st.session_state.v12_memory.get(ticker_raw, {})
