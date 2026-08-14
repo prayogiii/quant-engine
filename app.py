@@ -1255,11 +1255,33 @@ def get_daftar_saham(mode):
                                   "WBSA", "JELI", "EMMI", "PRDL", "RANS", "OBMD", "NASI", "BSML", "ADMF", "ADMG",
                                   "AGII", "AGRS", "AHAP", "AIMS", "PNSE"]
     akselerasi_ekonomi = ["CASH", "SOFA", "PPGL", "PLAN", "LFLO", "LUCY", "MGLV", "IPAC", "FLMC", "RUNS",
-                           "IDEA", "WGSH", "SMKM", "NANO", "IBOS", "OLIV", "RCCC", "AMMS", "EURO", "KLIN",
-                           "NINE", "ISAP", "SOUL", "BMBL", "NAYZ", "PACK", "CHIP", "KING", "HAJJ", "RELF",
-                           "GRPM", "WIDI", "HBAT", "LMAX", "MSIE", "AEGS", "LOPI", "UDNG", "MEJA", "SPRE",
-                           "MANG", "BUKA"]
-    full_idx_static = list(dict.fromkeys(pengembangan + akselerasi_ekonomi))
+                          "IDEA", "WGSH", "SMKM", "NANO", "IBOS", "OLIV", "RCCC", "AMMS", "EURO", "KLIN",
+                          "NINE", "ISAP", "SOUL", "BMBL", "NAYZ", "PACK", "CHIP", "KING", "HAJJ", "RELF",
+                          "GRPM", "WIDI", "HBAT", "LMAX", "MSIE", "AEGS", "LOPI", "UDNG", "MEJA", "SPRE",
+                          "MANG", "BUKA"]
+    pemantauan_khusus = ["ABBA", "ACST", "ADES", "AKKU", "ALKA", "ALMI", "ALTO", "ARTI", "ASMI",
+                         "BATA", "BEKS", "BHIT", "BIKA", "BIMA", "BLTA", "BLTZ", "BSWD", "BTEK", "BTEL",
+                         "CANI", "CMPP", "CNKO", "COWL", "DUTI", "ELTY", "ETWA", "FASW", "GAMA", "GLOB",
+                         "GOLL", "HADE", "HITS", "HOME", "HOTL", "IBFN", "IBST", "IIKP", "IKAI", "INAF",
+                         "INRU", "INTA", "KARW", "KBRI", "KIAS", "KOIN", "KREN", "LCGP", "LMAS", "LMSH",
+                         "MAGP", "MDRN", "MFMI", "MIRA", "MLIA", "MPPA", "MTFN", "MTSM", "MYTX", "OCAP",
+                         "PBRX", "PLAS", "PLIN", "RIMO", "SCPI", "SIMA", "SKYB", "SMCB", "SMRU", "SONA",
+                         "SRIL", "SUGI", "SUPR", "TARA", "TAXI", "TELE", "TFCO", "TIRT", "TRAM", "TRIL",
+                         "TRIO", "UNSP", "VIVA", "WICO", "WIKA", "WSKT", "ZBRA", "MARI", "MKNT", "MTRA",
+                         "INCF", "WSBP", "TAMU", "TGRA", "TOPS", "ARMY", "MAPB", "MABA", "NASA", "ZINC",
+                         "PCAR", "BOSS", "JSKY", "INPS", "TDPM", "SWAT", "POLL", "NUSA", "ANDI", "DIGI",
+                         "HKMU", "DUCK", "SOSS", "DEAL", "URBN", "FOOD", "MTPS", "CPRI", "HRME", "POSA",
+                         "KAYU", "IPTV", "ENVY", "ARKA", "BAPI", "PURE", "SINI", "IFSH", "PGJO", "PURA",
+                         "SBAT", "KBAG", "CBMF", "TECH", "TOYS", "PNGO", "PTDU", "PMMP", "BEBS", "FIMP",
+                         "BAUT", "WINR", "RAFI", "KKES", "HILL", "SAGE", "TGUK", "RGAS", "PTMR", "MENN",
+                         "WMPP", "IPPE", "POLY", "POOL", "PPRO"]
+    # Set untuk filter cepat
+    pemantauan_khusus_set = set(pemantauan_khusus)
+    # Gabungkan daftar Full IDX tanpa Pemantauan Khusus
+    full_idx_static = [
+        c for c in list(dict.fromkeys(pengembangan + akselerasi_ekonomi))
+        if c not in pemantauan_khusus_set
+    ]
     if mode == "Cepat (LQ45)":
         return lq45
     elif mode == "Papan Utama":
@@ -1270,12 +1292,15 @@ def get_daftar_saham(mode):
         api_codes = fetch_all_idx_stocks()
         if api_codes:
             combined = list(dict.fromkeys(api_codes + full_idx_static))
+            combined = [c for c in combined if c not in pemantauan_khusus_set]
             return combined
         return full_idx_static
+
     elif mode == "Auto-Fetch (API BEI)":
         api_codes = fetch_all_idx_stocks()
         if api_codes:
             combined = list(dict.fromkeys(api_codes + full_idx_static))
+            combined = [c for c in combined if c not in pemantauan_khusus_set]
             return combined[:1000]
         return full_idx_static
 @st.cache_data(ttl=30)
