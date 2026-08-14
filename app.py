@@ -747,6 +747,7 @@ with st.sidebar:
             st.cache_data.clear()
             st.success("Cache dibersihkan!")
     # ==================== SCANNER SAHAM IDX ====================
+elif scan_btn:
     st.markdown("---")
     st.subheader("🔍 Scanner Saham IDX")
     mode_scan = st.selectbox(
@@ -2658,10 +2659,9 @@ if run_btn:
                 st.markdown(html_ai,unsafe_allow_html=True)
             elif error_ai: st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
     else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
-
     simpan_riwayat(ringkasan)
 # ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
-if scan_btn:
+elif scan_btn:
     st.title("🔍 Scanner Saham IDX (V12 Tech Score)")
     st.write(f"Mode: {mode_scan} | Likuiditas Min: Rp {likuiditas_min:,.0f}/hari")
 
@@ -2755,8 +2755,9 @@ if scan_btn:
         'hasil_scan_count': len(hasil_scan),
         'daftar_saham_count': len(daftar_saham)
     }
+     st.rerun()
 # ==================== TAMPILAN HASIL SCAN (DARI SESSION STATE) ====================
-if st.session_state.get('scan_results'):
+elif st.session_state.get('scan_results'):
     sr = st.session_state.scan_results
     buy_signals  = sr['buy_signals']
     sell_signals = sr['sell_signals']
