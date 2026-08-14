@@ -146,14 +146,16 @@ def load_v12_predictions(ticker):
         st.error(f"Gagal memuat prediksi: {e}")
         return None
 
-def save_v12_prediction(ticker, close_price, factor_signals):
+def save_v12_prediction(ticker, close_price, factor_signals, entry_low=None, entry_high=None):
     try:
         sheet = get_gsheet()
         ws = sheet.worksheet("v12_predictions")
         new_row = {
             'ticker': ticker,
             'close_price': close_price,
-            'timestamp': datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
+            'timestamp': datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"),
+            'entry_low': entry_low,
+            'entry_high': entry_high
         }
         for k in FACTOR_KEYS:
             new_row[f'sig_{k}'] = factor_signals.get(k, 0.0)
@@ -387,6 +389,7 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
         last_pred = load_v12_predictions(ticker)
         if not last_pred:
             return
+
         factor_signals = {}
         for k in FACTOR_KEYS:
             key = f'sig_{k}'
@@ -395,19 +398,56 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
             else:
                 factor_signals[k] = 0.0
 
-        # Hanya update jika Actual_Close diisi dan valid
+        # --- 1) Update arah prediksi berdasarkan Actual Close ---
         actual_close_str = actual_data.get('Actual_Close', '')
         if actual_close_str:
             try:
-                actual_close = float(actual_close_str)
+                actual_close = float(str(actual_close_str).replace(",", ""))
                 last_close = float(last_pred['close_price'])
                 if last_close > 0:
                     actual_return = (actual_close - last_close) / last_close
                     actual_return = max(-1.0, min(1.0, actual_return))
                     update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
             except:
-                pass  # gagal parse → tidak update
-        # Jika Actual_Close tidak diisi, tidak ada update V12
+                pass  # gagal parse → arah tidak diupdate
+
+        # --- 2) Belajar dari Entry Miss / Not Touched ---
+        # Hanya berjalan jika prediksi sebelumnya menyimpan entry_low & entry_high
+        entry_low = last_pred.get('entry_low')
+        entry_high = last_pred.get('entry_high')
+        if entry_low is not None and entry_high is not None:
+            try:
+                entry_low_f = float(entry_low)
+                entry_high_f = float(entry_high)
+            except:
+                entry_low_f = None
+                entry_high_f = None
+
+            if entry_low_f is not None and entry_high_f is not None and entry_low_f < entry_high_f:
+                actual_low_str = actual_data.get('Actual_Low', '')
+                if actual_low_str:
+                    try:
+                        actual_low_f = float(str(actual_low_str).replace(",", ""))
+                        # Untuk sinyal BUY: entry zone seharusnya di bawah harga.
+                        # Jika actual low > entry_high, berarti harga tidak pernah turun menyentuh entry.
+                        # Ini menunjukkan entry zone terlalu rendah → kita koreksi.
+                        if actual_low_f > entry_high_f:
+                            gap = actual_low_f - entry_high_f
+
+                            # Ambil memori ticker, tambahkan key entry_error_ema jika belum ada
+                            mem = st.session_state.v12_memory.get(ticker, {})
+                            if 'entry_error_ema' not in mem:
+                                mem['entry_error_ema'] = 0.0
+
+                            alpha = 0.2   # semakin besar gap, makin cepat koreksi
+                            mem['entry_error_ema'] = (
+                                mem['entry_error_ema'] * (1 - alpha) + gap * alpha
+                            )
+
+                            st.session_state.v12_memory[ticker] = mem
+                            save_v12_memory(st.session_state.v12_memory)
+                    except:
+                        pass  # tidak ada actual low valid → tidak update entry error
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 # ====================== API IDX ======================
@@ -1855,17 +1895,31 @@ if run_btn:
         entry_low = s1
     else:
         entry_low = harga_terakhir * (1 - atr_pct/100)
+
     if "STRONG BUY" in signal:
         entry_high = harga_terakhir
     else:
         entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
+
     if entry_low > entry_high:
         entry_low, entry_high = entry_high, entry_low
+
     min_entry_width = 0.5 * atr14_val
     if (entry_high - entry_low) < min_entry_width:
         entry_high = entry_low + min_entry_width
-    entry_zone = f"Rp {entry_low:,.0f} - Rp {entry_high:,.0f}"
-    # Bulatkan ke fraksi BEI
+
+    # ---- Belajar dari error entry sebelumnya ----
+    mem = st.session_state.v12_memory.get(ticker_raw, {})
+    entry_error = mem.get('entry_error_ema', 0.0)
+    if entry_error > 0:
+        entry_low  += entry_error * 0.2
+        entry_high += entry_error * 0.2
+
+    # ---- Pengaman agar entry_high tidak melebihi harga close ----
+    entry_high = min(entry_high, harga_terakhir)
+    entry_low  = min(entry_low, entry_high)   # pastikan low <= high
+
+    # ---- Bulatkan ke fraksi BEI ----
     entry_low_f = fraksi_bei(entry_low)
     entry_high_f = fraksi_bei(entry_high)
     entry_zone_f = f"Rp {entry_low_f:,.0f} - Rp {entry_high_f:,.0f}"
@@ -2480,9 +2534,10 @@ if run_btn:
         mem = st.session_state.v12_memory.get(ticker_raw, {})
         if mem:
             keys_to_show = [k for k in FACTOR_KEYS if not (is_daytrade and k == "Coppock")]
-            acc_data = {k: mem.get('accuracy',{}).get(k,0.5) for k in keys_to_show}
-            err_data = {k: mem.get('error_ema',{}).get(k,1.0) for k in keys_to_show}
-            col_a,col_e = st.columns(2)
+            acc_data = {k: mem.get('accuracy', {}).get(k, 0.5) for k in keys_to_show}
+            err_data = {k: mem.get('error_ema', {}).get(k, 1.0) for k in keys_to_show}
+
+            col_a, col_e = st.columns(2)
             with col_a:
                 st.caption("✅ Accuracy (higher = better)")
                 st.bar_chart(pd.Series(acc_data))
@@ -2495,14 +2550,26 @@ if run_btn:
             mem_insight = f"🏆 **Faktor paling akurat:** **{best_factor}** (akurasi {acc_data[best_factor]:.1%}). "
             mem_insight += f"Faktor **{worst_factor}** perlu dievaluasi (akurasi {acc_data[worst_factor]:.1%})."
             st.caption(mem_insight)
+
+            # ---- Tambahan: Menampilkan error entry (belajar dari Not Touched) ----
+            entry_err = mem.get('entry_error_ema', 0.0)
+            if entry_err > 0:
+                st.caption(
+                    f"🎯 **Rata‑rata error entry:** {entry_err:.2f} poin. "
+                    "Entry sering tidak tersentuh, engine akan menggeser zona entry lebih dekat ke harga."
+                )
+            else:
+                st.caption("🎯 **Error entry:** 0 — entry zone sudah cukup baik atau belum ada data Not Touched.")
         else:
             st.info("Belum ada data memori untuk ticker ini. Lakukan analisis beberapa kali agar engine mulai belajar.")
 
         st.markdown("### 🔁 Proses Self‑Learning")
         st.caption(
             "Setiap analisis, engine membandingkan prediksi sebelumnya dengan harga aktual. "
-            "Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan."
+            "Jika benar → akurasi naik. Jika salah → error bertambah. Bobot otomatis menyesuaikan. "
+            "Selain itu, engine juga mempelajari **level entry** dari kejadian Entry Tidak Tersentuh."
         )
+
         last_pred = load_v12_predictions(ticker_raw)
         if last_pred:
             last_close = float(last_pred['close_price'])
@@ -2514,6 +2581,7 @@ if run_btn:
                         last_signals[k] = float(last_pred[key])
                     else:
                         last_signals[k] = 0.0
+
                 actual_return = (harga_terakhir - last_close) / last_close
                 volatility = returns.std()
                 update_v12_memory(ticker_raw, last_signals, actual_return, volatility)
@@ -2522,7 +2590,6 @@ if run_btn:
                 st.info("ℹ️ Prediksi sebelumnya tidak memiliki close_price yang valid.")
         else:
             st.info("ℹ️ Tidak ada prediksi sebelumnya. Engine akan mulai belajar pada analisis berikutnya.")
-
         # Simpan prediksi sekarang
         factor_signals = {
             "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
@@ -2533,7 +2600,13 @@ if run_btn:
             "OFI": df['OFI_raw'].iloc[-1] / 3.0
         }
         norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
-        save_v12_prediction(ticker_raw, harga_terakhir, norm_signals)
+        save_v12_prediction(
+            ticker_raw,
+            harga_terakhir,
+            norm_signals,
+            entry_low=entry_low_f,
+            entry_high=entry_high_f
+        )
         st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
 
     # ==================== AI INSIGHT OTOMATIS ====================
