@@ -1258,11 +1258,14 @@ def get_daftar_saham(mode):
         return pengembangan
     elif mode == "Full IDX":
         codes = fetch_all_idx_stocks()
+        st.write(f"Full IDX API result: {len(codes) if codes else 0}")
         if codes:
             return codes
         return pengembangan
+    
     elif mode == "Auto-Fetch (API BEI)":
         codes = fetch_all_idx_stocks()
+        st.write(f"Auto-Fetch API result: {len(codes) if codes else 0}")
         if codes:
             return codes[:1000]
         return pengembangan
