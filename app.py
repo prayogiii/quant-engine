@@ -1277,11 +1277,17 @@ def get_daftar_saham(mode):
                          "WMPP", "IPPE", "POLY", "POOL", "PPRO"]
     # Set untuk filter cepat
     pemantauan_khusus_set = set(pemantauan_khusus)
-    # Gabungkan daftar Full IDX tanpa Pemantauan Khusus
-    full_idx_static = [
-        c for c in list(dict.fromkeys(pengembangan + akselerasi_ekonomi))
+    # Gabungan dasar semua emiten statis (non-khusus)
+    base_non_khusus = list(dict.fromkeys(pengembangan + akselerasi_ekonomi))
+    # Full IDX = non-Pemantauan Khusus
+    full_idx_static_non_khusus = [
+        c for c in base_non_khusus
         if c not in pemantauan_khusus_set
     ]
+    # Auto-Fetch = SEMUA emiten (termasuk Pemantauan Khusus)
+    full_idx_static_all = list(dict.fromkeys(
+        base_non_khusus + pemantauan_khusus
+    ))
     if mode == "Cepat (LQ45)":
         return lq45
     elif mode == "Papan Utama":
@@ -1291,18 +1297,17 @@ def get_daftar_saham(mode):
     elif mode == "Full IDX":
         api_codes = fetch_all_idx_stocks()
         if api_codes:
-            combined = list(dict.fromkeys(api_codes + full_idx_static))
+            combined = list(dict.fromkeys(api_codes + full_idx_static_non_khusus))
             combined = [c for c in combined if c not in pemantauan_khusus_set]
             return combined
-        return full_idx_static
-
+        return full_idx_static_non_khusus
     elif mode == "Auto-Fetch (API BEI)":
         api_codes = fetch_all_idx_stocks()
         if api_codes:
-            combined = list(dict.fromkeys(api_codes + full_idx_static))
-            combined = [c for c in combined if c not in pemantauan_khusus_set]
+            combined = list(dict.fromkeys(api_codes + full_idx_static_all))
+            # jangan filter apa pun, semua emiten diikutsertakan
             return combined[:1000]
-        return full_idx_static
+        return full_idx_static_all
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
     """Ambil harga real-time terpisah dari bar historis, untuk override kalau bar terakhir stale."""
