@@ -2662,7 +2662,7 @@ if run_btn:
     simpan_riwayat(ringkasan)
     st.stop()
 # ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
-elif scan_btn:
+if scan_btn:
     st.title("🔍 Scanner Saham IDX (V12 Tech Score)")
     st.write(f"Mode: {mode_scan} | Likuiditas Min: Rp {likuiditas_min:,.0f}/hari")
 
