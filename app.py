@@ -746,7 +746,7 @@ with st.sidebar:
         if st.button("🗑️ Reset Cache", use_container_width=True):
             st.cache_data.clear()
             st.success("Cache dibersihkan!")
-    # ==================== SCANNER SAHAM IDX ====================
+# ==================== SCANNER SAHAM IDX ====================
 if scan_btn:
     st.markdown("---")
     st.subheader("🔍 Scanner Saham IDX")
