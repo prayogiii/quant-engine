@@ -554,14 +554,41 @@ Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
     except Exception as e:
         return None, f"Gagal menghasilkan insight AI: {str(e)}"
 
-def analisis_riwayat_global(riwayat_data, api_key):
+def analisis_riwayat_global(riwayat_data, riwayat_actual, api_key):
     model, error = dapatkan_model_gemini(api_key)
     if error: return None, error
     if not riwayat_data: return None, "Belum ada riwayat."
-    prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan:\n\n"
+    prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan (termasuk hasil aktual jika tersedia):\n\n"
     for r in riwayat_data[:30]:
-        prompt += f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%\n"
-    prompt += "\nBerdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia):\n- Pola sinyal yang sering muncul\n- Saham dengan peluang terbaik menurut data\n- Rekomendasi perbaikan strategi\n- Insight tambahan yang berguna untuk trader"
+        base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%"
+
+        # Tambahkan data aktual jika tersedia
+        key_actual = (r.get('Waktu'), r.get('Saham'))
+        actual = riwayat_actual.get(key_actual, {})
+        if actual:
+            base += " | Hasil Aktual: "
+            details = []
+            if actual.get('Actual_High'):
+                details.append(f"High={actual['Actual_High']}")
+            if actual.get('Actual_Low'):
+                details.append(f"Low={actual['Actual_Low']}")
+            if actual.get('Actual_Close'):
+                details.append(f"Close={actual['Actual_Close']}")
+            if actual.get('Outcome'):
+                details.append(f"Outcome={actual['Outcome']}")
+            if actual.get('Entry_Miss') == 'Yes':
+                details.append("Entry Tidak Tersentuh")
+            base += ", ".join(details)
+
+        prompt += base + "\n"
+
+    prompt += (
+        "\nBerdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia):\n"
+        "- Pola sinyal yang sering muncul\n"
+        "- Saham dengan peluang terbaik menurut data (termasuk hasil aktualnya)\n"
+        "- Rekomendasi perbaikan strategi\n"
+        "- Insight tambahan yang berguna untuk trader\n"
+    )
     try:
         response = model.generate_content(prompt)
         return response.text.strip(), None
@@ -3174,8 +3201,18 @@ if ai_riwayat_btn:
     elif not st.session_state.riwayat: st.warning("Belum ada riwayat.")
     else:
         with st.spinner("🧠 AI menganalisis riwayat..."):
-            hasil, error = analisis_riwayat_global(st.session_state.riwayat, st.session_state.gemini_api_key)
-            if error: st.error(error)
+            hasil, error = analisis_riwayat_global(
+                st.session_state.riwayat,
+                st.session_state.riwayat_actual,
+                st.session_state.gemini_api_key
+            )
+            if error:
+                st.error(error)
             elif hasil:
                 hasil_bersih = bersihkan_teks_ai(hasil)
-                st.markdown(f'<div class="ai-insight-card" style="border-left-color:#06b6d4;"><h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3><p>{hasil_bersih}</p></div>', unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="ai-insight-card" style="border-left-color:#06b6d4;">'
+                    f'<h3 style="color:#67e8f9;">📊 Insight AI dari Riwayat</h3>'
+                    f'<p>{hasil_bersih}</p></div>',
+                    unsafe_allow_html=True
+                )
