@@ -454,38 +454,36 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 # ====================== API IDX ======================
-def fetch_idx_stock_list(exchange_boards=None):
+@st.cache_data(ttl=86400)   # cache 1 hari
+def fetch_idx_stock_list_exclude_monitoring():
     """
-    Ambil daftar kode saham dari API BEI.
-    exchange_boards: list string board, mis. ["Main", "Development", "Acceleration"].
-                     None atau [] berarti ambil semua (tanpa filter board).
-    Return list kode unik (uppercase) atau None jika gagal.
+    Ambil daftar saham dari API BEI.
+    Kecualikan Papan Pemantauan Khusus (suspensi/bermasalah).
     """
-    # Normalisasi parameter
-    if exchange_boards is None:
-        exchange_boards = [""]
-    elif not exchange_boards:
-        exchange_boards = [""]
+    excluded_boards = {
+        "pemantauankhusus", "pemantauan_khusus", "pemantauankhusus",
+        "monitoring", "special_monitoring", "specialmonitoring"
+    }
+
+    endpoints = [
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?start=0&length=9999&exchangeBoard=&industry=&subIndustry=&search=",
+        "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList?language=id-id&start=0&length=9999"
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham/"
+    }
 
     all_codes = []
     seen = set()
-    for board in exchange_boards:
-        url = (
-            "https://www.idx.co.id/umbraco/Surface/ListedCompany/GetStockList"
-            f"?start=0&length=9999&exchangeBoard={board}&industry=&subIndustry=&search="
-        )
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://www.idx.co.id/id/data-pasar/data-saham/daftar-saham/"
-        }
+    for url in endpoints:
         try:
             resp = requests.get(url, headers=headers, timeout=25)
             if resp.status_code != 200:
                 continue
             data = resp.json()
 
-            # Normalisasi data ke list of dict dengan key 'code'
             items = []
             if isinstance(data, list):
                 items = data
@@ -507,41 +505,32 @@ def fetch_idx_stock_list(exchange_boards=None):
                 items = extract(data)
 
             for item in items:
-                code = item.get('code') or item.get('Code')
-                if code and code not in seen:
+                if not isinstance(item, dict):
+                    continue
+                code = item.get('Code') or item.get('code') or item.get('KodeSaham')
+                if not code:
+                    continue
+                code = str(code).strip().upper()
+                if len(code) > 6:
+                    continue
+
+                board = item.get('BoardId') or item.get('Board') or item.get('boardId') or ""
+                board_lower = str(board).lower().replace(" ", "")
+                if board_lower in excluded_boards:
+                    continue
+
+                if code not in seen:
                     seen.add(code)
-                    all_codes.append(code.upper())
+                    all_codes.append(code)
+            if len(all_codes) >= 100:
+                break
         except Exception:
             continue
 
-    return all_codes if all_codes else None
+    return sorted(all_codes) if all_codes else None
 def fetch_all_idx_stocks():
-    """
-    Ambil daftar saham dari beberapa board BEI dan gabungkan.
-    Mengembalikan list kode unik (uppercase) atau None jika gagal total.
-    """
-    boards_to_try = [
-        "Main", "Development", "Acceleration", "Economy", "Ekonomi",
-        "Pemantauan Khusus", "Pemantauan", "Monitoring", "Special",
-        "Government", "ETF", "REIT", "Infrastructure",
-        "All", "Semua", "Utama", "Pengembangan", "Akselerasi"
-    ]
-    all_codes = []
-    seen = set()
-
-    for board in boards_to_try:
-        codes = fetch_idx_stock_list(exchange_boards=[board])
-        if codes:
-            for c in codes:
-                if c not in seen:
-                    seen.add(c)
-                    all_codes.append(c)
-
-    if all_codes:
-        return all_codes
-
-    # Fallback: coba tanpa filter board
-    return fetch_idx_stock_list()
+    """Ambil semua saham BEI non-Pemantauan Khusus."""
+    return fetch_idx_stock_list_exclude_monitoring()
 # ==========================================
 # FUNGSI AI GEMINI
 # ==========================================
@@ -1268,19 +1257,15 @@ def get_daftar_saham(mode):
     elif mode == "Komprehensif (Utama + Pengembangan)":
         return pengembangan
     elif mode == "Full IDX":
-        board_include = ["Main", "Development", "Acceleration", "Economy"]
-        codes = fetch_idx_stock_list(exchange_boards=board_include)
+        codes = fetch_all_idx_stocks()
         if codes:
             return codes
         return pengembangan
     elif mode == "Auto-Fetch (API BEI)":
-        api_codes = fetch_all_idx_stocks()
-        static_codes = pengembangan  
-        if api_codes:
-            combined = list(dict.fromkeys(api_codes + static_codes))  
-            return combined[:1000]
-        return static_codes
-    
+        codes = fetch_all_idx_stocks()
+        if codes:
+            return codes[:1000]
+        return pengembangan
 @st.cache_data(ttl=30)
 def get_realtime_price(ticker):
     """Ambil harga real-time terpisah dari bar historis, untuk override kalau bar terakhir stale."""
