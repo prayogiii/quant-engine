@@ -723,16 +723,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## 📊 QuantRisk Pro")
     
-    trading_style = st.radio(
-        "⏱️ Gaya Trading:",
-        ["Swing Trade (Mingguan)", "Day Trade (Harian)"],
-        index=0,
-        key="trading_style"
-    )
-    if "Day Trade" in trading_style:
-        st.caption("Menggunakan data 5-menit (5 hari terakhir)")
-    else:
-        st.caption("Menggunakan data harian (2 tahun terakhir)")
+    st.caption("⚙️ Sistem akan menganalisis **Swing (harian)** dan **Daytrade (intraday)** secara otomatis.")
     
     st.markdown("Masukkan kode saham IHSG untuk analisis lengkap.")
     ticker_raw = st.text_input("🔍 Kode Saham", value="BBRI", placeholder="Contoh: BBRI, TLKM, BMRI").upper().strip()
