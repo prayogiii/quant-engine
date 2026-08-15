@@ -424,12 +424,13 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
         entry_low = last_pred.get('entry_low')
         entry_high = last_pred.get('entry_high')
         if entry_low is not None and entry_high is not None:
-            entry_low_f = safe_float(entry_low, None)
-            entry_high_f = safe_float(entry_high, None)
-            if entry_low_f is not None and entry_high_f is not None and entry_low_f < entry_high_f:
-        except:
-            entry_low_f = None
-            entry_high_f = None
+            try:
+                entry_low_f = safe_float(entry_low, None)
+                entry_high_f = safe_float(entry_high, None)
+            except:
+                entry_low_f = None
+                entry_high_f = None
+
             if entry_low_f is not None and entry_high_f is not None and entry_low_f < entry_high_f:
                 actual_low_str = actual_data.get('Actual_Low', '')
                 if actual_low_str:
