@@ -965,17 +965,9 @@ with st.sidebar:
                 st.caption("Belum ada riwayat.")
     
     else:
-        # ---------- Tampilan flat (dua kolom per sesi) ----------
-        from collections import defaultdict
-        session_map = defaultdict(dict)
-        for r in riwayat_data:
-            s_key = (r.get('Waktu', ''), r.get('Saham', ''))
-            gaya = r.get('Gaya', 'SW')
-            session_map[s_key][gaya] = r
-
-        session_list = list(session_map.items())
+        # ---------- Tampilan flat (penuh & lengkap per item) ----------
         items_per_page = 10
-        total_items = len(session_list)
+        total_items = len(riwayat_data)
         total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
     
         if total_pages > 1:
@@ -991,24 +983,158 @@ with st.sidebar:
     
         start_idx = st.session_state.riwayat_page * items_per_page
         end_idx = start_idx + items_per_page
-        display_sessions = session_list[start_idx:end_idx]
+        display_riwayat = riwayat_data[start_idx:end_idx]
     
-        if display_sessions:
-            for s_idx, ((waktu, saham), modes) in enumerate(display_sessions):
-                r_sw = modes.get('SW')
-                r_dt = modes.get('DT')
-                harga_val = r_sw.get('Harga') if r_sw else (r_dt.get('Harga') if r_dt else '?')
-                expander_title = f"{saham} @ Rp {harga_val} (🕒 {waktu})"
+        if display_riwayat:
+            for idx, r in enumerate(display_riwayat):
+                sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else ("⚡" if "BUY" in r.get('Sinyal','') else ("⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
+                conf_str = r.get('Confidence', '0%')
+                try: conf_val = float(conf_str.replace('%',''))
+                except: conf_val = 0
+                conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
+                gaya = r.get('Gaya','?')
+                gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
+                expander_title = f"{r.get('Saham','?')} @ Rp {r.get('Harga','?')} {sig_icon} {r.get('Sinyal','?')} ({gaya_label}) Score: {r.get('Score','?')}"
                 with st.expander(expander_title):
-                    col_sw, col_dt = st.columns(2)
-                    render_mode_card(r_sw, "Swing", "📆", col_sw, f"f_{s_idx}")
-                    render_mode_card(r_dt, "Daytrade", "⏱️", col_dt, f"f_{s_idx}")
+                    st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}** ({gaya_label})")
+                    st.caption(f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} ({conf_text}) | Risk-Adj: {r.get('RRR','?')}")
+                    waktu_analisis = r.get('Waktu', '?')
+                    if waktu_analisis and waktu_analisis != '?':
+                        st.caption(f"🕒 Waktu Analisis: {waktu_analisis}")
+                    harga_beli_r = r.get('Harga_Beli', '')
+                    if harga_beli_r:
+                        st.caption(f"💰 Harga Beli: Rp {harga_beli_r} | Floating: {r.get('Floating_PL', '')}")
+                    st.divider()
+                
+                    # Coppock full width
+                    st.metric("Coppock", r.get('Coppock','?'))
+                
+                    # Estimasi (caption)
+                    est_netral = r.get('Estimasi_Netral', '?')
+                    est_sinyal = r.get('Estimasi_Sinyal', '?')
+                    ret_netral = r.get('Est_Return', '?')
+                    ret_sinyal = r.get('Est_Return_Sinyal', '?')
+                    st.caption(f"📊 Netral: {est_netral} ({ret_netral})  |  🎯 Sinyal: {est_sinyal} ({ret_sinyal})")
+                
+                    # TP & SL dalam dua kolom
+                    c1, c2 = st.columns(2)
+                    tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
+                    sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
+                    tp_val = r.get('TP_Harga') or r.get('TP_Range', '?')
+                    tp_display = str(tp_val) if str(tp_val).startswith('Rp') else f"Rp {tp_val}"
+                    sl_val = r.get('SL_Harga', '?')
+                    sl_display = str(sl_val) if str(sl_val).startswith('Rp') else f"Rp {sl_val}"
+                    with c1:
+                        st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label><div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{tp_display}</div></div>""", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"""<div style="margin-top: 0px;"><label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label><div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div></div>""", unsafe_allow_html=True)
+                
+                    # Likuiditas
+                    st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
+                
+                    # Entry Zone (bila ada)
+                    entry_zone_val = r.get('Entry_Zone', '?')
+                    if entry_zone_val and entry_zone_val != '?':
+                        st.markdown(f"""<div style="margin-top: 8px;">
+                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">🎯 Entry Zone</label>
+                            <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{entry_zone_val}</div>
+                        </div>""", unsafe_allow_html=True)
+                
+                    # Indikator tambahan
+                    ind1, ind2, ind3, ind4 = st.columns(4)
+                    ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
+                    ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
+                    ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
+                    ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
+                    b1, b2 = st.columns(2)
+                    b1.metric("Beta", r.get('Beta','?'))
+                    b2.metric("Momentum (5D)", r.get('Momentum','?'))
+                    st.caption(f"Regime: **{r.get('Rezim','?')}**")
+                    ai = r.get("AI_Insight", "").strip()
+                    status_pos = r.get('Status_Posisi', '')
+                    if status_pos == 'Sudah Beli':
+                        st.caption("🟢 Saat analisis: **Sudah memiliki posisi**")
+    
+                    # ---- Fitur Catat Actual ----
+                    waktu_key = r.get('Waktu','')
+                    saham_key = r.get('Saham','')
+                    gaya_key = r.get('Gaya', 'SW')
+                    mode_actual = "swing" if gaya_key == "SW" else "daytrade"
+                    actual_key = (waktu_key, saham_key, mode_actual)
+                    actual_data = st.session_state.riwayat_actual.get(actual_key) or st.session_state.riwayat_actual.get((waktu_key, saham_key))
+    
+                    if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
+                        st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
+                        if actual_data.get('Entry_Miss') == 'Yes':
+                            st.caption("⚠️ Entry Tidak Tersentuh")
+                        if actual_data.get('Outcome'):
+                            warna_outcome = {
+                                'Win': '🟢',
+                                'Loss': '🔴',
+                                'Not Touched': '⚪'
+                            }.get(actual_data['Outcome'], '')
+                            st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
+                    else:
+                        btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                        form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                        show_key = f"show_form_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                        hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+
+                        col_btn1, col_btn2 = st.columns([1, 1])
+                        with col_btn1:
+                            if st.button("📝 Catat Hasil", key=btn_key):
+                                st.session_state[show_key] = True
+                        with col_btn2:
+                            if st.button("🗑️ Hapus", key=hapus_key):
+                                hapus_riwayat_item(waktu_key, saham_key, gaya=gaya_key)
+                                st.rerun()
+
+                        if st.session_state.get(show_key, False):
+                            with st.form(key=form_key):
+                                actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
+                                actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
+                                actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
+
+                                entry_miss = st.checkbox(
+                                    "🚫 Entry Tidak Tersentuh",
+                                    value=False,
+                                    help="Centang jika harga tidak pernah menyentuh zona entry (meskipun TP/ SL tersentuh)."
+                                )
+
+                                if entry_miss:
+                                    outcome = "Not Touched"
+                                    st.info("ℹ️ Entry tidak tersentuh → outcome otomatis **Not Touched**.")
+                                else:
+                                    outcome = st.selectbox(
+                                        "Outcome",
+                                        options=["", "Win", "Loss", "Not Touched"],
+                                        format_func=lambda x: "Pilih Outcome" if x == "" else x
+                                    )
+
+                                submitted = st.form_submit_button("Simpan", key=f"submit_{form_key}")
+                                if submitted:
+                                    if not entry_miss and outcome == "":
+                                        st.error("Pilih Outcome terlebih dahulu.")
+                                    else:
+                                        data = {
+                                            'Actual_High': actual_high.strip(),
+                                            'Actual_Low': actual_low.strip(),
+                                            'Actual_Close': actual_close.strip(),
+                                            'Outcome': outcome,
+                                            'Entry_Miss': 'Yes' if entry_miss else ''
+                                        }
+                                        simpan_riwayat_actual(waktu_key, saham_key, data, mode=mode_actual)
+                                        st.success("Data actual tersimpan!")
+                                        st.session_state[show_key] = False
+                                        st.rerun()
+                    if ai:
+                        st.caption(f"💡 {ai[:150]}")
     
             st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat" +
                       (f" (hasil pencarian '{search_query}')" if search_query else ""))
         else:
             if search_query:
-                st.caption(f"❌ Tidak ada riwayat yang cocok dengan '{search_query}'.")
+                st.caption(f"❌ Tidak ada riwayat mecocok dengan '{search_query}'.")
             else:
                 st.caption("Belum ada riwayat.")
     
