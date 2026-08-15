@@ -335,24 +335,32 @@ def muat_riwayat_actual():
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
         for row in records:
-            key = (row.get('Waktu',''), row.get('Saham',''))
-            if key[0] and key[1]:
-                data[key] = {
-                    'Actual_High': row.get('Actual_High', ''),
-                    'Actual_Low': row.get('Actual_Low', ''),
-                    'Actual_Close': row.get('Actual_Close', ''),
-                    'Outcome': row.get('Outcome', ''),
-                    'Entry_Miss': row.get('Entry_Miss', '')
-                }
+            mode = row.get('Mode') or 'swing'
+            waktu = str(row.get('Waktu', ''))
+            saham = str(row.get('Saham', ''))
+            val = {
+                'Actual_High': row.get('Actual_High', ''),
+                'Actual_Low': row.get('Actual_Low', ''),
+                'Actual_Close': row.get('Actual_Close', ''),
+                'Outcome': row.get('Outcome', ''),
+                'Entry_Miss': row.get('Entry_Miss', ''),
+                'Mode': mode
+            }
+            if waktu and saham:
+                data[(waktu, saham, mode)] = val
+                data[(waktu, saham)] = val
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
 
-def hapus_riwayat_item(waktu, saham):
+def hapus_riwayat_item(waktu, saham, gaya=None):
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
+        if gaya:
+            filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham and r.get('Gaya') == gaya)]
+        else:
+            filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
         filtered = filtered[:50]
         sheet.clear()
         if filtered:
@@ -368,20 +376,28 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
-        headers = ['Waktu', 'Saham', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome', 'Entry_Miss']
+        headers = ['Waktu', 'Saham', 'Mode', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome', 'Entry_Miss']
+        
+        # Pastikan kolom Mode ada di header sheet jika belum ada
+        if records:
+            existing_headers = list(records[0].keys())
+            if 'Mode' not in existing_headers:
+                sheet.insert_row(headers, 1)
+
         row_index = None
         for i, row in enumerate(records):
-            if row.get('Waktu') == waktu and row.get('Saham') == saham:
+            r_mode = row.get('Mode') or 'swing'
+            if row.get('Waktu') == waktu and row.get('Saham') == saham and r_mode == mode:
                 row_index = i + 2
                 break
-        new_row = [waktu, saham,
+        new_row = [waktu, saham, mode,
                    actual_data.get('Actual_High', ''),
                    actual_data.get('Actual_Low', ''),
                    actual_data.get('Actual_Close', ''),
                    actual_data.get('Outcome', ''),
                    actual_data.get('Entry_Miss', '')]
         if row_index:
-            sheet.update(f'A{row_index}:G{row_index}', [new_row], value_input_option='RAW')
+            sheet.update(f'A{row_index}:H{row_index}', [new_row], value_input_option='RAW')
         else:
             if not records:
                 sheet.insert_row(headers, 1)
@@ -866,9 +882,16 @@ with st.sidebar:
                         # Fitur Catat Actual (ringkas, tanpa expander detail)
                         waktu_key = r.get('Waktu','')
                         saham_key = r.get('Saham','')
-                        mode_actual = "swing" if r.get('Gaya') == "SW" else "daytrade"
-                        actual_key = (waktu_key, saham_key)
-                        actual_data = st.session_state.riwayat_actual.get(actual_key, None)
+                        gaya_key = r.get('Gaya', 'SW')
+                        mode_actual = "swing" if gaya_key == "SW" else "daytrade"
+                        actual_key = (waktu_key, saham_key, mode_actual)
+                        actual_data = st.session_state.riwayat_actual.get(actual_key) or st.session_state.riwayat_actual.get((waktu_key, saham_key))
+                        
+                        btn_key = f"btn_{waktu_key}_{saham_key}_{gaya_key}"
+                        del_key = f"del_{waktu_key}_{saham_key}_{gaya_key}"
+                        show_key = f"show_{waktu_key}_{saham_key}_{gaya_key}"
+                        form_key = f"form_{waktu_key}_{saham_key}_{gaya_key}"
+
                         if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
                             st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
                             if actual_data.get('Entry_Miss') == 'Yes':
@@ -879,14 +902,14 @@ with st.sidebar:
                         else:
                             col_btn1, col_btn2 = st.columns([1, 1])
                             with col_btn1:
-                                if st.button("📝 Catat Hasil", key=f"btn_{waktu_key}_{saham_key}"):
-                                    st.session_state[f"show_{waktu_key}_{saham_key}"] = True
+                                if st.button("📝 Catat Hasil", key=btn_key):
+                                    st.session_state[show_key] = True
                             with col_btn2:
-                                if st.button("🗑️ Hapus", key=f"del_{waktu_key}_{saham_key}"):
-                                    hapus_riwayat_item(waktu_key, saham_key)
+                                if st.button("🗑️ Hapus", key=del_key):
+                                    hapus_riwayat_item(waktu_key, saham_key, gaya=gaya_key)
                                     st.rerun()
-                            if st.session_state.get(f"show_{waktu_key}_{saham_key}", False):
-                                with st.form(key=f"form_{waktu_key}_{saham_key}"):
+                            if st.session_state.get(show_key, False):
+                                with st.form(key=form_key):
                                     actual_high = st.text_input("Actual High", placeholder="6250")
                                     actual_low = st.text_input("Actual Low (opsional)", placeholder="6100")
                                     actual_close = st.text_input("Actual Close (opsional)", placeholder="6200")
@@ -910,7 +933,7 @@ with st.sidebar:
                                             }
                                             simpan_riwayat_actual(waktu_key, saham_key, data, mode=mode_actual)
                                             st.success("Data actual tersimpan!")
-                                            st.session_state[f"show_{waktu_key}_{saham_key}"] = False
+                                            st.session_state[show_key] = False
                                             st.rerun()
                         st.divider()
             st.caption(f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} hari" +
@@ -1015,9 +1038,10 @@ with st.sidebar:
                     # ---- Fitur Catat Actual ----
                     waktu_key = r.get('Waktu','')
                     saham_key = r.get('Saham','')
-                    mode_actual = "swing" if r.get('Gaya') == "SW" else "daytrade"
-                    actual_key = (waktu_key, saham_key)
-                    actual_data = st.session_state.riwayat_actual.get(actual_key, None)
+                    gaya_key = r.get('Gaya', 'SW')
+                    mode_actual = "swing" if gaya_key == "SW" else "daytrade"
+                    actual_key = (waktu_key, saham_key, mode_actual)
+                    actual_data = st.session_state.riwayat_actual.get(actual_key) or st.session_state.riwayat_actual.get((waktu_key, saham_key))
     
                     if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
                         st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
@@ -1031,10 +1055,10 @@ with st.sidebar:
                             }.get(actual_data['Outcome'], '')
                             st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
                     else:
-                        btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}"
-                        form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}"
-                        show_key = f"show_form_{idx}_{waktu_key}_{saham_key}"
-                        hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}"
+                        btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                        form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                        show_key = f"show_form_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                        hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
 
                         col_btn1, col_btn2 = st.columns([1, 1])
                         with col_btn1:
@@ -1042,7 +1066,7 @@ with st.sidebar:
                                 st.session_state[show_key] = True
                         with col_btn2:
                             if st.button("🗑️ Hapus", key=hapus_key):
-                                hapus_riwayat_item(waktu_key, saham_key)
+                                hapus_riwayat_item(waktu_key, saham_key, gaya=gaya_key)
                                 st.rerun()
 
                         if st.session_state.get(show_key, False):
@@ -3119,8 +3143,9 @@ if run_btn:
         except Exception as e:
             st.warning(f"Gagal menyimpan prediksi {res['mode']}: {e}")
 
-    # ----- SIMPAN RIWAYAT UNTUK MODE TERBAIK -----
-    simpan_riwayat(res_terbaik['ringkasan'])
+    # ----- SIMPAN RIWAYAT UNTUK KEDUA MODE (SWING & DAYTRADE) -----
+    simpan_riwayat(res_swing['ringkasan'])
+    simpan_riwayat(res_day['ringkasan'])
 
     st.stop()
 # ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
