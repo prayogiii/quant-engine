@@ -42,7 +42,12 @@ try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
-
+def safe_float(value, default=0.0):
+    """Konversi aman ke float, kembalikan default jika gagal."""
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
@@ -406,7 +411,7 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
         if actual_close_str:
             try:
                 actual_close = float(str(actual_close_str).replace(",", ""))
-                last_close = float(last_pred['close_price'])
+                last_close = safe_float(last_pred.get('close_price'), 0.0)
                 if last_close > 0:
                     actual_return = (actual_close - last_close) / last_close
                     actual_return = max(-1.0, min(1.0, actual_return))
@@ -419,9 +424,9 @@ def integrate_actual_to_v12(waktu, saham, actual_data):
         entry_low = last_pred.get('entry_low')
         entry_high = last_pred.get('entry_high')
         if entry_low is not None and entry_high is not None:
-            try:
-                entry_low_f = float(entry_low)
-                entry_high_f = float(entry_high)
+            entry_low_f = safe_float(entry_low, None)
+            entry_high_f = safe_float(entry_high, None)
+            if entry_low_f is not None and entry_high_f is not None and entry_low_f < entry_high_f:
             except:
                 entry_low_f = None
                 entry_high_f = None
@@ -2634,13 +2639,13 @@ if run_btn:
 
         last_pred = load_v12_predictions(ticker_raw)
         if last_pred:
-            last_close = float(last_pred['close_price'])
+            last_close = safe_float(last_pred.get('close_price'), 0.0)
             if last_close > 0:
                 last_signals = {}
                 for k in FACTOR_KEYS:
                     key = f'sig_{k}'
                     if key in last_pred:
-                        last_signals[k] = float(last_pred[key])
+                        last_signals[k] = safe_float(last_pred[key], 0.0)
                     else:
                         last_signals[k] = 0.0
 
