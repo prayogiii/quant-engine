@@ -1034,22 +1034,29 @@ with st.sidebar:
                         btn_key = f"btn_actual_{idx}_{waktu_key}_{saham_key}"
                         form_key = f"form_actual_{idx}_{waktu_key}_{saham_key}"
                         show_key = f"show_form_{idx}_{waktu_key}_{saham_key}"
-    
-                        if st.button("📝 Catat Hasil", key=btn_key):
-                            st.session_state[show_key] = True
-    
+                        hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}"
+
+                        col_btn1, col_btn2 = st.columns([1, 1])
+                        with col_btn1:
+                            if st.button("📝 Catat Hasil", key=btn_key):
+                                st.session_state[show_key] = True
+                        with col_btn2:
+                            if st.button("🗑️ Hapus", key=hapus_key):
+                                hapus_riwayat_item(waktu_key, saham_key)
+                                st.rerun()
+
                         if st.session_state.get(show_key, False):
                             with st.form(key=form_key):
                                 actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
                                 actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
                                 actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
-    
+
                                 entry_miss = st.checkbox(
                                     "🚫 Entry Tidak Tersentuh",
                                     value=False,
                                     help="Centang jika harga tidak pernah menyentuh zona entry (meskipun TP/ SL tersentuh)."
                                 )
-    
+
                                 if entry_miss:
                                     outcome = "Not Touched"
                                     st.info("ℹ️ Entry tidak tersentuh → outcome otomatis **Not Touched**.")
@@ -1059,7 +1066,7 @@ with st.sidebar:
                                         options=["", "Win", "Loss", "Not Touched"],
                                         format_func=lambda x: "Pilih Outcome" if x == "" else x
                                     )
-    
+
                                 submitted = st.form_submit_button("Simpan", key=f"submit_{form_key}")
                                 if submitted:
                                     if not entry_miss and outcome == "":
@@ -1076,11 +1083,6 @@ with st.sidebar:
                                         st.success("Data actual tersimpan!")
                                         st.session_state[show_key] = False
                                         st.rerun()
-                        hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}"
-                        if st.button("🗑️ Hapus Riwayat Ini", key=hapus_key):
-                            hapus_riwayat_item(waktu_key, saham_key)
-                            st.success("Riwayat dihapus.")
-                            st.rerun()
                     if ai:
                         st.caption(f"💡 {ai[:150]}")
     
