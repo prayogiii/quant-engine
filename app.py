@@ -305,10 +305,12 @@ def bersihkan_untuk_json(obj):
 def simpan_riwayat(ringkasan):
     try:
         sheet = get_gsheet().worksheet("riwayat")
-        ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in ringkasan.items()}
+        items_to_add = ringkasan if isinstance(ringkasan, list) else [ringkasan]
         records = sheet.get_all_records()
         data = list(records)
-        data.insert(0, ringkasan_bersih)
+        for item in reversed(items_to_add):
+            ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
+            data.insert(0, ringkasan_bersih)
         data = data[:50]
         if data:
             headers = list(data[0].keys())
@@ -3144,8 +3146,7 @@ if run_btn:
             st.warning(f"Gagal menyimpan prediksi {res['mode']}: {e}")
 
     # ----- SIMPAN RIWAYAT UNTUK KEDUA MODE (SWING & DAYTRADE) -----
-    simpan_riwayat(res_swing['ringkasan'])
-    simpan_riwayat(res_day['ringkasan'])
+    simpan_riwayat([res_swing['ringkasan'], res_day['ringkasan']])
 
     st.stop()
 # ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
