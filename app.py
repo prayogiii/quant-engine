@@ -139,24 +139,25 @@ def save_v12_memory(mem):
     except Exception as e:
         st.error(f"Gagal menyimpan V12 memory: {e}")
 
-def load_v12_predictions(ticker):
+def load_v12_predictions(ticker, mode="swing"):
     try:
         sheet = get_gsheet().worksheet("v12_predictions")
         records = sheet.get_all_records()
         for row in records:
-            if row.get('ticker') == ticker:
+            if row.get('ticker') == ticker and row.get('mode') == mode:
                 return row
         return None
     except Exception as e:
         st.error(f"Gagal memuat prediksi: {e}")
         return None
 
-def save_v12_prediction(ticker, close_price, factor_signals, entry_low=None, entry_high=None):
+def save_v12_prediction(ticker, close_price, factor_signals, entry_low=None, entry_high=None, mode="swing"):
     try:
         sheet = get_gsheet()
         ws = sheet.worksheet("v12_predictions")
         new_row = {
             'ticker': ticker,
+            'mode': mode,               # <-- tambah ini
             'close_price': close_price,
             'timestamp': datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"),
             'entry_low': entry_low,
@@ -165,34 +166,27 @@ def save_v12_prediction(ticker, close_price, factor_signals, entry_low=None, ent
         for k in FACTOR_KEYS:
             new_row[f'sig_{k}'] = factor_signals.get(k, 0.0)
 
-        headers = list(new_row.keys())   # sekarang 9 kolom
-                # ---------- Pastikan jumlah kolom cukup ----------
+        headers = list(new_row.keys())   # sekarang 10 kolom (termasuk mode)
+        # ---------- Pastikan jumlah kolom cukup ----------
         if ws.col_count < len(headers):
             ws.add_cols(len(headers) - ws.col_count)
 
-        # Selalu tulis ulang header sesuai headers terbaru
-        last_col = chr(64 + len(headers))  # contoh: 11 kolom -> 'K'
+        # Tulis ulang header
+        last_col = chr(64 + len(headers))
         ws.update(f'A1:{last_col}1', [headers], value_input_option='RAW')
-        # -------------------------------------------------
 
         records = ws.get_all_records()
         row_index = None
         for i, row in enumerate(records):
-            if row.get('ticker') == ticker:
+            if row.get('ticker') == ticker and row.get('mode') == mode:
                 row_index = i + 2
                 break
 
         if row_index:
             values = [new_row[h] for h in headers]
-            # Tentukan huruf kolom terakhir (misal 9 kolom -> 'I')
-            last_col = chr(64 + len(headers))  # 65='A', 73='I'
+            last_col = chr(64 + len(headers))
             ws.update(f'A{row_index}:{last_col}{row_index}', [values], value_input_option='RAW')
         else:
-            if not records:
-                # pastikan header di baris 1 lengkap
-                existing_headers = ws.row_values(1)
-                if not existing_headers or len(existing_headers) < len(headers):
-                    ws.insert_row(headers, 1)
             values = [new_row[h] for h in headers]
             ws.append_row(values, value_input_option='RAW')
     except Exception as e:
@@ -1697,163 +1691,216 @@ def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
     if notes:
         return base + " " + " ".join(notes)
     return base
-# ==================== PROSES ANALISIS ====================
-if run_btn:
-    if not ticker_input:
-        st.warning("⚠️ Kode saham tidak boleh kosong!"); st.stop()
+# ==================== FUNGSI ANALISIS UTAMA ====================
+def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_daytrade):
+    """
+    Menjalankan analisis lengkap untuk satu mode (swing/daytrade).
+    Mengembalikan dictionary hasil atau None jika data tidak cukup.
+    """
+    # ------------------------------------------------------------------
+    # 1. AMBIL DATA
+    # ------------------------------------------------------------------
+    bars_per_day_map = {"5m": 54, "15m": 18, "30m": 9, "60m": 5}
 
-    with st.spinner("🤖 Mengunduh data dan memproses analitika kuantitatif..."):
-        is_daytrade = "Day Trade" in st.session_state.trading_style
-        bars_per_day_map = {"5m": 54, "15m": 18, "30m": 9, "60m": 5}
-        
-        if is_daytrade:
-            actual_interval = "5m"
+    if is_daytrade:
+        actual_interval = "5m"
+        df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
+        if df.empty or len(df) < 20:
+            actual_interval = "15m"
             df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
-            if df.empty or len(df) < 20:
-                st.warning("Data 5 menit tidak lengkap, mencoba interval 15 menit...")
-                actual_interval = "15m"
-                df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
-            if df.empty or len(df) < 20:
-                st.warning("Data 15 menit tidak lengkap, mencoba interval 30 menit...")
-                actual_interval = "30m"
-                df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
-            if df.empty or len(df) < 20:
-                st.warning("Data 30 menit tidak lengkap, menggunakan interval 60 menit...")
-                actual_interval = "60m"
-                df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
-            df_ihsg = load_ihsg_data(period="5d", interval="5m")
-            df_daily = load_stock_data(ticker_input, period="1mo", interval="1d")
+        if df.empty or len(df) < 20:
+            actual_interval = "30m"
+            df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
+        if df.empty or len(df) < 20:
+            actual_interval = "60m"
+            df = load_stock_data(ticker_input, period="5d", interval=actual_interval)
+        df_ihsg = load_ihsg_data(period="5d", interval="5m")
+        df_daily = load_stock_data(ticker_input, period="1mo", interval="1d")
+    else:
+        actual_interval = "1d"
+        df = load_stock_data(ticker_input, period="2y", interval="1d")
+        df_ihsg = load_ihsg_data(period="2y", interval="1d")
+        df_daily = df
+
+    if df.empty:
+        return None
+
+    # ------------------------------------------------------------------
+    # 2. PERHITUNGAN DASAR
+    # ------------------------------------------------------------------
+    harga_terakhir_asli = float(df['Close'].iloc[-1])
+    harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
+
+    floating_pl_pct = None
+    if sudah_beli and harga_beli_float and harga_beli_float > 0:
+        floating_pl_pct = (harga_terakhir - harga_beli_float) / harga_beli_float * 100
+
+    returns = df['Close'].pct_change().dropna()
+    if len(returns) < 20:
+        return None
+
+    # ------------------------------------------------------------------
+    # 3. INDIKATOR TEKNIKAL
+    # ------------------------------------------------------------------
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    df['ADX'] = compute_adx_series(df)
+
+    if is_daytrade:
+        df['Mom5D'] = df['Close'].pct_change(10) * 100   # 10 bar intraday
+    else:
+        df['Mom5D'] = df['Close'].pct_change(5) * 100    # 5 hari
+
+    df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
+    df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
+
+    # OFI
+    df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
+    df['Cumulative_OFI'] = df['Delta'].cumsum()
+    df['OFI_raw'] = df['Delta'] / df['Volume'].rolling(20).mean().fillna(1)
+
+    # VWAP hanya untuk daytrade
+    if is_daytrade:
+        df['CumVol'] = df['Volume'].cumsum()
+        df['CumPV'] = (df['Close'] * df['Volume']).cumsum()
+        df['VWAP'] = df['CumPV'] / df['CumVol']
+        vwap_now = df['VWAP'].iloc[-1]
+        vwap_bias = "Di Atas VWAP (Bullish)" if harga_terakhir > vwap_now else "Di Bawah VWAP (Bearish)"
+    else:
+        vwap_now = None
+        vwap_bias = "N/A"
+
+    # ------------------------------------------------------------------
+    # 4. FUNDAMENTAL
+    # ------------------------------------------------------------------
+    try:
+        ticker_info = yf.Ticker(ticker_input).info
+    except:
+        ticker_info = {}
+    mc = ticker_info.get('marketCap')
+    per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
+    pbv = ticker_info.get('priceToBook')
+    roe = ticker_info.get('returnOnEquity')
+    de = ticker_info.get('debtToEquity')
+
+    # ------------------------------------------------------------------
+    # 5. BERITA & SENTIMEN
+    # ------------------------------------------------------------------
+    news_pool = []
+    translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
+    translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
+
+    rss, _ = get_google_news_rss(f"{ticker_raw} saham")
+    if rss:
+        news_pool.extend(rss)
+    ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
+    if ysearch:
+        news_pool.extend(ysearch)
+    ipot, _ = get_ipot_news(f"{ticker_raw}")
+    if ipot:
+        news_pool.extend(ipot)
+
+    news_pool = filter_relevant(news_pool, ticker_raw)
+    seen = set()
+    unique_news = []
+    for n in news_pool:
+        if n['title'] not in seen:
+            seen.add(n['title'])
+            unique_news.append(n)
+        if len(unique_news) >= 5:
+            break
+
+    avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
+    headlines = [n['title'] for n in unique_news]
+    sources = [n['source'] for n in unique_news]
+    translated = []
+    for n in unique_news:
+        if TRANSLATOR_AVAILABLE and translator_id:
+            try:
+                translated.append(translator_id.translate(n['title']))
+            except:
+                translated.append("")
         else:
-            df = load_stock_data(ticker_input, period="2y", interval="1d")
-            df_ihsg = load_ihsg_data(period="2y", interval="1d")
-            df_daily = df
-        
-        if df.empty: st.error("❌ Data tidak ditemukan untuk ticker tersebut."); st.stop()
+            translated.append("")
+    sentimen_status = "Positif 🟢" if avg_sentiment >= 0.05 else ("Negatif 🔴" if avg_sentiment <= -0.05 else "Netral ⚪")
 
-        harga_terakhir_asli = float(df['Close'].iloc[-1])
-        harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
-        # --- Hitung floating P/L jika user sudah beli ---
-        floating_pl_pct = None
-        if sudah_beli and harga_beli_float and harga_beli_float > 0:
-            floating_pl_pct = (harga_terakhir - harga_beli_float) / harga_beli_float * 100
-        returns = df['Close'].pct_change().dropna()
-        if len(returns)<20: st.error("❌ Data historis kurang untuk analisa kuantitatif."); st.stop()
+    # ------------------------------------------------------------------
+    # 6. THRESHOLD & DISTRIBUSI
+    # ------------------------------------------------------------------
+    if is_daytrade:
+        n_recent = min(200, len(df))
+        df_thresh = df.iloc[-n_recent:]
+    else:
+        split_idx = max(126, len(df) - 126)
+        df_thresh = df.iloc[:split_idx]
 
-        # ============ INDIKATOR ============
-        df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-        df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-        df['ADX'] = compute_adx_series(df)
-        if is_daytrade:
-            df['Mom5D'] = df['Close'].pct_change(10) * 100   # 10 bar = 50 menit (lebih smooth)
-        else:
-            df['Mom5D'] = df['Close'].pct_change(5) * 100    # 5 hari untuk swing
-        df['ZScore'] = (df['Close']-df['Close'].rolling(20).mean())/df['Close'].rolling(20).std()
-        df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0   
-        # ============ OFI (Order Flow Imbalance) ============
-        df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
-        df['Cumulative_OFI'] = df['Delta'].cumsum()
-        df['OFI_raw'] = df['Delta'] / df['Volume'].rolling(20).mean().fillna(1)
-        # ============ VWAP (Intraday Fair Value) ============
-        if is_daytrade:
-            df['CumVol'] = df['Volume'].cumsum()
-            df['CumPV'] = (df['Close'] * df['Volume']).cumsum()
-            df['VWAP'] = df['CumPV'] / df['CumVol']
-            vwap_now = df['VWAP'].iloc[-1]
-            vwap_bias = "Di Atas VWAP (Bullish)" if harga_terakhir > vwap_now else "Di Bawah VWAP (Bearish)"
-        else:
-            vwap_now = None
-            vwap_bias = "N/A"
-        # ============ FUNDAMENTAL ============
-        try: ticker_info = yf.Ticker(ticker_input).info
-        except: ticker_info = {}
-        mc = ticker_info.get('marketCap')
-        per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
-        pbv = ticker_info.get('priceToBook')
-        roe = ticker_info.get('returnOnEquity')
-        de = ticker_info.get('debtToEquity')
-         # ============ BERITA & SENTIMEN ============
-        news_pool = []
-        translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
-        translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
-        rss, _ = get_google_news_rss(f"{ticker_raw} saham")
-        if rss: news_pool.extend(rss)
-        ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
-        if ysearch: news_pool.extend(ysearch)
-        # --- Ipotnews ---
-        ipot, _ = get_ipot_news(f"{ticker_raw}")
-        if ipot: news_pool.extend(ipot)
-        news_pool = filter_relevant(news_pool, ticker_raw)
-        seen = set(); unique_news = []
-        for n in news_pool:
-            if n['title'] not in seen: seen.add(n['title']); unique_news.append(n)
-            if len(unique_news)>=5: break
-        avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
-        headlines = [n['title'] for n in unique_news]
-        sources = [n['source'] for n in unique_news]
-        translated = []
-        for n in unique_news:
-            if TRANSLATOR_AVAILABLE and translator_id:
-                try: translated.append(translator_id.translate(n['title']))
-                except: translated.append("")
-            else: translated.append("")
-        sentimen_status = "Positif 🟢" if avg_sentiment>=0.05 else ("Negatif 🔴" if avg_sentiment<=-0.05 else "Netral ⚪")
+    returns_thresh = df_thresh['Close'].pct_change().dropna()
+    adx_threshold = np.percentile(df_thresh['ADX'].dropna(), 75) if not df_thresh['ADX'].dropna().empty else 20
+    z_oversold_th = -1.5
+    mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(), 50) if not df_thresh['Mom5D'].dropna().empty else 0.0
 
-        # ============ THRESHOLD & DISTRIBUTION (adaptive, trailing window) ============
-        if is_daytrade:
-            # gunakan 200 bar terakhir (≈ 1–2 hari) agar threshold mengikuti kondisi sesi terbaru
-            n_recent = min(200, len(df))
-            df_thresh = df.iloc[-n_recent:]
-        else:
-            split_idx = max(126, len(df)-126)
-            df_thresh = df.iloc[:split_idx]
-        
-        returns_thresh = df_thresh['Close'].pct_change().dropna()
-        adx_threshold = np.percentile(df_thresh['ADX'].dropna(), 75) if not df_thresh['ADX'].dropna().empty else 20
-        z_oversold_th = -1.5
-        mom_median_th = np.percentile(df_thresh['Mom5D'].dropna(), 50) if not df_thresh['Mom5D'].dropna().empty else 0.0
+    def t_loglike(p, d):
+        if p[0] <= 2 or p[2] <= 0:
+            return np.inf
+        return -np.sum(student_t.logpdf(d, p[0], p[1], p[2]))
 
-        def t_loglike(p,d):
-            if p[0]<=2 or p[2]<=0: return np.inf
-            return -np.sum(student_t.logpdf(d,p[0],p[1],p[2]))
-        res = minimize(t_loglike, [5, returns_thresh.mean(), returns_thresh.std()],
-                       bounds=[(2.1,100),(-0.1,0.1),(1e-6,None)], args=(returns_thresh,), method='L-BFGS-B')
-        df_est, t_loc, t_scale = res.x if res.success else (5, returns_thresh.mean(), returns_thresh.std())
+    res_opt = minimize(
+        t_loglike,
+        [5, returns_thresh.mean(), returns_thresh.std()],
+        bounds=[(2.1, 100), (-0.1, 0.1), (1e-6, None)],
+        args=(returns_thresh,),
+        method='L-BFGS-B'
+    )
+    df_est, t_loc, t_scale = res_opt.x if res_opt.success else (5, returns_thresh.mean(), returns_thresh.std())
 
-        # ============ REGIME ============
-        def get_regime_row(row):
-            h,e20,e50,a,z,m = row['Close'],row['EMA20'],row['EMA50'],row['ADX'],row['ZScore'],row['Mom5D']
-            if a>adx_threshold:
-                if h>e20 and e20>e50:
-                    return ("Strong Bullish 🚀","RISK-ON 🔥") if (m>mom_median_th or z>z_oversold_th) else ("Bullish 📈","RISK-ON 🔥")
-                elif h<e20 and e20<e50:
-                    return ("Panic Sell 🚨","RISK-OFF 🛑") if (m<mom_median_th or z<z_oversold_th) else ("Bearish 🔻","RISK-OFF 🛑")
-                elif h>e20 and e20<e50: return ("Early Recovery 🔄","TRANSISI ⚠️")
-                elif h<e20 and e20>e50: return ("Distribution 📉","TRANSISI ⚠️")
-                else: return ("Konsolidasi Tren ↔️","NEUTRAL ⚖️")
+    # ------------------------------------------------------------------
+    # 7. REGIME
+    # ------------------------------------------------------------------
+    def get_regime_row(row):
+        h, e20, e50, a, z, m = row['Close'], row['EMA20'], row['EMA50'], row['ADX'], row['ZScore'], row['Mom5D']
+        if a > adx_threshold:
+            if h > e20 and e20 > e50:
+                return ("Strong Bullish 🚀", "RISK-ON 🔥") if (m > mom_median_th or z > z_oversold_th) else ("Bullish 📈", "RISK-ON 🔥")
+            elif h < e20 and e20 < e50:
+                return ("Panic Sell 🚨", "RISK-OFF 🛑") if (m < mom_median_th or z < z_oversold_th) else ("Bearish 🔻", "RISK-OFF 🛑")
+            elif h > e20 and e20 < e50:
+                return ("Early Recovery 🔄", "TRANSISI ⚠️")
+            elif h < e20 and e20 > e50:
+                return ("Distribution 📉", "TRANSISI ⚠️")
             else:
-                if h>e20 and e20>e50: return ("Bullish Accumulation 🏗️","NEUTRAL ⚖️")
-                elif h<e20 and e20<e50: return ("Bearish Accumulation 🧊","NEUTRAL ⚖️")
-                elif h>e20 and e20<e50: return ("Sideways Bias Naik ↗️","NEUTRAL ⚖️")
-                elif h<e20 and e20>e50: return ("Sideways Bias Turun ↘️","NEUTRAL ⚖️")
-                else: return ("Sideways Normal ↔️","NEUTRAL ⚖️")
-        regime, ihsg_cond = get_regime_row(df.iloc[-1])
-        adx = df['ADX'].iloc[-1]
+                return ("Konsolidasi Tren ↔️", "NEUTRAL ⚖️")
+        else:
+            if h > e20 and e20 > e50:
+                return ("Bullish Accumulation 🏗️", "NEUTRAL ⚖️")
+            elif h < e20 and e20 < e50:
+                return ("Bearish Accumulation 🧊", "NEUTRAL ⚖️")
+            elif h > e20 and e20 < e50:
+                return ("Sideways Bias Naik ↗️", "NEUTRAL ⚖️")
+            elif h < e20 and e20 > e50:
+                return ("Sideways Bias Turun ↘️", "NEUTRAL ⚖️")
+            else:
+                return ("Sideways Normal ↔️", "NEUTRAL ⚖️")
 
-        # ============ BETA ============
-        # Inisialisasi default
-        beta_ihsg = 1.0
-        ihsg_ret = pd.Series(dtype=float)  # series kosong sebagai fallback
-        
-        try:
-            if not df_ihsg.empty:
-                ihsg_ret = df_ihsg['Close'].pct_change().dropna()
-                common = returns.index.intersection(ihsg_ret.index)
-                if len(common) > 20:
-                    beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0,1] / np.var(ihsg_ret.loc[common])
-        except:
-            pass
+    regime, ihsg_cond = get_regime_row(df.iloc[-1])
+    adx = df['ADX'].iloc[-1]
 
-    # ============ ATR & RSI ============
+    # ------------------------------------------------------------------
+    # 8. BETA
+    # ------------------------------------------------------------------
+    beta_ihsg = 1.0
+    ihsg_ret = pd.Series(dtype=float)
+    try:
+        if not df_ihsg.empty:
+            ihsg_ret = df_ihsg['Close'].pct_change().dropna()
+            common = returns.index.intersection(ihsg_ret.index)
+            if len(common) > 20:
+                beta_ihsg = np.cov(returns.loc[common], ihsg_ret.loc[common])[0, 1] / np.var(ihsg_ret.loc[common])
+    except:
+        pass
+
+    # ------------------------------------------------------------------
+    # 9. ATR & RSI
+    # ------------------------------------------------------------------
     df['TR'] = pd.concat([
         df['High'] - df['Low'],
         (df['High'] - df['Close'].shift()).abs(),
@@ -1861,7 +1908,7 @@ if run_btn:
     ], axis=1).max(axis=1)
     atr14_val = df['TR'].rolling(14).mean().iloc[-1]
     atr_pct = (atr14_val / harga_terakhir_asli) * 100
-    
+
     now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
     if is_daytrade:
         bars_remaining = hitung_bars_remaining(now_jkt, actual_interval, bars_per_day_map)
@@ -1873,10 +1920,14 @@ if run_btn:
     loss = -delta.where(delta < 0, 0.0)
     avg_gain = gain.rolling(14).mean().iloc[-1]
     avg_loss = loss.rolling(14).mean().iloc[-1]
-    if avg_loss is None or avg_loss == 0: rsi14 = 100.0
-    else: rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
-    
-    # ============ PIVOT (ADAPTIF) ============
+    if avg_loss is None or avg_loss == 0:
+        rsi14 = 100.0
+    else:
+        rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
+
+    # ------------------------------------------------------------------
+    # 10. PIVOT
+    # ------------------------------------------------------------------
     if is_daytrade:
         today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
         if not df_daily.empty:
@@ -1932,7 +1983,9 @@ if run_btn:
             r1 = 2 * pp - lo; s1 = 2 * pp - hi
             r2 = pp + (hi - lo); s2 = pp - (hi - lo)
 
-    # ============ V12 ADAPTIVE SIGNAL ============
+    # ------------------------------------------------------------------
+    # 11. V12 ADAPTIVE SIGNAL
+    # ------------------------------------------------------------------
     adaptive_w = get_adaptive_weights(ticker_raw, regime)
     coppock_val, coppock_prev = coppock_curve(df['Close'].values)
     factor_signals = {
@@ -1945,7 +1998,7 @@ if run_btn:
     }
     norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
     total_score = sum(norm_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
-    
+
     if total_score > 0.3:
         signal = "🔥 STRONG BUY"
     elif total_score > 0.1:
@@ -1955,42 +2008,44 @@ if run_btn:
     else:
         signal = "🚨 AVOID"
 
-    # ============ ENTRY ZONE (ADAPTIF) ============
+    # ------------------------------------------------------------------
+    # 12. ENTRY ZONE
+    # ------------------------------------------------------------------
     if s1 >= harga_terakhir * 0.98:
         entry_low = s1
     else:
-        entry_low = harga_terakhir * (1 - atr_pct/100)
+        entry_low = harga_terakhir * (1 - atr_pct / 100)
 
     if "STRONG BUY" in signal:
         entry_high = harga_terakhir
     else:
-        entry_high = harga_terakhir * (1 - 0.3 * atr_pct/100)
+        entry_high = harga_terakhir * (1 - 0.3 * atr_pct / 100)
 
     if entry_low > entry_high:
         entry_low, entry_high = entry_high, entry_low
 
     min_entry_width = 0.5 * atr14_val
     if (entry_high - entry_low) < min_entry_width:
-        entry_low  = max(0, entry_high - min_entry_width)
+        entry_low = max(0, entry_high - min_entry_width)
         entry_high = entry_low + min_entry_width
         entry_high = min(entry_high, harga_terakhir)
 
-    # ---- Belajar dari error entry sebelumnya ----
     mem = st.session_state.v12_memory.get(ticker_raw, {})
     entry_error = mem.get('entry_error_ema', 0.0)
     if entry_error > 0:
-        entry_low  += entry_error * 0.2
+        entry_low += entry_error * 0.2
         entry_high += entry_error * 0.2
 
-    # ---- Pengaman agar entry_high tidak melebihi harga close ----
     entry_high = min(entry_high, harga_terakhir)
-    entry_low  = min(entry_low, entry_high)   # pastikan low <= high
+    entry_low = min(entry_low, entry_high)
 
-    # ---- Bulatkan ke fraksi BEI ----
     entry_low_f = fraksi_bei(entry_low)
     entry_high_f = fraksi_bei(entry_high)
     entry_zone_f = f"Rp {entry_low_f:,.0f} - Rp {entry_high_f:,.0f}"
-    # ============ MULTIPLIER SL & TP ============
+
+    # ------------------------------------------------------------------
+    # 13. SL & TP
+    # ------------------------------------------------------------------
     sl_mult = 1.0
     if adx > 30 and 30 < rsi14 < 70:
         sl_mult = 0.75
@@ -1998,6 +2053,7 @@ if run_btn:
         sl_mult = 1.25
     if rsi14 > 70 or rsi14 < 30:
         sl_mult = 1.5
+
     tp_mult_low = 1.5
     tp_mult_high = 2.5
     if adx > 30 and 30 < rsi14 < 70:
@@ -2005,7 +2061,6 @@ if run_btn:
     elif adx < 20:
         tp_mult_low, tp_mult_high = 1.2, 1.8
 
-    # ============ STOP LOSS ============
     if is_daytrade:
         base_sl_dist = harga_terakhir * 0.04 * sl_mult
         min_ticks_dist = 2 * fraksi_step(entry_low)
@@ -2022,7 +2077,6 @@ if run_btn:
         sl_harga = fraksi_bei(harga_terakhir * 0.95)
     sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
 
-    # ============ TAKE PROFIT RANGE ============
     if r1 > harga_terakhir:
         tp_low = r1
     else:
@@ -2036,16 +2090,19 @@ if run_btn:
     tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
     tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
 
-    # ============ RRR ============
     risk = harga_terakhir - sl_harga
     reward = tp_low - harga_terakhir
     rrr = reward / risk if risk > 0 else 0
-    if rrr >= 2.0: rrr_status = "Sangat Baik (≥ 2.0) 🟢"
-    elif rrr >= 1.5: rrr_status = "Baik (1.5 - 2.0) 🟢"
-    elif rrr >= 1.0: rrr_status = "Cukup (1.0 - 1.5) 🟡"
-    else: rrr_status = "Buruk (< 1.0) 🔴"
+    if rrr >= 2.0:
+        rrr_status = "Sangat Baik (≥ 2.0) 🟢"
+    elif rrr >= 1.5:
+        rrr_status = "Baik (1.5 - 2.0) 🟢"
+    elif rrr >= 1.0:
+        rrr_status = "Cukup (1.0 - 1.5) 🟡"
+    else:
+        rrr_status = "Buruk (< 1.0) 🔴"
 
-    # Breakout (adaptif)
+    # Breakout
     if is_daytrade:
         bars_per_day = bars_per_day_map.get(actual_interval, 54)
         if len(df) >= bars_per_day:
@@ -2062,23 +2119,28 @@ if run_btn:
         breakout_label = "Breakout 20 Hari"
     breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
-    # ============ BACKTEST (ADAPTIF) ============
-    # Untuk backtest, gunakan sinyal lama dari generate_signals_vectorized agar konsisten
+    # ------------------------------------------------------------------
+    # 14. BACKTEST
+    # ------------------------------------------------------------------
     def generate_signals_vectorized(dataframe, mom_th):
         score = pd.Series(0, index=dataframe.index)
-        is_uptrend = (dataframe['Close']>dataframe['EMA20']) & (dataframe['EMA20']>dataframe['EMA50'])
-        score += is_uptrend.astype(int)*2
-        score += (dataframe['Mom5D']>mom_th).astype(int)
-        if 'Volume' in dataframe.columns: score += (dataframe['Volume']>dataframe['Vol_MA20']).astype(int)
+        is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
+        score += is_uptrend.astype(int) * 2
+        score += (dataframe['Mom5D'] > mom_th).astype(int)
+        if 'Volume' in dataframe.columns:
+            score += (dataframe['Volume'] > dataframe['Vol_MA20']).astype(int)
         sig = pd.Series("🚨 AVOID", index=dataframe.index)
-        sig[score==1] = "⏸️ HOLD / WAIT"; sig[score>=2] = "⚡ BUY (TACTICAL)"; sig[score>=3] = "🔥 STRONG BUY"
-        sig[(dataframe['ADX']<20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
-        sig[(dataframe['ZScore']<-1.5) & (dataframe['Close']<dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
+        sig[score == 1] = "⏸️ HOLD / WAIT"
+        sig[score >= 2] = "⚡ BUY (TACTICAL)"
+        sig[score >= 3] = "🔥 STRONG BUY"
+        sig[(dataframe['ADX'] < 20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
+        sig[(dataframe['ZScore'] < -1.5) & (dataframe['Close'] < dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
         return sig
+
     df['Signal'] = generate_signals_vectorized(df, mom_median_th)
 
     if is_daytrade:
-        backtest_window = min(200, len(df))   # lebih pendek, lebih relevan untuk intraday
+        backtest_window = min(200, len(df))
     else:
         backtest_window = 126
     df_back = df.iloc[-backtest_window:].copy()
@@ -2087,65 +2149,72 @@ if run_btn:
     for i in range(len(df_back)):
         curr_sig = df_back['Signal'].iloc[i]
         curr_close = float(df_back['Close'].iloc[i])
-        prev_close = float(df_back['Close'].iloc[i-1]) if i>0 else curr_close
+        prev_close = float(df_back['Close'].iloc[i-1]) if i > 0 else curr_close
         if in_position:
-            daily_returns.append((curr_close-prev_close)/prev_close if prev_close else 0)
-            if "AVOID" in curr_sig or i==len(df_back)-1:
-                trades.append((curr_close-entry_price)/entry_price); in_position=False
+            daily_returns.append((curr_close - prev_close) / prev_close if prev_close else 0)
+            if "AVOID" in curr_sig or i == len(df_back) - 1:
+                trades.append((curr_close - entry_price) / entry_price)
+                in_position = False
         else:
             daily_returns.append(0.0)
-            if "BUY" in curr_sig: in_position, entry_price = True, curr_close
+            if "BUY" in curr_sig:
+                in_position, entry_price = True, curr_close
+
     if trades:
-        win_bt = sum(1 for r in trades if r>0)/len(trades)
-        loss_trades = [r for r in trades if r<0]; profit_trades = [r for r in trades if r>0]
-        pf_bt = abs(sum(profit_trades)/sum(loss_trades)) if loss_trades else np.inf
+        win_bt = sum(1 for r in trades if r > 0) / len(trades)
+        loss_trades = [r for r in trades if r < 0]
+        profit_trades = [r for r in trades if r > 0]
+        pf_bt = abs(sum(profit_trades) / sum(loss_trades)) if loss_trades else np.inf
         avg_bt = np.mean(trades)
-        equity = np.cumprod([1+r for r in trades])
-        max_dd_bt = float(np.min(equity/np.maximum.accumulate(equity)-1)*100) if len(equity) else 0
+        equity = np.cumprod([1 + r for r in trades])
+        max_dd_bt = float(np.min(equity / np.maximum.accumulate(equity) - 1) * 100) if len(equity) else 0
         daily_ret = np.array(daily_returns)
         if is_daytrade:
             bars_per_day = bars_per_day_map.get(actual_interval, 54)
             annual_factor = np.sqrt(bars_per_day * 252)
         else:
             annual_factor = np.sqrt(252)
-        sharpe_bt = (daily_ret.mean()/daily_ret.std())*annual_factor if daily_ret.std() else 0
+        sharpe_bt = (daily_ret.mean() / daily_ret.std()) * annual_factor if daily_ret.std() else 0
         trades_bt = len(trades)
     else:
-        win_bt=pf_bt=avg_bt=max_dd_bt=sharpe_bt=trades_bt=0
+        win_bt = pf_bt = avg_bt = max_dd_bt = sharpe_bt = trades_bt = 0
 
-    if is_daytrade and trades_bt < 15:
-        st.warning(
-            f"⚠️ Backtest hanya menghasilkan **{trades_bt}** sinyal trading dalam {backtest_window} bar. "
-            "Jumlah ini terlalu sedikit untuk backtest yang andal di mode Day Trade. "
-            "Interpretasikan Win Rate, Sharpe, dan metrik lainnya dengan sangat hati‑hati."
-            )
-
-    # ============ KELLY ============
+    # ------------------------------------------------------------------
+    # 15. KELLY & DRAWDOWN
+    # ------------------------------------------------------------------
     roll_max_th = df_thresh['Close'].cummax()
-    drawdown_th = (df_thresh['Close']-roll_max_th)/roll_max_th
-    max_dd = float(drawdown_th.min()*100)
-    max_dd_30 = float(drawdown_th.tail(30).min()*100) if len(drawdown_th)>=30 else max_dd
-    if trades_bt>=2: win_r,avg_g,avg_l = win_bt, np.mean(profit_trades) if profit_trades else 0.01, abs(np.mean(loss_trades)) if loss_trades else 0.01
-    else:
-        win_r = len(returns_thresh[returns_thresh>0])/len(returns_thresh)
-        avg_g = returns_thresh[returns_thresh>0].mean() if win_r>0 else 0.01
-        avg_l = abs(returns_thresh[returns_thresh<0].mean()) if len(returns_thresh[returns_thresh<0]) else 0.01
-    wl = avg_g/avg_l if avg_l else 1
-    kelly_raw = win_r - (1-win_r)/wl
-    ret_skew = float(skew(returns_thresh)); ret_kurt = float(kurtosis(returns_thresh, fisher=True))
-    kurt_penalty = 0.5 if ret_kurt>3 else 1.0
-    kelly_adj = min(0.25, max(0.0, kelly_raw*0.3*(0.5 if ret_skew<-0.5 else 1)*kurt_penalty))
+    drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
+    max_dd = float(drawdown_th.min() * 100)
+    max_dd_30 = float(drawdown_th.tail(30).min() * 100) if len(drawdown_th) >= 30 else max_dd
 
-    # ============ MONTE CARLO ============
+    if trades_bt >= 2:
+        win_r = win_bt
+        avg_g = np.mean(profit_trades) if profit_trades else 0.01
+        avg_l = abs(np.mean(loss_trades)) if loss_trades else 0.01
+    else:
+        win_r = len(returns_thresh[returns_thresh > 0]) / len(returns_thresh)
+        avg_g = returns_thresh[returns_thresh > 0].mean() if win_r > 0 else 0.01
+        avg_l = abs(returns_thresh[returns_thresh < 0].mean()) if len(returns_thresh[returns_thresh < 0]) else 0.01
+
+    wl = avg_g / avg_l if avg_l else 1
+    kelly_raw = win_r - (1 - win_r) / wl
+    ret_skew = float(skew(returns_thresh))
+    ret_kurt = float(kurtosis(returns_thresh, fisher=True))
+    kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
+    kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1) * kurt_penalty))
+
+    # ------------------------------------------------------------------
+    # 16. MONTE CARLO
+    # ------------------------------------------------------------------
     if is_daytrade:
         n_sim = 2000
         n_steps = max(1, bars_remaining)
     else:
-        n_sim, n_days = 2000, 30
-        n_steps = n_days
+        n_sim = 2000
+        n_steps = 30
 
     latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
-    scale_corrected = latest_vol/np.sqrt(df_est/(df_est-2)) if df_est>2 else latest_vol
+    scale_corrected = latest_vol / np.sqrt(df_est / (df_est - 2)) if df_est > 2 else latest_vol
     theta_ou = estimate_theta_ou(df['Close'])
     locked_log_mean20 = np.log(df['Close']).tail(20).mean()
 
@@ -2153,24 +2222,21 @@ if run_btn:
     current_log = np.ones(n_sim) * np.log(harga_terakhir)
     for step in range(n_steps):
         inov = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
-        current_log = current_log + theta_ou*(locked_log_mean20 - current_log) + inov
+        current_log = current_log + theta_ou * (locked_log_mean20 - current_log) + inov
         paths[step] = np.exp(current_log)
 
     final_prices = paths[-1, :]
-    # 1. Estimasi netral (median) – untuk backtest, self‑learning, dan metrik objektif
     est_besok = float(np.median(final_prices))
-    # 2. Estimasi kontekstual berdasarkan sinyal (hanya untuk tampilan)
     if "STRONG BUY" in signal:
         est_besok_sinyal = float(np.percentile(final_prices, 75))
     elif "BUY" in signal:
         est_besok_sinyal = float(np.percentile(final_prices, 65))
     elif "HOLD" in signal:
-        est_besok_sinyal = float(np.percentile(final_prices, 50))   # sama dengan netral
-    else:  # AVOID
+        est_besok_sinyal = float(np.percentile(final_prices, 50))
+    else:
         est_besok_sinyal = float(np.percentile(final_prices, 35))
-    # 3. Range ketidakpastian tetap pakai persentil 25 dan 75
+
     low_est, up_est = float(np.percentile(final_prices, 25)), float(np.percentile(final_prices, 75))
-    # 4. Probabilitas & hit TP/SL (tidak berubah)
     prob_bull = (final_prices > harga_terakhir).mean() * 100
     hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
     hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
@@ -2182,49 +2248,80 @@ if run_btn:
         estimasi_label = "Estimasi Besok"
         prob_label = "Prob Naik Besok"
 
-    # ============ METRIK TAMBAHAN UNTUK RIWAYAT ============
-    if "STRONG BUY" in signal: signal_score = 0.7 + (prob_bull / 200)
-    elif "BUY" in signal: signal_score = 0.4 + (prob_bull / 200)
-    elif "HOLD" in signal: signal_score = 0.2 + (prob_bull / 300)
-    else: signal_score = max(0, (prob_bull - 30) / 100)
+    # ------------------------------------------------------------------
+    # 17. METRIK TAMBAHAN
+    # ------------------------------------------------------------------
+    if "STRONG BUY" in signal:
+        signal_score = 0.7 + (prob_bull / 200)
+    elif "BUY" in signal:
+        signal_score = 0.4 + (prob_bull / 200)
+    elif "HOLD" in signal:
+        signal_score = 0.2 + (prob_bull / 300)
+    else:
+        signal_score = max(0, (prob_bull - 30) / 100)
     signal_score = min(1.0, max(0.0, signal_score))
     confidence = min(0.99, 0.5 + (signal_score * 0.5) + (win_bt - 0.5) * 0.1)
-    if confidence is None or np.isnan(confidence): confidence = 0.5
-    
-    trend_consistency = np.mean([1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0 for i in range(1, 11)]) * 100
-    if np.isnan(trend_consistency): trend_consistency = 50.0
-    
+    if confidence is None or np.isnan(confidence):
+        confidence = 0.5
+
+    trend_consistency = np.mean([
+        1 if (df['Close'].iloc[-i] > df['Close'].iloc[-i-1]) == (df['EMA20'].iloc[-1] > df['EMA50'].iloc[-1]) else 0
+        for i in range(1, 11)
+    ]) * 100
+    if np.isnan(trend_consistency):
+        trend_consistency = 50.0
+
     avg_vol_5 = df['Volume'].iloc[-5:].mean()
     avg_vol_20 = df['Volume'].iloc[-20:].mean()
-    if avg_vol_20 > 0: vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
-    else: vol_surge_pct = 0.0
-    
+    if avg_vol_20 > 0:
+        vol_surge_pct = ((avg_vol_5 / avg_vol_20) - 1) * 100
+    else:
+        vol_surge_pct = 0.0
+
     avg_value = (df['Volume'].iloc[-5:] * df['Close'].iloc[-5:]).mean()
-    if np.isnan(avg_value): avg_value = 0.0
-    if avg_value >= 1e9: likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
-    elif avg_value >= 1e6: likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
-    elif avg_value >= 1e3: likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
-    else: likuiditas_str = f"Rp {avg_value:,.0f}"
-        
-    if rsi14 > 70: rsi_status = "Overbought"
-    elif rsi14 < 30: rsi_status = "Oversold"
-    else: rsi_status = "Normal"
-    
+    if np.isnan(avg_value):
+        avg_value = 0.0
+    if avg_value >= 1e9:
+        likuiditas_str = f"Rp {avg_value/1e9:.2f} M"
+    elif avg_value >= 1e6:
+        likuiditas_str = f"Rp {avg_value/1e6:.0f} Jt"
+    elif avg_value >= 1e3:
+        likuiditas_str = f"Rp {avg_value/1e3:.0f} rb"
+    else:
+        likuiditas_str = f"Rp {avg_value:,.0f}"
+
+    if rsi14 > 70:
+        rsi_status = "Overbought"
+    elif rsi14 < 30:
+        rsi_status = "Oversold"
+    else:
+        rsi_status = "Normal"
+
     zscore_val = df['ZScore'].iloc[-1]
-    if pd.isna(zscore_val): zscore_val = 0.0
-    if zscore_val > 2: zs_status = "Overbought"
-    elif zscore_val < -2: zs_status = "Oversold"
-    else: zs_status = "Normal"
-    
-    if vol_surge_pct > 50: vs_status = "Tinggi"
-    elif vol_surge_pct < -30: vs_status = "Rendah"
-    else: vs_status = "Normal"
-    
+    if pd.isna(zscore_val):
+        zscore_val = 0.0
+    if zscore_val > 2:
+        zs_status = "Overbought"
+    elif zscore_val < -2:
+        zs_status = "Oversold"
+    else:
+        zs_status = "Normal"
+
+    if vol_surge_pct > 50:
+        vs_status = "Tinggi"
+    elif vol_surge_pct < -30:
+        vs_status = "Rendah"
+    else:
+        vs_status = "Normal"
+
     coppock_rising = coppock_val > coppock_prev
     coppock_turning_up = coppock_rising and coppock_prev <= 0
-    if coppock_turning_up: coppock_status = "Turning Up"
-    elif coppock_rising: coppock_status = "Rising"
-    else: coppock_status = "Falling"
+    if coppock_turning_up:
+        coppock_status = "Turning Up"
+    elif coppock_rising:
+        coppock_status = "Rising"
+    else:
+        coppock_status = "Falling"
 
     est_besok_f = fraksi_bei(est_besok)
     est_besok_sinyal_f = fraksi_bei(est_besok_sinyal)
@@ -2233,13 +2330,16 @@ if run_btn:
     tp_low_f = fraksi_bei(tp_low)
     tp_high_f = fraksi_bei(tp_high)
     sl_harga_f = fraksi_bei(sl_harga)
-    
+
+    # ------------------------------------------------------------------
+    # 18. RINGKASAN UNTUK RIWAYAT
+    # ------------------------------------------------------------------
     ringkasan = {
         "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
         "Saham": ticker_raw,
         "Harga": f"{harga_terakhir:,.0f}",
         "Sinyal": signal,
-        "Estimasi": f"{est_besok:,.0f}",   # tetap median untuk kompatibilitas
+        "Estimasi": f"{est_besok:,.0f}",
         "Estimasi_Netral": f"Rp {est_besok_f:,.0f}",
         "Estimasi_Sinyal": f"Rp {est_besok_sinyal_f:,.0f}",
         "Prob Naik": f"{prob_bull:.1f}%",
@@ -2274,19 +2374,188 @@ if run_btn:
         "Floating_PL": f"{floating_pl_pct:+.2f}%" if floating_pl_pct is not None else ""
     }
 
-    # ==================== TAMPILAN UTAMA ====================
+    # ------------------------------------------------------------------
+    # 19. KUMPULKAN RESULT
+    # ------------------------------------------------------------------
+    result = {
+        "df": df,
+        "df_back": df_back,
+        "harga_terakhir": harga_terakhir,
+        "signal": signal,
+        "entry_zone_f": entry_zone_f,
+        "sl_harga_f": sl_harga_f,
+        "tp_low_f": tp_low_f,
+        "tp_high_f": tp_high_f,
+        "rrr": rrr,
+        "rrr_status": rrr_status,
+        "prob_bull": prob_bull,
+        "signal_score": signal_score,
+        "confidence": confidence,
+        "est_besok_f": est_besok_f,
+        "est_besok_sinyal_f": est_besok_sinyal_f,
+        "low_est_f": low_est_f,
+        "up_est_f": up_est_f,
+        "tp_pct_low": tp_pct_low,
+        "tp_pct_high": tp_pct_high,
+        "sl_pct": sl_pct,
+        "adx": adx,
+        "rsi14": rsi14,
+        "atr_pct": atr_pct,
+        "avg_sentiment": avg_sentiment,
+        "sentimen_status": sentimen_status,
+        "headlines": headlines,
+        "sources": sources,
+        "translated": translated,
+        "regime": regime,
+        "ihsg_cond": ihsg_cond,
+        "coppock_val": coppock_val,
+        "coppock_prev": coppock_prev,
+        "coppock_turning_up": coppock_turning_up,
+        "beta_ihsg": beta_ihsg,
+        "win_bt": win_bt,
+        "pf_bt": pf_bt,
+        "avg_bt": avg_bt,
+        "max_dd_bt": max_dd_bt,
+        "sharpe_bt": sharpe_bt,
+        "trades_bt": trades_bt,
+        "kelly_adj": kelly_adj,
+        "max_dd": max_dd,
+        "max_dd_30": max_dd_30,
+        "breakout": breakout,
+        "breakout_label": breakout_label,
+        "vwap_now": vwap_now,
+        "vwap_bias": vwap_bias,
+        "r1": r1, "r2": r2, "s1": s1, "s2": s2, "pp": pp,
+        "mc": mc, "per": per, "pbv": pbv, "roe": roe, "de": de,
+        "norm_signals": norm_signals,   # untuk simpan prediksi
+        "ringkasan": ringkasan,
+        "is_daytrade": is_daytrade,
+        "mode": "daytrade" if is_daytrade else "swing",
+        "actual_interval": actual_interval,
+        "harga_terakhir_asli": harga_terakhir_asli,
+        "floating_pl_pct": floating_pl_pct,
+        "harga_beli_float": harga_beli_float,
+        "sudah_beli": sudah_beli,
+        "ticker_raw": ticker_raw
+    }
+        # Tambahan untuk UI
+    result["ticker_info"] = ticker_info
+    result["adx_threshold"] = adx_threshold
+    result["hit_tp"] = hit_tp
+    result["hit_sl"] = hit_sl
+    result["estimasi_label"] = estimasi_label
+    result["prob_label"] = prob_label
+    result["backtest_window"] = backtest_window
+    result["ofi_now"] = df['OFI_raw'].iloc[-1]
+    result["adaptive_w"] = adaptive_w
+    result["returns"] = returns
+    result["mom_median_th"] = mom_median_th
+    result["coppock_rising"] = coppock_rising
+    result["coppock_turning_up"] = coppock_turning_up
+    result["coppock_status"] = coppock_status
+    result["avg_sentiment"] = avg_sentiment
+    result["norm_signals"] = norm_signals
+    result["entry_low_f"] = entry_low_f
+    result["entry_high_f"] = entry_high_f
+    result["ticker_raw"] = ticker_raw
+    result["harga_terakhir"] = harga_terakhir
+    result["floating_pl_pct"] = floating_pl_pct
+    result["sudah_beli"] = sudah_beli
+    result["harga_beli_float"] = harga_beli_float
+    result["df_est"] = df_est
+    return result
+def display_analysis_result(res):
+    # ===== AMBIL SEMUA VARIABEL DARI RES =====
+    df = res['df']
+    df_back = res['df_back']
+    harga_terakhir = res['harga_terakhir']
+    signal = res['signal']
+    entry_zone_f = res['entry_zone_f']
+    sl_harga_f = res['sl_harga_f']
+    tp_low_f = res['tp_low_f']
+    tp_high_f = res['tp_high_f']
+    rrr = res['rrr']
+    rrr_status = res['rrr_status']
+    prob_bull = res['prob_bull']
+    est_besok_f = res['est_besok_f']
+    est_besok_sinyal_f = res['est_besok_sinyal_f']
+    low_est_f = res['low_est_f']
+    up_est_f = res['up_est_f']
+    tp_pct_low = res['tp_pct_low']
+    tp_pct_high = res['tp_pct_high']
+    sl_pct = res['sl_pct']
+    adx = res['adx']
+    rsi14 = res['rsi14']
+    atr_pct = res['atr_pct']
+    avg_sentiment = res['avg_sentiment']
+    sentimen_status = res['sentimen_status']
+    headlines = res['headlines']
+    sources = res['sources']
+    translated = res['translated']
+    regime = res['regime']
+    ihsg_cond = res['ihsg_cond']
+    coppock_val = res['coppock_val']
+    coppock_prev = res['coppock_prev']
+    coppock_turning_up = res['coppock_turning_up']
+    coppock_rising = res['coppock_rising']
+    coppock_status = res['coppock_status']
+    beta_ihsg = res['beta_ihsg']
+    win_bt = res['win_bt']
+    pf_bt = res['pf_bt']
+    avg_bt = res['avg_bt']
+    max_dd_bt = res['max_dd_bt']
+    sharpe_bt = res['sharpe_bt']
+    trades_bt = res['trades_bt']
+    kelly_adj = res['kelly_adj']
+    max_dd = res['max_dd']
+    max_dd_30 = res['max_dd_30']
+    breakout = res['breakout']
+    breakout_label = res['breakout_label']
+    vwap_now = res['vwap_now']
+    vwap_bias = res['vwap_bias']
+    r1 = res['r1']
+    r2 = res['r2']
+    s1 = res['s1']
+    s2 = res['s2']
+    pp = res['pp']
+    mc = res['mc']
+    per = res['per']
+    pbv = res['pbv']
+    roe = res['roe']
+    de = res['de']
+    ticker_info = res['ticker_info']
+    adx_threshold = res['adx_threshold']
+    hit_tp = res['hit_tp']
+    hit_sl = res['hit_sl']
+    estimasi_label = res['estimasi_label']
+    prob_label = res['prob_label']
+    backtest_window = res['backtest_window']
+    ofi_now = res['ofi_now']
+    is_daytrade = res['is_daytrade']
+    floating_pl_pct = res['floating_pl_pct']
+    sudah_beli = res['sudah_beli']
+    ticker_raw = res['ticker_raw']
+
+    # === Tambahan untuk V12 Adaptive & AI Insight ===
+    adaptive_w = res['adaptive_w']
+    returns = res['returns']
+    mom_median_th = res['mom_median_th']
+    harga_beli_float = res['harga_beli_float']
+
+    # ===== TAMPILAN UTAMA =====
     st.title("📊 Quant & Risk Engine Pro")
     st.write("Algoritma kuantitatif + Berita + Backtest + AI + Grafik Interaktif + Fundamental")
-    st.success(f"✅ Analisis Berhasil: {ticker_input} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",","."))
-    # Ambil waktu Jakarta saat ini
+    st.success(f"✅ Analisis Berhasil: {ticker_raw} | Closing Price: Rp {harga_terakhir:,.0f}".replace(",", "."))
+
     now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
     st.caption(f"⏱️ **Waktu Analisis:** {now_jkt.strftime('%d %B %Y, %H:%M:%S WIB')}")
     waktu_str = now_jkt.strftime('%d %B %Y, %H:%M WIB')
-    col1,col2,col3 = st.columns(3)
+
+    col1, col2, col3 = st.columns(3)
     col1.metric(
-        "Sinyal Eksekusi", 
-        signal, 
-        delta=f"per {now_jkt.strftime('%d/%m %H:%M')} WIB",  # format pendek
+        "Sinyal Eksekusi",
+        signal,
+        delta=f"per {now_jkt.strftime('%d/%m %H:%M')} WIB",
         delta_color="off"
     )
     with col2:
@@ -2298,10 +2567,11 @@ if run_btn:
         st.metric(
             label=f"{estimasi_label} (Sinyal {signal.split()[0]})",
             value=f"Rp {est_besok_sinyal_f:,.0f}",
-            delta=f"{((est_besok_sinyal - harga_terakhir) / harga_terakhir * 100):+.2f}%"
+            delta=f"{((est_besok_sinyal_f - harga_terakhir) / harga_terakhir * 100):+.2f}%"
         )
     col3.metric(prob_label, f"{prob_bull:.1f}%")
 
+    # ===== GRAFIK =====
     if PLOTLY_AVAILABLE:
         st.header("📈 Chart Harga & Sinyal")
         fig = go.Figure()
@@ -2311,31 +2581,33 @@ if run_btn:
         buy_signals = df_back[df_back['Signal'].str.contains("BUY")]
         fig.add_trace(go.Scatter(x=buy_signals.index, y=buy_signals['Close'], mode='markers',
                                  marker=dict(symbol='triangle-up', size=10, color='#10b981'), name='Buy Signal'))
-        for lvl,lbl,clr in [(r1,'R1','orange'),(s1,'S1','red'),(pp,'PP','gray')]:
+        for lvl, lbl, clr in [(r1, 'R1', 'orange'), (s1, 'S1', 'red'), (pp, 'PP', 'gray')]:
             fig.add_hline(y=lvl, line_dash="dash", line_color=clr, annotation_text=lbl, annotation_position="right")
-        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10,r=10,t=20,b=10), dragmode='pan')
+        fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), dragmode='pan')
         st.plotly_chart(fig, use_container_width=True)
 
-    # --- RINGKASAN EKSEKUTIF ---
-    st.markdown("---"); st.header("📋 Ringkasan Eksekutif & Rekomendasi")
+    # ===== RINGKASAN EKSEKUTIF =====
+    st.markdown("---")
+    st.header("📋 Ringkasan Eksekutif & Rekomendasi")
+
     if rrr < 1.0 and ("BUY" in signal):
-        ac,ai = "#ef4444","⚠️"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
+        ac, ai = "#ef4444", "⚠️"
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {tp_low_f:,.0f} - {tp_high_f:,.0f}."
     elif "STRONG BUY" in signal:
-        ac,ai = "#10b981","🟢"
-        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap {ringkasan['TP_Range']}."
+        ac, ai = "#10b981", "🟢"
+        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap {tp_low_f:,.0f} - {tp_high_f:,.0f}."
     elif "BUY" in signal:
-        ac,ai = "#f59e0b","🟡"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {ringkasan['TP_Range']}."
+        ac, ai = "#f59e0b", "🟡"
+        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {tp_low_f:,.0f} - {tp_high_f:,.0f}."
     elif "HOLD" in signal:
-        ac,ai = "#3b82f6","🔵"
+        ac, ai = "#3b82f6", "🔵"
         at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
     else:
-        ac,ai = "#ef4444","🔴"
+        ac, ai = "#ef4444", "🔴"
         at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
-    # --- Tambahan untuk status kepemilikan & harga beli ---
+
+    # Tambahan untuk status kepemilikan
     if sudah_beli:
-        # Saran dasar berdasarkan sinyal (dari kode sebelumnya)
         if "AVOID" in signal:
             extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk <b>take profit sebagian</b> atau <b>keluar seluruhnya</b> untuk mengamankan modal."
         elif "HOLD" in signal:
@@ -2344,24 +2616,23 @@ if run_btn:
             extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh <b>entry zone</b>."
         else:
             extra = ""
-    
-        # Tambahan berdasarkan floating P/L (jika harga beli diisi)
+
         if floating_pl_pct is not None:
-            pl_str = f"💰 <b>Floating P/L:<b> {floating_pl_pct:+.2f}%"
+            pl_str = f"💰 <b>Floating P/L:</b> {floating_pl_pct:+.2f}%"
             if floating_pl_pct > 5:
-                extra += f" (Profit sudah >5%. Pertimbangkan <b>take profit sebagian<b> atau <b>trailing stop<b>.)"
+                extra += f" (Profit sudah >5%. Pertimbangkan <b>take profit sebagian</b> atau <b>trailing stop</b>.)"
             elif floating_pl_pct > 0:
                 extra += f" (Masih profit. Pantau SL ketat.)"
             elif floating_pl_pct < -3:
                 extra += f" (Rugi >3%. Jika menembus SL, keluar.)"
             else:
                 extra += f" (Rugi kecil. Tahan dengan SL sesuai rekomendasi.)"
-            # Gabungkan dengan extra
             extra = pl_str + " " + extra
-    
+
         if extra:
             at += f"<br><br><b>📌 Status Posisi:</b> {extra}"
-    col1,col2 = st.columns([1,1])
+
+    col1, col2 = st.columns([1, 1])
     with col1:
         if "AVOID" not in signal:
             st.markdown(f'''
@@ -2369,7 +2640,7 @@ if run_btn:
                     <div class="summary-item">🕒 <b>Waktu Scan:</b> {waktu_str}</div>
                     <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
                     <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga_f:,.0f} (-{sl_pct:.1f}%)</div>
-                    <div class="summary-item">🎯 <b>Take Profit Range:</b> {ringkasan['TP_Range']}<br>
+                    <div class="summary-item">🎯 <b>Take Profit Range:</b> Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}<br>
                         <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
                     <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
                     <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
@@ -2391,26 +2662,32 @@ if run_btn:
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
-    # --- DETAIL EXPANDER ---
+    # ===== DETAIL EXPANDER =====
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
-        st.subheader("📰 Sentimen Berita Terbobot"); c1,c2=st.columns([1,2])
-        c1.metric("Sentimen Skor",f"{avg_sentiment:.2f}",sentimen_status)
+        st.subheader("📰 Sentimen Berita Terbobot")
+        c1, c2 = st.columns([1, 2])
+        c1.metric("Sentimen Skor", f"{avg_sentiment:.2f}", sentimen_status)
         with c2:
             st.markdown("**5 Berita Utama Pasar:**")
-            for i,h in enumerate(headlines):
-                src=sources[i] if i<len(sources) else ""; t=translated[i] if i<len(translated) else ""
-                st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>",unsafe_allow_html=True)
-                if t and t!=h: st.markdown(f"<span class='translated'>🇮🇩 {t}</span>",unsafe_allow_html=True)
+            for i, h in enumerate(headlines):
+                src = sources[i] if i < len(sources) else ""
+                t = translated[i] if i < len(translated) else ""
+                st.markdown(f"{i+1}. **{h}** <span class='source'>({src})</span>", unsafe_allow_html=True)
+                if t and t != h:
+                    st.markdown(f"<span class='translated'>🇮🇩 {t}</span>", unsafe_allow_html=True)
+
         st.divider()
-        st.subheader("🧬 Regime Pasar & Volatilitas"); m1,m2,m3,m4 = st.columns(4)
-        m1.metric("Market Regime",regime)
-        m2.metric("Kondisi Makro IHSG",ihsg_cond)
-        m3.metric("ADX Adaptif",f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
-        m4.metric("OFI Ratio", f"{df['OFI_raw'].iloc[-1]:.2f}")
+        st.subheader("🧬 Regime Pasar & Volatilitas")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Market Regime", regime)
+        m2.metric("Kondisi Makro IHSG", ihsg_cond)
+        m3.metric("ADX Adaptif", f"{adx:.1f} (Thresh: {adx_threshold:.1f})")
+        m4.metric("OFI Ratio", f"{ofi_now:.2f}")
         if is_daytrade:
             vwap_col = st.columns(1)[0]
             vwap_col.metric("VWAP", f"{vwap_now:,.0f}", vwap_bias)
-        st.markdown(f"**Insight Regime:** {generate_regime_insight(regime, adx, df['OFI_raw'].iloc[-1], ihsg_cond)}")
+        st.markdown(f"**Insight Regime:** {generate_regime_insight(regime, adx, ofi_now, ihsg_cond)}")
+
         st.divider()
         st.subheader("📊 Metrik Fundamental Saham (IDX)")
         if ticker_info:
@@ -2439,60 +2716,92 @@ if run_btn:
                 f"</table>"
             )
             st.markdown(table_html, unsafe_allow_html=True)
-            interpretation_items=[]
+
+            interpretation_items = []
             if mc:
-                if mc>=1e13: mct=f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
-                elif mc>=1e12: mct=f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
-                elif mc>=1e10: mct=f"Market Cap Rp {mc:,.0f} tergolong menengah (Mid Cap)."
-                else: mct=f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
-            else: mct="Market Cap tidak tersedia."
+                if mc >= 1e13:
+                    mct = f"Market Cap Rp {mc:,.0f} tergolong sangat besar (Mega Cap)."
+                elif mc >= 1e12:
+                    mct = f"Market Cap Rp {mc:,.0f} tergolong besar (Blue Chip)."
+                elif mc >= 1e10:
+                    mct = f"Market Cap Rp {mc:,.0f} tergolong menengah (Mid Cap)."
+                else:
+                    mct = f"Market Cap Rp {mc:,.0f} tergolong kecil (Small Cap)."
+            else:
+                mct = "Market Cap tidak tersedia."
             interpretation_items.append(f"<li><b>Market Cap:</b> {mct}</li>")
+
             if per:
-                if per<10: pt=f"PER {per:.2f}x tergolong rendah (potensi undervalue)."
-                elif per<20: pt=f"PER {per:.2f}x moderat."
-                else: pt=f"PER {per:.2f}x tergolong tinggi (premium)."
-            else: pt="PER tidak tersedia."
+                if per < 10:
+                    pt = f"PER {per:.2f}x tergolong rendah (potensi undervalue)."
+                elif per < 20:
+                    pt = f"PER {per:.2f}x moderat."
+                else:
+                    pt = f"PER {per:.2f}x tergolong tinggi (premium)."
+            else:
+                pt = "PER tidak tersedia."
             interpretation_items.append(f"<li><b>PER:</b> {pt}</li>")
+
             if pbv:
-                if pbv<1: pbt=f"PBV {pbv:.2f}x di bawah 1 (di bawah nilai buku, bisa undervalue)."
-                elif pbv<3: pbt=f"PBV {pbv:.2f}x moderat."
-                else: pbt=f"PBV {pbv:.2f}x tinggi (premium)."
-            else: pbt="PBV tidak tersedia."
+                if pbv < 1:
+                    pbt = f"PBV {pbv:.2f}x di bawah 1 (di bawah nilai buku, bisa undervalue)."
+                elif pbv < 3:
+                    pbt = f"PBV {pbv:.2f}x moderat."
+                else:
+                    pbt = f"PBV {pbv:.2f}x tinggi (premium)."
+            else:
+                pbt = "PBV tidak tersedia."
             interpretation_items.append(f"<li><b>PBV:</b> {pbt}</li>")
+
             if roe:
-                roep=roe*100
-                if roep>20: rt=f"ROE {roep:.1f}% sangat baik (profitabilitas tinggi)."
-                elif roep>10: rt=f"ROE {roep:.1f}% cukup baik."
-                else: rt=f"ROE {roep:.1f}% rendah."
-            else: rt="ROE tidak tersedia."
+                roep = roe * 100
+                if roep > 20:
+                    rt = f"ROE {roep:.1f}% sangat baik (profitabilitas tinggi)."
+                elif roep > 10:
+                    rt = f"ROE {roep:.1f}% cukup baik."
+                else:
+                    rt = f"ROE {roep:.1f}% rendah."
+            else:
+                rt = "ROE tidak tersedia."
             interpretation_items.append(f"<li><b>ROE:</b> {rt}</li>")
+
             if de:
-                if de>1: dt=f"D/E {de:.2f} tinggi (leverage tinggi, risiko lebih besar)."
-                elif de>0.5: dt=f"D/E {de:.2f} moderat."
-                else: dt=f"D/E {de:.2f} rendah (konservatif)."
-            else: dt="D/E tidak tersedia."
+                if de > 1:
+                    dt = f"D/E {de:.2f} tinggi (leverage tinggi, risiko lebih besar)."
+                elif de > 0.5:
+                    dt = f"D/E {de:.2f} moderat."
+                else:
+                    dt = f"D/E {de:.2f} rendah (konservatif)."
+            else:
+                dt = "D/E tidak tersedia."
             interpretation_items.append(f"<li><b>D/E:</b> {dt}</li>")
-            st.markdown(f'<div style="background-color:#1e293b;border-radius:12px;padding:15px;margin-top:15px;color:#cbd5e1;font-size:14px;"><b style="color:#00ffcc;">📝 Interpretasi Metrik:</b><ul style="margin-top:8px;padding-left:20px;">{"".join(interpretation_items)}</ul></div>',unsafe_allow_html=True)
-        else: st.warning("⚠️ Data fundamental finansial tidak tersedia.")
+
+            st.markdown(f'<div style="background-color:#1e293b;border-radius:12px;padding:15px;margin-top:15px;color:#cbd5e1;font-size:14px;"><b style="color:#00ffcc;">📝 Interpretasi Metrik:</b><ul style="margin-top:8px;padding-left:20px;">{"".join(interpretation_items)}</ul></div>', unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ Data fundamental finansial tidak tersedia.")
+
         st.divider()
-        st.subheader("🎯 Target Pivot & Support/Resistance"); p1,p2,p3,p4,p5=st.columns(5)
+        st.subheader("🎯 Target Pivot & Support/Resistance")
+        p1, p2, p3, p4, p5 = st.columns(5)
         r2_f = fraksi_bei(r2)
         r1_f = fraksi_bei(r1)
         pp_f = fraksi_bei(pp)
         s1_f = fraksi_bei(s1)
         s2_f = fraksi_bei(s2)
-        
-        p1.metric("R2", f"Rp {r2_f:,.0f}".replace(",","."))
-        p2.metric("R1", f"Rp {r1_f:,.0f}".replace(",","."))
-        p3.metric("Pivot", f"Rp {pp_f:,.0f}".replace(",","."))
-        p4.metric("S1", f"Rp {s1_f:,.0f}".replace(",","."))
-        p5.metric("S2", f"Rp {s2_f:,.0f}".replace(",","."))
-        st.write(f"Kondisi {breakout_label}: **{breakout}**"); st.divider()
+
+        p1.metric("R2", f"Rp {r2_f:,.0f}".replace(",", "."))
+        p2.metric("R1", f"Rp {r1_f:,.0f}".replace(",", "."))
+        p3.metric("Pivot", f"Rp {pp_f:,.0f}".replace(",", "."))
+        p4.metric("S1", f"Rp {s1_f:,.0f}".replace(",", "."))
+        p5.metric("S2", f"Rp {s2_f:,.0f}".replace(",", "."))
+        st.write(f"Kondisi {breakout_label}: **{breakout}**")
+
+        st.divider()
         st.subheader("🔮 Sinyal Kuantitatif & Hasil Backtest" + (" (Intraday)" if is_daytrade else " (6 Bulan)"))
         if "AVOID" not in signal:
             c1, c2, c3, c4, c5 = st.columns(5)
             c1.metric("Sinyal", signal)
-            c2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."))
+            c2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",", "."))
             c3.metric("Entry Zone", entry_zone_f)
             c4.metric("TP Range", f"Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}",
                       f"+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%")
@@ -2500,20 +2809,32 @@ if run_btn:
         else:
             c1, c2 = st.columns(2)
             c1.metric("Sinyal", signal)
-            c2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",","."))
+            c2.metric(estimasi_label, f"Rp {est_besok_f:,.0f}".replace(",", "."))
             st.info("⛔ Tidak ada rekomendasi entry, TP, atau SL untuk sinyal AVOID.")
-        st.markdown(f"**Hasil Backtest ({backtest_window} Bar):**"); b1,b2,b3,b4,b5,b6=st.columns(6)
-        b1.metric("Win Rate",f"{win_bt:.1%}" if trades_bt else "N/A"); b2.metric("Profit Factor",f"{pf_bt:.2f}" if trades_bt and pf_bt!=np.inf else "N/A")
-        b3.metric("Avg Return/Trade",f"{avg_bt:.2%}" if trades_bt else "N/A"); b4.metric("Max DD Strat",f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
-        b5.metric("Sharpe",f"{sharpe_bt:.2f}" if trades_bt else "N/A"); b6.metric("Total Trades",trades_bt)
+
+        st.markdown(f"**Hasil Backtest ({backtest_window} Bar):**")
+        b1, b2, b3, b4, b5, b6 = st.columns(6)
+        b1.metric("Win Rate", f"{win_bt:.1%}" if trades_bt else "N/A")
+        b2.metric("Profit Factor", f"{pf_bt:.2f}" if trades_bt and pf_bt != np.inf else "N/A")
+        b3.metric("Avg Return/Trade", f"{avg_bt:.2%}" if trades_bt else "N/A")
+        b4.metric("Max DD Strat", f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
+        b5.metric("Sharpe", f"{sharpe_bt:.2f}" if trades_bt else "N/A")
+        b6.metric("Total Trades", trades_bt)
+
         st.divider()
-        st.subheader("🛡️ Manajemen Risiko Portofolio (Kelly)"); rc1,rc2=st.columns(2)
-        rc1.metric("Alokasi Maks (Kelly)",f"{kelly_adj*100:.1f}%"); rc2.metric("Beta IHSG",f"{beta_ihsg:.2f}x")
+        st.subheader("🛡️ Manajemen Risiko Portofolio (Kelly)")
+        rc1, rc2 = st.columns(2)
+        rc1.metric("Alokasi Maks (Kelly)", f"{kelly_adj*100:.1f}%")
+        rc2.metric("Beta IHSG", f"{beta_ihsg:.2f}x")
         st.markdown(f"**Interpretasi:** Berdasarkan Win Rate **{win_bt:.1%}**, maksimal alokasi **{kelly_adj*100:.1f}%** dari total ekuitas.")
         st.markdown(f"Max DD Historis: `{max_dd:.2f}%` | DD 30 Hari: `{max_dd_30:.2f}%`")
+
         st.divider()
-        st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck"); pr1,pr2,pr3=st.columns(3)
-        pr1.metric(prob_label, f"{prob_bull:.1f}%"); pr2.metric("Prob. Sentuh R1 (30H)",f"{hit_tp:.1f}%"); pr3.metric("Prob. Sentuh S2 (30H)",f"{hit_sl:.1f}%")
+        st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck")
+        pr1, pr2, pr3 = st.columns(3)
+        pr1.metric(prob_label, f"{prob_bull:.1f}%")
+        pr2.metric("Prob. Sentuh R1 (30H)", f"{hit_tp:.1f}%")
+        pr3.metric("Prob. Sentuh S2 (30H)", f"{hit_sl:.1f}%")
 
     # ══════════════════════════════════════════════════════════
     # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
@@ -2618,7 +2939,6 @@ if run_btn:
             mem_insight += f"Faktor **{worst_factor}** perlu dievaluasi (akurasi {acc_data[worst_factor]:.1%})."
             st.caption(mem_insight)
 
-            # ---- Tambahan: Menampilkan error entry (belajar dari Not Touched) ----
             entry_err = mem.get('entry_error_ema', 0.0)
             if entry_err > 0:
                 st.caption(
@@ -2637,7 +2957,7 @@ if run_btn:
             "Selain itu, engine juga mempelajari **level entry** dari kejadian Entry Tidak Tersentuh."
         )
 
-        last_pred = load_v12_predictions(ticker_raw)
+        last_pred = load_v12_predictions(ticker_raw, mode='daytrade' if is_daytrade else 'swing')
         if last_pred:
             last_close = safe_float(last_pred.get('close_price'), 0.0)
             if last_close > 0:
@@ -2657,35 +2977,23 @@ if run_btn:
                 st.info("ℹ️ Prediksi sebelumnya tidak memiliki close_price yang valid.")
         else:
             st.info("ℹ️ Tidak ada prediksi sebelumnya. Engine akan mulai belajar pada analisis berikutnya.")
-        # Simpan prediksi sekarang
-        factor_signals = {
-            "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
-            "AI_Senti": avg_sentiment,
-            "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
-            "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),  # ✅ diperbaiki
-            "Coppock": coppock_val / 10.0,
-            "OFI": df['OFI_raw'].iloc[-1] / 3.0
-        }
-        norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
-        save_v12_prediction(
-            ticker_raw,
-            harga_terakhir,
-            norm_signals,
-            entry_low=entry_low_f,
-            entry_high=entry_high_f
-        )
-        st.caption("📌 Prediksi hari ini telah disimpan. Lakukan analisis lagi di lain waktu untuk melanjutkan pembelajaran.")
 
     # ==================== AI INSIGHT OTOMATIS ====================
     st.markdown("---")
     if st.session_state.get("gemini_api_key"):
         with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
             data_ai = {
-                "Saham": ticker_input, "Harga": f"{harga_terakhir:,.0f}", "Sinyal": signal,
-                "Rezim": regime, "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
-                "RRR": f"{rrr:.2f} (Kontekstual)", "Prob Naik": f"{prob_bull:.1f}%",
-                "TP%": f"{tp_pct_low:.1f}% - {tp_pct_high:.1f}%", "SL%": f"{sl_pct:.1f}",
-                "Estimasi": f"{est_besok:,.0f}", "Beta": f"{beta_ihsg:.2f}x",
+                "Saham": ticker_raw,
+                "Harga": f"{harga_terakhir:,.0f}",
+                "Sinyal": signal,
+                "Rezim": regime,
+                "Sentimen": f"{avg_sentiment:.2f} ({sentimen_status})",
+                "RRR": f"{rrr:.2f} (Kontekstual)",
+                "Prob Naik": f"{prob_bull:.1f}%",
+                "TP%": f"{tp_pct_low:.1f}% - {tp_pct_high:.1f}%",
+                "SL%": f"{sl_pct:.1f}",
+                "Estimasi": f"{est_besok_f:,.0f}",
+                "Beta": f"{beta_ihsg:.2f}x",
                 "WinRate": f"{win_bt:.1%}" if trades_bt else "N/A",
                 "ProfitFactor": f"{pf_bt:.2f}" if trades_bt else "N/A",
                 "MaxDD": f"{max_dd_bt:.2f}%" if trades_bt else "N/A",
@@ -2702,7 +3010,7 @@ if run_btn:
             riwayat_konteks = []
             for r in st.session_state.riwayat:
                 if r['Saham'] == ticker_raw:
-                    r_copy = dict(r)                # jangan ubah state asli
+                    r_copy = dict(r)
                     key_actual = (r.get('Waktu'), r.get('Saham'))
                     actual = st.session_state.riwayat_actual.get(key_actual, {})
                     if actual:
@@ -2714,15 +3022,86 @@ if run_btn:
                     riwayat_konteks.append(r_copy)
                     if len(riwayat_konteks) >= 10:
                         break
+
             hasil_ai, error_ai = analisis_saham_dengan_ai(data_ai, riwayat_konteks, st.session_state.gemini_api_key)
             if not error_ai and hasil_ai:
-                ringkasan["AI_Insight"] = hasil_ai
                 hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f'<div class="ai-insight-card"><h3>🤖 Insight AI</h3><p>{hasil_ai_bersih}</p></div>'
-                st.markdown(html_ai,unsafe_allow_html=True)
-            elif error_ai: st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
-    else: st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
-    simpan_riwayat(ringkasan)
+                st.markdown(html_ai, unsafe_allow_html=True)
+            elif error_ai:
+                st.warning(f"AI tidak dapat memberikan insight: {error_ai}")
+    else:
+        st.info("💡 Isi API Key Gemini di sidebar untuk mendapatkan insight AI otomatis.")
+# ==================== PROSES ANALISIS ====================
+if run_btn:
+    if not ticker_input:
+        st.warning("⚠️ Kode saham tidak boleh kosong!")
+        st.stop()
+
+    with st.spinner("🤖 Menganalisis mode Swing dan Daytrade secara paralel..."):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_swing = executor.submit(
+                analyze_stock,
+                ticker_input, harga_manual, sudah_beli, harga_beli_float,
+                False  # swing
+            )
+            future_day = executor.submit(
+                analyze_stock,
+                ticker_input, harga_manual, sudah_beli, harga_beli_float,
+                True   # daytrade
+            )
+            res_swing = future_swing.result()
+            res_day = future_day.result()
+
+    if res_swing is None or res_day is None:
+        st.error("❌ Gagal mengambil data untuk salah satu mode.")
+        st.stop()
+
+    # ----- REKOMENDASI MODE -----
+    def skor_mode(res):
+        return res['signal_score'] * 0.5 + min(res['rrr'], 5) * 0.2 + res['confidence'] * 0.3
+
+    skor_swing = skor_mode(res_swing)
+    skor_day = skor_mode(res_day)
+
+    if skor_swing >= skor_day:
+        mode_terbaik = "Swing Trade"
+        alasan = "Sinyal swing lebih kuat dan RRR lebih baik."
+        res_terbaik = res_swing
+    else:
+        mode_terbaik = "Day Trade"
+        alasan = "Sinyal intraday lebih kuat dan probabilitas naik lebih tinggi."
+        res_terbaik = res_day
+
+    st.success(f"🏆 **Rekomendasi Mode: {mode_terbaik}** — {alasan}")
+
+    # ----- TAMPILKAN HASIL KEDUA MODE DALAM TAB -----
+    tab_swing, tab_day = st.tabs(["📆 Swing Trade", "⏱️ Day Trade"])
+
+    with tab_swing:
+        display_analysis_result(res_swing)
+
+    with tab_day:
+        display_analysis_result(res_day)
+
+    # ----- SIMPAN PREDIKSI V12 UNTUK KEDUA MODE -----
+    for res in [res_swing, res_day]:
+        try:
+            save_v12_prediction(
+                ticker_raw,
+                res['harga_terakhir'],
+                res['norm_signals'],   # sudah berupa dict norm_signals
+                entry_low=res['entry_low_f'],
+                entry_high=res['entry_high_f'],
+                mode=res['mode']
+            )
+        except Exception as e:
+            st.warning(f"Gagal menyimpan prediksi {res['mode']}: {e}")
+
+    # ----- SIMPAN RIWAYAT UNTUK MODE TERBAIK -----
+    simpan_riwayat(res_terbaik['ringkasan'])
+
     st.stop()
 # ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
 if scan_btn:
