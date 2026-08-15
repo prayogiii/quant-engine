@@ -364,7 +364,7 @@ def hapus_riwayat_item(waktu, saham):
     except Exception as e:
         st.error(f"❌ Gagal menghapus riwayat: {e}")
         
-def simpan_riwayat_actual(waktu, saham, actual_data):
+def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
@@ -387,14 +387,14 @@ def simpan_riwayat_actual(waktu, saham, actual_data):
                 sheet.insert_row(headers, 1)
             sheet.append_row(new_row, value_input_option='RAW')
         st.session_state.riwayat_actual = muat_riwayat_actual()
-        integrate_actual_to_v12(waktu, saham, actual_data)
+        integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
 
-def integrate_actual_to_v12(waktu, saham, actual_data):
+def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
     try:
         ticker = saham
-        last_pred = load_v12_predictions(ticker)
+        last_pred = load_v12_predictions(ticker, mode=mode)
         if not last_pred:
             return
 
@@ -866,6 +866,7 @@ with st.sidebar:
                         # Fitur Catat Actual (ringkas, tanpa expander detail)
                         waktu_key = r.get('Waktu','')
                         saham_key = r.get('Saham','')
+                        mode_actual = "swing" if r.get('Gaya') == "SW" else "daytrade"
                         actual_key = (waktu_key, saham_key)
                         actual_data = st.session_state.riwayat_actual.get(actual_key, None)
                         if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
@@ -907,7 +908,7 @@ with st.sidebar:
                                                 'Outcome': outcome,
                                                 'Entry_Miss': 'Yes' if entry_miss else ''
                                             }
-                                            simpan_riwayat_actual(waktu_key, saham_key, data)
+                                            simpan_riwayat_actual(waktu_key, saham_key, data, mode=mode_actual)
                                             st.success("Data actual tersimpan!")
                                             st.session_state[f"show_{waktu_key}_{saham_key}"] = False
                                             st.rerun()
@@ -1014,6 +1015,7 @@ with st.sidebar:
                     # ---- Fitur Catat Actual ----
                     waktu_key = r.get('Waktu','')
                     saham_key = r.get('Saham','')
+                    mode_actual = "swing" if r.get('Gaya') == "SW" else "daytrade"
                     actual_key = (waktu_key, saham_key)
                     actual_data = st.session_state.riwayat_actual.get(actual_key, None)
     
@@ -1070,7 +1072,7 @@ with st.sidebar:
                                             'Outcome': outcome,
                                             'Entry_Miss': 'Yes' if entry_miss else ''
                                         }
-                                        simpan_riwayat_actual(waktu_key, saham_key, data)
+                                        simpan_riwayat_actual(waktu_key, saham_key, data, mode=mode_actual)
                                         st.success("Data actual tersimpan!")
                                         st.session_state[show_key] = False
                                         st.rerun()
