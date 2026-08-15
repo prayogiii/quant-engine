@@ -236,8 +236,14 @@ def hitung_bars_remaining(now_jkt, actual_interval, bars_per_day_map):
     return max(1, bars)
 
 # ---------- Adaptive Weights ----------
-def get_adaptive_weights(ticker, regime):
-    mem = st.session_state.v12_memory.get(ticker, {})
+def get_adaptive_weights(ticker, regime, v12_mem=None):
+    if v12_mem is not None:
+        mem = v12_mem.get(ticker, {})
+    else:
+        try:
+            mem = st.session_state.v12_memory.get(ticker, {})
+        except (AttributeError, Exception):
+            mem = {}
     defs = {k: default_weight(k, regime) for k in FACTOR_KEYS}
     w_pri = {}
     for k in FACTOR_KEYS:
@@ -1683,7 +1689,7 @@ def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
         return base + " " + " ".join(notes)
     return base
 # ==================== FUNGSI ANALISIS UTAMA ====================
-def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_daytrade):
+def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_daytrade, v12_mem=None):
     """
     Menjalankan analisis lengkap untuk satu mode (swing/daytrade).
     Mengembalikan dictionary hasil atau None jika data tidak cukup.
@@ -1977,7 +1983,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     # ------------------------------------------------------------------
     # 11. V12 ADAPTIVE SIGNAL
     # ------------------------------------------------------------------
-    adaptive_w = get_adaptive_weights(ticker_raw, regime)
+    adaptive_w = get_adaptive_weights(ticker_raw, regime, v12_mem=v12_mem)
     coppock_val, coppock_prev = coppock_curve(df['Close'].values)
     factor_signals = {
         "Momentum": (df['Mom5D'].iloc[-1] - mom_median_th) / max(0.1, df['Mom5D'].std()),
@@ -3031,16 +3037,35 @@ if run_btn:
 
     with st.spinner("🤖 Menganalisis mode Swing dan Daytrade secara paralel..."):
         from concurrent.futures import ThreadPoolExecutor
+        try:
+            from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+        except ImportError:
+            try:
+                from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
+            except ImportError:
+                add_script_run_ctx = None
+                get_script_run_ctx = None
+
+        ctx = get_script_run_ctx() if get_script_run_ctx is not None else None
+        v12_mem_snapshot = dict(st.session_state.v12_memory) if "v12_memory" in st.session_state else {}
+
+        def run_analysis_task(func, *args, **kwargs):
+            if add_script_run_ctx and ctx:
+                add_script_run_ctx(ctx=ctx)
+            return func(*args, **kwargs)
+
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_swing = executor.submit(
+                run_analysis_task,
                 analyze_stock,
                 ticker_input, harga_manual, sudah_beli, harga_beli_float,
-                False  # swing
+                False, v12_mem_snapshot  # swing
             )
             future_day = executor.submit(
+                run_analysis_task,
                 analyze_stock,
                 ticker_input, harga_manual, sudah_beli, harga_beli_float,
-                True   # daytrade
+                True, v12_mem_snapshot   # daytrade
             )
             res_swing = future_swing.result()
             res_day = future_day.result()
