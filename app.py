@@ -833,7 +833,7 @@ with st.sidebar:
             gaya_key = r.get('Gaya', 'SW')
             mode_actual = "swing" if gaya_key == "SW" else "daytrade"
             actual_key = (waktu_key, saham_key, mode_actual)
-            actual_data = st.session_state.riwayat_actual.get(actual_key) or st.session_state.riwayat_actual.get((waktu_key, saham_key))
+            actual_data = st.session_state.riwayat_actual.get(actual_key)
 
             btn_key = f"btn_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
             del_key = f"del_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
