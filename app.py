@@ -326,7 +326,7 @@ def muat_riwayat_dari_sheets():
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        return list(records)[:500]
+        return list(records)[:200]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
@@ -383,7 +383,7 @@ def hapus_riwayat_item(waktu, saham, gaya=None):
         sheet.clear()
         if filtered:
             headers = list(filtered[0].keys())
-            sheet.insert_row(headers, 1)
+            sheet.update('A1:Z1', [headers], value_input_option='RAW')
             rows = [[row.get(h, "") for h in headers] for row in filtered]
             sheet.append_rows(rows, value_input_option='RAW')
         st.session_state.riwayat = filtered
@@ -395,12 +395,17 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
         headers = ['Waktu', 'Saham', 'Mode', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome', 'Entry_Miss']
-        
-        # Pastikan kolom Mode ada di header sheet jika belum ada
-        if records:
+
+        # Jika belum ada data sama sekali, tulis header dulu
+        if not records:
+            sheet.insert_row(headers, 1)
+        else:
             existing_headers = list(records[0].keys())
             if 'Mode' not in existing_headers:
-                sheet.insert_row(headers, 1)
+                # Update baris 1 saja — JANGAN insert_row agar tidak duplikat header
+                sheet.update('A1:H1', [headers], value_input_option='RAW')
+                # Reload records karena header berubah
+                records = sheet.get_all_records()
 
         row_index = None
         for i, row in enumerate(records):
@@ -417,8 +422,6 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
         if row_index:
             sheet.update(f'A{row_index}:H{row_index}', [new_row], value_input_option='RAW')
         else:
-            if not records:
-                sheet.insert_row(headers, 1)
             sheet.append_row(new_row, value_input_option='RAW')
         st.session_state.riwayat_actual = muat_riwayat_actual()
         integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
@@ -1648,8 +1651,6 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         # --- Estimasi return & TP/SL ---
         alpha = np.mean(s_ret) - beta * np.mean(i_ret)
         mu_est = np.clip(beta * i_ret5 + alpha + mom_combo * 0.15, -0.04, 0.04)
-        tp_est = last_price * (1 + mu_est + 0.6 * sigma20)
-        sl_est = last_price * (1 + mu_est - 0.5 * sigma20)
 
         # --- Metrik tambahan ---
         # Bollinger %B
@@ -1671,13 +1672,28 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         else:
             trend_consistency = 50.0
 
-        # Entry Zone sederhana (berbasis pivot)
+        # Entry Zone sederhana (berbasis pivot & fraksi BEI)
         pivot = (highs[-1] + lows[-1] + closes[-1]) / 3.0
         s1 = 2 * pivot - highs[-1]
-        entry_low = min(s1, last_price * (1 - sigma20))
-        entry_high = last_price
-        if entry_low > entry_high:
-            entry_low, entry_high = entry_high, entry_low
+        entry_low = fraksi_bei(min(s1, last_price * (1 - sigma20)))
+        entry_high = fraksi_bei(last_price)
+        if entry_low >= entry_high:
+            step = fraksi_step(last_price)
+            entry_low = fraksi_bei(entry_high - step)
+
+        # Take Profit Est (di atas harga pasar, dibulatkan ke fraksi BEI)
+        tp_dist_pct = max(0.02, max(mu_est, 0.01) + 0.8 * sigma20)
+        tp_est = fraksi_bei(last_price * (1 + tp_dist_pct))
+        if tp_est <= last_price:
+            step = fraksi_step(last_price)
+            tp_est = fraksi_bei(last_price + 2 * step)
+
+        # Stop Loss Est (selalu di bawah entry_low & last_price, dibulatkan ke fraksi BEI)
+        sl_dist_pct = max(0.02, 1.5 * sigma20)
+        sl_est = fraksi_bei(entry_low * (1 - sl_dist_pct))
+        if sl_est >= entry_low:
+            step = fraksi_step(entry_low)
+            sl_est = fraksi_bei(entry_low - 2 * step)
 
         # Likuiditas
         avg_value = np.mean(volumes[-20:] * closes[-20:])
