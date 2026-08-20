@@ -326,7 +326,7 @@ def muat_riwayat_dari_sheets():
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        return list(records)[:200]
+        return list(records)[:500]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
