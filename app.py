@@ -337,20 +337,27 @@ def muat_riwayat_actual():
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
         for row in records:
-            mode = row.get('Mode') or 'swing'
             waktu = str(row.get('Waktu', ''))
             saham = str(row.get('Saham', ''))
+            gaya = row.get('Mode', '')   # bisa 'SW', 'DT', atau kosong (data lama)
+
+            # Isi nilai aktual
             val = {
                 'Actual_High': row.get('Actual_High', ''),
                 'Actual_Low': row.get('Actual_Low', ''),
                 'Actual_Close': row.get('Actual_Close', ''),
                 'Outcome': row.get('Outcome', ''),
                 'Entry_Miss': row.get('Entry_Miss', ''),
-                'Mode': mode
+                'Mode': gaya if gaya else ''
             }
+
             if waktu and saham:
-                data[(waktu, saham, mode)] = val
-                data[(waktu, saham)] = val
+                if gaya:
+                    # Data baru: gunakan key 3 elemen
+                    data[(waktu, saham, gaya)] = val
+                else:
+                    # Data lama tanpa mode: gunakan key 2 elemen
+                    data[(waktu, saham)] = val
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
@@ -3058,14 +3065,25 @@ def display_analysis_result(res):
             for r in st.session_state.riwayat:
                 if r['Saham'] == ticker_raw:
                     r_copy = dict(r)
-                    key_actual = (r.get('Waktu'), r.get('Saham'))
-                    actual = st.session_state.riwayat_actual.get(key_actual, {})
+                    # Ambil mode/gaya dari baris riwayat
+                    mode_actual = r.get('Gaya', 'SW')   # "SW" atau "DT"
+
+                    # Coba key 3 elemen (format baru)
+                    key_actual_baru = (r.get('Waktu'), r.get('Saham'), mode_actual)
+                    actual = st.session_state.riwayat_actual.get(key_actual_baru)
+
+                    # Fallback ke key 2 elemen (format lama)
+                    if actual is None:
+                        key_actual_lama = (r.get('Waktu'), r.get('Saham'))
+                        actual = st.session_state.riwayat_actual.get(key_actual_lama, {})
+
                     if actual:
                         r_copy['Actual_High']   = actual.get('Actual_High', '')
                         r_copy['Actual_Low']    = actual.get('Actual_Low', '')
                         r_copy['Actual_Close']  = actual.get('Actual_Close', '')
                         r_copy['Actual_Outcome']= actual.get('Outcome', '')
                         r_copy['Entry_Miss']    = actual.get('Entry_Miss', '')
+
                     riwayat_konteks.append(r_copy)
                     if len(riwayat_konteks) >= 20:
                         break
