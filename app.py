@@ -311,7 +311,7 @@ def simpan_riwayat(ringkasan):
         for item in reversed(items_to_add):
             ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
             data.insert(0, ringkasan_bersih)
-        data = data[:200]
+        data = data[:500]
         if data:
             headers = list(data[0].keys())
             sheet.clear()
@@ -584,7 +584,7 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     riwayat_text = ""
     if riwayat:
         riwayat_text = "Riwayat analisis sebelumnya (termasuk hasil aktual jika tersedia):\n"
-        for r in riwayat[:10]:
+        for r in riwayat:  # sudah difilter per emiten oleh pemanggil
             base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
             # Tambahkan data aktual
             if r.get('Actual_High') or r.get('Actual_Outcome'):
@@ -3065,7 +3065,7 @@ def display_analysis_result(res):
                         r_copy['Actual_Outcome']= actual.get('Outcome', '')
                         r_copy['Entry_Miss']    = actual.get('Entry_Miss', '')
                     riwayat_konteks.append(r_copy)
-                    if len(riwayat_konteks) >= 10:
+                    if len(riwayat_konteks) >= 20:
                         break
 
             hasil_ai, error_ai = analisis_saham_dengan_ai(data_ai, riwayat_konteks, st.session_state.gemini_api_key)
