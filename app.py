@@ -333,13 +333,23 @@ def muat_riwayat_dari_sheets():
 
 def muat_riwayat_actual():
     data = {}
+    # Normalisasi nilai mode dari berbagai format ke label pendek (SW/DT)
+    def norm_gaya(val):
+        v = str(val).strip().lower()
+        if v in ('sw', 'swing'): return 'SW'
+        if v in ('dt', 'daytrade', 'day_trade', 'day trade'): return 'DT'
+        return val  # kembalikan apa adanya jika tidak dikenali
+
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
         for row in records:
             waktu = str(row.get('Waktu', ''))
             saham = str(row.get('Saham', ''))
-            gaya = row.get('Mode', '')   # bisa 'SW', 'DT', atau kosong (data lama)
+            # Baca dari kolom 'Mode' (simpan_riwayat_actual menulis ke sini)
+            # lalu normalisasi ke 'SW'/'DT' agar cocok dengan kolom 'Gaya' di riwayat
+            raw_gaya = row.get('Mode', '') or row.get('Gaya', '')
+            gaya = norm_gaya(raw_gaya) if raw_gaya else ''
 
             # Isi nilai aktual
             val = {
@@ -353,11 +363,10 @@ def muat_riwayat_actual():
 
             if waktu and saham:
                 if gaya:
-                    # Data baru: gunakan key 3 elemen
+                    # Data baru: gunakan key 3 elemen (nilai sudah dinormalisasi)
                     data[(waktu, saham, gaya)] = val
-                else:
-                    # Data lama tanpa mode: gunakan key 2 elemen
-                    data[(waktu, saham)] = val
+                # Selalu simpan juga key 2 elemen sebagai fallback
+                data[(waktu, saham)] = val
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
@@ -662,8 +671,9 @@ def analisis_riwayat_global(riwayat_data, riwayat_actual, api_key):
 
         # Tambahkan data aktual jika tersedia
         gaya = r.get('Gaya', 'SW')
+        # Coba key 3 elemen (dengan gaya), fallback ke key 2 elemen (data lama)
         key_actual = (r.get('Waktu'), r.get('Saham'), gaya)
-        actual = riwayat_actual.get(key_actual, {})
+        actual = riwayat_actual.get(key_actual) or riwayat_actual.get((r.get('Waktu'), r.get('Saham')), {})
         if actual:
             base += " | Hasil Aktual: "
             details = []
