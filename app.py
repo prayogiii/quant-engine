@@ -650,10 +650,12 @@ def analisis_riwayat_global(riwayat_data, riwayat_actual, api_key):
     if not riwayat_data: return None, "Belum ada riwayat."
     prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan (termasuk hasil aktual jika tersedia):\n\n"
     for r in riwayat_data[:30]:
-        base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | Harga: {r['Harga']} | RRR: {r['RRR']} | Sentimen: {r['Sentimen']} | Rezim: {r['Rezim']} | TP%: {r['TP%']}% | SL%: {r['SL%']}%"
+        gaya_label = "📆 SW" if r.get('Gaya') == "SW" else "⏱️ DT"
+        base = f"- {r['Waktu']}|{gaya_label}|{r['Saham']}|Sinyal:{r['Sinyal']}|Harga:{r['Harga']}|RRR:{r['RRR']}|Sentimen:{r['Sentimen']}|Rezim:{r['Rezim']}|TP%:{r['TP%']}%|SL%:{r['SL%']}%"
 
         # Tambahkan data aktual jika tersedia
-        key_actual = (r.get('Waktu'), r.get('Saham'))
+        gaya = r.get('Gaya', 'SW')
+        key_actual = (r.get('Waktu'), r.get('Saham'), gaya)
         actual = riwayat_actual.get(key_actual, {})
         if actual:
             base += " | Hasil Aktual: "
