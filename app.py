@@ -311,7 +311,7 @@ def simpan_riwayat(ringkasan):
         for item in reversed(items_to_add):
             ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
             data.insert(0, ringkasan_bersih)
-        data = data[:50]
+        data = data[:500]
         if data:
             headers = list(data[0].keys())
             sheet.clear()
@@ -326,7 +326,7 @@ def muat_riwayat_dari_sheets():
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        return list(records)[:50]
+        return list(records)[:500]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
