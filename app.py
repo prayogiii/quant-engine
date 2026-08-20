@@ -97,7 +97,7 @@ def init_sheets():
         sheet = get_gsheet()
         existing = {ws.title: ws for ws in sheet.worksheets()}   # ⬅️ ubah di sini
         if "riwayat" not in existing:
-            sheet.add_worksheet("riwayat", rows=100, cols=35)
+            sheet.add_worksheet("riwayat", rows=500, cols=35)
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
         if "v12_predictions" not in existing:
@@ -311,7 +311,7 @@ def simpan_riwayat(ringkasan):
         for item in reversed(items_to_add):
             ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
             data.insert(0, ringkasan_bersih)
-        data = data[:500]
+        data = data[:200]
         if data:
             headers = list(data[0].keys())
             sheet.clear()
@@ -326,7 +326,7 @@ def muat_riwayat_dari_sheets():
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        return list(records)[:500]
+        return list(records)[:200]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
@@ -363,7 +363,7 @@ def hapus_riwayat_item(waktu, saham, gaya=None):
             filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham and r.get('Gaya') == gaya)]
         else:
             filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
-        filtered = filtered[:50]
+        filtered = filtered[:200]
         sheet.clear()
         if filtered:
             headers = list(filtered[0].keys())
