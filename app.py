@@ -364,9 +364,11 @@ def muat_riwayat_actual():
                     data[(waktu, saham, gaya)] = val
                     mode_long = "swing" if gaya == "SW" else ("daytrade" if gaya == "DT" else gaya)
                     data[(waktu, saham, mode_long)] = val
-                if raw_gaya:
+                elif raw_gaya:
                     data[(waktu, saham, str(raw_gaya))] = val
-                data[(waktu, saham)] = val
+                else:
+                    # Legacy data tanpa spesifikasi mode
+                    data[(waktu, saham)] = val
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
     return data
@@ -416,7 +418,7 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
         row_index = None
         target_mode_norm = norm_gaya(mode)
         for i, row in enumerate(records):
-            r_mode = row.get('Mode') or row.get('Gaya') or 'swing'
+            r_mode = row.get('Mode') or row.get('Gaya') or ''
             if str(row.get('Waktu')) == str(waktu) and str(row.get('Saham')) == str(saham) and norm_gaya(r_mode) == target_mode_norm:
                 row_index = i + 2
                 break
