@@ -346,26 +346,26 @@ def muat_riwayat_actual():
         for row in records:
             waktu = str(row.get('Waktu', ''))
             saham = str(row.get('Saham', ''))
-            # Baca dari kolom 'Mode' (simpan_riwayat_actual menulis ke sini)
-            # lalu normalisasi ke 'SW'/'DT' agar cocok dengan kolom 'Gaya' di riwayat
             raw_gaya = row.get('Mode', '') or row.get('Gaya', '')
             gaya = norm_gaya(raw_gaya) if raw_gaya else ''
 
             # Isi nilai aktual
             val = {
-                'Actual_High': row.get('Actual_High', ''),
-                'Actual_Low': row.get('Actual_Low', ''),
-                'Actual_Close': row.get('Actual_Close', ''),
-                'Outcome': row.get('Outcome', ''),
-                'Entry_Miss': row.get('Entry_Miss', ''),
+                'Actual_High': str(row.get('Actual_High', '') or '').strip(),
+                'Actual_Low': str(row.get('Actual_Low', '') or '').strip(),
+                'Actual_Close': str(row.get('Actual_Close', '') or '').strip(),
+                'Outcome': str(row.get('Outcome', '') or '').strip(),
+                'Entry_Miss': str(row.get('Entry_Miss', '') or '').strip(),
                 'Mode': gaya if gaya else ''
             }
 
             if waktu and saham:
                 if gaya:
-                    # Data baru: gunakan key 3 elemen (nilai sudah dinormalisasi)
                     data[(waktu, saham, gaya)] = val
-                # Selalu simpan juga key 2 elemen sebagai fallback
+                    mode_long = "swing" if gaya == "SW" else ("daytrade" if gaya == "DT" else gaya)
+                    data[(waktu, saham, mode_long)] = val
+                if raw_gaya:
+                    data[(waktu, saham, str(raw_gaya))] = val
                 data[(waktu, saham)] = val
     except Exception as e:
         st.error(f"Gagal memuat actual: {e}")
@@ -391,6 +391,12 @@ def hapus_riwayat_item(waktu, saham, gaya=None):
         st.error(f"❌ Gagal menghapus riwayat: {e}")
         
 def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
+    def norm_gaya(val):
+        v = str(val).strip().lower()
+        if v in ('sw', 'swing'): return 'SW'
+        if v in ('dt', 'daytrade', 'day_trade', 'day trade'): return 'DT'
+        return val
+
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
@@ -408,9 +414,10 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
                 records = sheet.get_all_records()
 
         row_index = None
+        target_mode_norm = norm_gaya(mode)
         for i, row in enumerate(records):
-            r_mode = row.get('Mode') or 'swing'
-            if row.get('Waktu') == waktu and row.get('Saham') == saham and r_mode == mode:
+            r_mode = row.get('Mode') or row.get('Gaya') or 'swing'
+            if str(row.get('Waktu')) == str(waktu) and str(row.get('Saham')) == str(saham) and norm_gaya(r_mode) == target_mode_norm:
                 row_index = i + 2
                 break
         new_row = [waktu, saham, mode,
@@ -854,15 +861,27 @@ with st.sidebar:
             saham_key = r.get('Saham','')
             gaya_key = r.get('Gaya', 'SW')
             mode_actual = "swing" if gaya_key == "SW" else "daytrade"
-            actual_key = (waktu_key, saham_key, mode_actual)
-            actual_data = st.session_state.riwayat_actual.get(actual_key)
+            actual_data = (
+                st.session_state.riwayat_actual.get((waktu_key, saham_key, gaya_key)) or
+                st.session_state.riwayat_actual.get((waktu_key, saham_key, mode_actual)) or
+                st.session_state.riwayat_actual.get((waktu_key, saham_key))
+            )
 
             btn_key = f"btn_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
             del_key = f"del_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
             show_key = f"show_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
             form_key = f"form_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
 
-            if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
+            has_actual = False
+            if actual_data:
+                if (actual_data.get('Actual_High') or 
+                    actual_data.get('Actual_Low') or 
+                    actual_data.get('Actual_Close') or 
+                    actual_data.get('Outcome') or 
+                    actual_data.get('Entry_Miss') == 'Yes'):
+                    has_actual = True
+
+            if has_actual:
                 st.caption(f"📌 High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
                 if actual_data.get('Entry_Miss') == 'Yes':
                     st.caption("⚠️ Entry Tidak Tersentuh")
@@ -1082,10 +1101,22 @@ with st.sidebar:
                     saham_key = r.get('Saham','')
                     gaya_key = r.get('Gaya', 'SW')
                     mode_actual = "swing" if gaya_key == "SW" else "daytrade"
-                    actual_key = (waktu_key, saham_key, mode_actual)
-                    actual_data = st.session_state.riwayat_actual.get(actual_key) or st.session_state.riwayat_actual.get((waktu_key, saham_key))
-    
-                    if actual_data and (actual_data.get('Actual_High') or actual_data.get('Outcome')):
+                    actual_data = (
+                        st.session_state.riwayat_actual.get((waktu_key, saham_key, gaya_key)) or
+                        st.session_state.riwayat_actual.get((waktu_key, saham_key, mode_actual)) or
+                        st.session_state.riwayat_actual.get((waktu_key, saham_key))
+                    )
+
+                    has_actual = False
+                    if actual_data:
+                        if (actual_data.get('Actual_High') or 
+                            actual_data.get('Actual_Low') or 
+                            actual_data.get('Actual_Close') or 
+                            actual_data.get('Outcome') or 
+                            actual_data.get('Entry_Miss') == 'Yes'):
+                            has_actual = True
+
+                    if has_actual:
                         st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
                         if actual_data.get('Entry_Miss') == 'Yes':
                             st.caption("⚠️ Entry Tidak Tersentuh")
