@@ -134,8 +134,8 @@ def save_v12_memory(mem):
         rows = [{'ticker': t, 'data': json.dumps(d)} for t, d in mem.items()]
         sheet.clear()
         if rows:
-            sheet.insert_row(['ticker', 'data'], 1)
-            sheet.append_rows([[r['ticker'], r['data']] for r in rows], value_input_option='RAW')
+            all_values = [['ticker', 'data']] + [[r['ticker'], r['data']] for r in rows]
+            sheet.update(all_values, value_input_option='RAW')
     except Exception as e:
         st.error(f"Gagal menyimpan V12 memory: {e}")
 
@@ -314,10 +314,9 @@ def simpan_riwayat(ringkasan):
         data = data[:500]
         if data:
             headers = list(data[0].keys())
-            sheet.clear()
-            sheet.insert_row(headers, 1)
             rows = [[row.get(h, "") for h in headers] for row in data]
-            sheet.append_rows(rows, value_input_option='RAW')
+            sheet.clear()
+            sheet.update([headers] + rows, value_input_option='RAW')
         st.session_state.riwayat = data
     except Exception as e:
         st.error(f"❌ Gagal menyimpan riwayat: {e}")
@@ -377,17 +376,29 @@ def hapus_riwayat_item(waktu, saham, gaya=None):
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        if gaya:
-            filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham and r.get('Gaya') == gaya)]
+        waktu_str = str(waktu).strip()
+        saham_str = str(saham).strip()
+        gaya_str = str(gaya).strip() if gaya else None
+
+        if gaya_str:
+            filtered = [
+                r for r in records
+                if not (str(r.get('Waktu', '')).strip() == waktu_str and
+                        str(r.get('Saham', '')).strip() == saham_str and
+                        str(r.get('Gaya', '')).strip() == gaya_str)
+            ]
         else:
-            filtered = [r for r in records if not (r.get('Waktu') == waktu and r.get('Saham') == saham)]
-        filtered = filtered[:200]
+            filtered = [
+                r for r in records
+                if not (str(r.get('Waktu', '')).strip() == waktu_str and
+                        str(r.get('Saham', '')).strip() == saham_str)
+            ]
+        filtered = filtered[:500]
         sheet.clear()
         if filtered:
             headers = list(filtered[0].keys())
-            sheet.update('A1:Z1', [headers], value_input_option='RAW')
             rows = [[row.get(h, "") for h in headers] for row in filtered]
-            sheet.append_rows(rows, value_input_option='RAW')
+            sheet.update([headers] + rows, value_input_option='RAW')
         st.session_state.riwayat = filtered
     except Exception as e:
         st.error(f"❌ Gagal menghapus riwayat: {e}")
