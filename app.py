@@ -478,30 +478,44 @@ def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
                 entry_high_f = None
 
             if entry_low_f is not None and entry_high_f is not None and entry_low_f < entry_high_f:
+                gap = None
+
+                # --- Path A: User mengisi Actual Low → hitung gap dari data nyata ---
                 actual_low_str = actual_data.get('Actual_Low', '')
                 if actual_low_str:
                     try:
                         actual_low_f = float(str(actual_low_str).replace(",", ""))
-                        # Untuk sinyal BUY: entry zone seharusnya di bawah harga.
-                        # Jika actual low > entry_high, berarti harga tidak pernah turun menyentuh entry.
-                        # Ini menunjukkan entry zone terlalu rendah → kita koreksi.
+                        # Jika actual low > entry_high, harga tidak pernah menyentuh zona entry
                         if actual_low_f > entry_high_f:
                             gap = actual_low_f - entry_high_f
-
-                            # Ambil memori ticker, tambahkan key entry_error_ema jika belum ada
-                            mem = st.session_state.v12_memory.get(ticker, {})
-                            if 'entry_error_ema' not in mem:
-                                mem['entry_error_ema'] = 0.0
-
-                            alpha = 0.2   # semakin besar gap, makin cepat koreksi
-                            mem['entry_error_ema'] = (
-                                mem['entry_error_ema'] * (1 - alpha) + gap * alpha
-                            )
-
-                            st.session_state.v12_memory[ticker] = mem
-                            save_v12_memory(st.session_state.v12_memory)
                     except:
-                        pass  # tidak ada actual low valid → tidak update entry error
+                        pass
+
+                # --- Path B: User centang "Entry Tidak Tersentuh" (Entry_Miss=Yes)
+                #     tanpa mengisi Actual Low → estimasi gap dari selisih close price
+                #     prediksi terakhir vs entry_high (fallback konservatif) ---
+                if gap is None and actual_data.get('Entry_Miss', '') == 'Yes':
+                    last_close = safe_float(last_pred.get('close_price'), 0.0)
+                    if last_close > entry_high_f:
+                        # Harga penutupan sudah di atas entry_high → gap = selisihnya
+                        gap = last_close - entry_high_f
+                    else:
+                        # Tidak bisa estimasi gap dengan pasti, gunakan nilai kecil
+                        # agar engine tahu ada miss tapi tidak over-koreksi
+                        gap = entry_high_f * 0.01  # 1% dari entry_high sebagai proxy
+
+                if gap is not None and gap > 0:
+                    mem = st.session_state.v12_memory.get(ticker, {})
+                    if 'entry_error_ema' not in mem:
+                        mem['entry_error_ema'] = 0.0
+
+                    alpha = 0.2
+                    mem['entry_error_ema'] = (
+                        mem['entry_error_ema'] * (1 - alpha) + gap * alpha
+                    )
+
+                    st.session_state.v12_memory[ticker] = mem
+                    save_v12_memory(st.session_state.v12_memory)
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 # ====================== API IDX ======================
@@ -2143,8 +2157,12 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         entry_high = entry_low + min_entry_width
         entry_high = min(entry_high, harga_terakhir)
 
-    mem = st.session_state.v12_memory.get(ticker_raw, {})
-    entry_error = mem.get('entry_error_ema', 0.0)
+    # Baca entry_error dari v12_mem (parameter thread-safe), fallback ke session_state
+    if v12_mem is not None:
+        mem_for_entry = v12_mem.get(ticker_raw, {})
+    else:
+        mem_for_entry = st.session_state.v12_memory.get(ticker_raw, {})
+    entry_error = mem_for_entry.get('entry_error_ema', 0.0)
     if entry_error > 0:
         entry_low += entry_error * 0.2
         entry_high += entry_error * 0.2
