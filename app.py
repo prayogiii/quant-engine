@@ -97,7 +97,7 @@ def init_sheets():
         sheet = get_gsheet()
         existing = {ws.title: ws for ws in sheet.worksheets()}   # ⬅️ ubah di sini
         if "riwayat" not in existing:
-            sheet.add_worksheet("riwayat", rows=500, cols=35)
+            sheet.add_worksheet("riwayat", rows=3000, cols=35)
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
         if "v12_predictions" not in existing:
@@ -307,11 +307,12 @@ def simpan_riwayat(ringkasan):
         sheet = get_gsheet().worksheet("riwayat")
         items_to_add = ringkasan if isinstance(ringkasan, list) else [ringkasan]
         records = sheet.get_all_records()
-        data = list(records)
+        valid_records = [r for r in records if any(str(v).strip() for v in r.values())]
+        data = list(valid_records)
         for item in reversed(items_to_add):
             ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
             data.insert(0, ringkasan_bersih)
-        data = data[:500]
+        data = data[:3000]
         if data:
             headers = list(data[0].keys())
             rows = [[row.get(h, "") for h in headers] for row in data]
@@ -325,7 +326,8 @@ def muat_riwayat_dari_sheets():
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        return list(records)[:200]
+        valid_records = [r for r in records if any(str(v).strip() for v in r.values())]
+        return valid_records[:3000]
     except Exception as e:
         st.error(f"❌ Gagal memuat riwayat: {e}")
         return []
@@ -376,24 +378,25 @@ def hapus_riwayat_item(waktu, saham, gaya=None):
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
+        valid_records = [r for r in records if any(str(v).strip() for v in r.values())]
         waktu_str = str(waktu).strip()
         saham_str = str(saham).strip()
         gaya_str = str(gaya).strip() if gaya else None
 
         if gaya_str:
             filtered = [
-                r for r in records
+                r for r in valid_records
                 if not (str(r.get('Waktu', '')).strip() == waktu_str and
                         str(r.get('Saham', '')).strip() == saham_str and
                         str(r.get('Gaya', '')).strip() == gaya_str)
             ]
         else:
             filtered = [
-                r for r in records
+                r for r in valid_records
                 if not (str(r.get('Waktu', '')).strip() == waktu_str and
                         str(r.get('Saham', '')).strip() == saham_str)
             ]
-        filtered = filtered[:500]
+        filtered = filtered[:3000]
         sheet.clear()
         if filtered:
             headers = list(filtered[0].keys())
