@@ -4039,7 +4039,6 @@ if st.session_state.get('scan_results'):
                             st.error("Gagal mengakses Gemini.")
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
-    render_notifikasi_evaluasi_riwayat()
     st.title("📊 Quant & Risk Engine Pro")
     st.markdown("""
     ## Selamat Datang di Dashboard Analisis Saham IHSG
