@@ -836,6 +836,15 @@ with st.sidebar:
                 harga_beli_float = float(harga_beli_str.replace(",", ""))
             except:
                 st.error("Format harga beli salah")
+
+    # ---- Pengaturan Fee Broker ----
+    with st.expander("⚙️ Fee Broker (Beli & Jual)", expanded=False):
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            fee_beli_pct = st.number_input("Fee Beli (%)", min_value=0.0, max_value=2.0, value=0.15, step=0.05, key="fee_beli_pct")
+        with col_f2:
+            fee_jual_pct = st.number_input("Fee Jual (%)", min_value=0.0, max_value=2.0, value=0.25, step=0.05, key="fee_jual_pct")
+
     col1, col2 = st.columns(2)
     with col1:
         run_btn = st.button("🚀 ANALISIS", use_container_width=True)
@@ -1833,7 +1842,7 @@ def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
         return base + " " + " ".join(notes)
     return base
 # ==================== FUNGSI ANALISIS UTAMA ====================
-def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_daytrade, v12_mem=None):
+def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_daytrade, v12_mem=None, fee_beli_pct=0.15, fee_jual_pct=0.25):
     """
     Menjalankan analisis lengkap untuk satu mode (swing/daytrade).
     Mengembalikan dictionary hasil atau None jika data tidak cukup.
@@ -2222,16 +2231,45 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         sl_harga = fraksi_bei(harga_terakhir * 0.95)
     sl_pct = (harga_terakhir - sl_harga) / harga_terakhir * 100
 
-    if r1 > harga_terakhir:
-        tp_low = r1
+    if is_daytrade:
+        # --- PERHITUNGAN TP DAYTRADE BERBASIS ATR INTRADAY & FAKTOR FEE BROKER ---
+        # 1. Target ATR Intraday (5m)
+        tp_low_raw = entry_low + (tp_mult_low * atr14_val)
+        tp_high_raw = entry_low + (tp_mult_high * atr14_val)
+
+        # 2. Safety Floor untuk Memastikan Cover Fee Broker (Beli + Jual) + Target Net Profit Margin (+0.6% net)
+        total_fee_pct = (fee_beli_pct + fee_jual_pct) / 100.0
+        min_net_margin = 0.0060
+        fee_floor = entry_low * (1.0 + total_fee_pct + min_net_margin)
+
+        # Gunakan nilai terbesar antara ATR Intraday & Fee Floor
+        tp_low_raw = max(tp_low_raw, fee_floor)
+        tp_high_raw = max(tp_high_raw, tp_low_raw + (2 * fraksi_step(tp_low_raw)))
+
+        # 3. Pastikan minimal 2 tick di atas entry_low dan harga_terakhir agar komisi tercover penuh
+        min_tp_low_ticks = max(entry_low + (2 * step), harga_terakhir + (2 * fraksi_step(harga_terakhir)))
+        if tp_low_raw < min_tp_low_ticks:
+            tp_low_raw = min_tp_low_ticks
+
+        tp_low = fraksi_bei(tp_low_raw)
+        tp_high = fraksi_bei(tp_high_raw)
+        if tp_low <= entry_low:
+            tp_low = fraksi_bei(entry_low + 2 * step)
+        if tp_high <= tp_low:
+            tp_high = fraksi_bei(tp_low + 2 * fraksi_step(tp_low))
     else:
-        tp_low = harga_terakhir + tp_mult_low * atr14_val
-    if r2 > harga_terakhir:
-        tp_high = r2
-    else:
-        tp_high = harga_terakhir + tp_mult_high * atr14_val
-    if tp_low > tp_high:
-        tp_low, tp_high = tp_high, tp_low
+        # --- PERHITUNGAN TP SWING (RESISTANCE HARIAN / PIVOT R1 R2) ---
+        if r1 > harga_terakhir:
+            tp_low = r1
+        else:
+            tp_low = harga_terakhir + tp_mult_low * atr14_val
+        if r2 > harga_terakhir:
+            tp_high = r2
+        else:
+            tp_high = harga_terakhir + tp_mult_high * atr14_val
+        if tp_low > tp_high:
+            tp_low, tp_high = tp_high, tp_low
+
     tp_pct_low = (tp_low - harga_terakhir) / harga_terakhir * 100
     tp_pct_high = (tp_high - harga_terakhir) / harga_terakhir * 100
 
@@ -3218,13 +3256,13 @@ if run_btn:
                 run_analysis_task,
                 analyze_stock,
                 ticker_input, harga_manual, sudah_beli, harga_beli_float,
-                False, v12_mem_snapshot  # swing
+                False, v12_mem_snapshot, fee_beli_pct, fee_jual_pct  # swing
             )
             future_day = executor.submit(
                 run_analysis_task,
                 analyze_stock,
                 ticker_input, harga_manual, sudah_beli, harga_beli_float,
-                True, v12_mem_snapshot   # daytrade
+                True, v12_mem_snapshot, fee_beli_pct, fee_jual_pct   # daytrade
             )
             res_swing = future_swing.result()
             res_day = future_day.result()
