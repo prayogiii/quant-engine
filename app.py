@@ -451,6 +451,298 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
 
+def hitung_hari_bursa(start_date, end_date):
+    """Menghitung jumlah hari bursa (Senin-Jumat) antara 2 tanggal"""
+    if isinstance(start_date, datetime):
+        start_date = start_date.date()
+    if isinstance(end_date, datetime):
+        end_date = end_date.date()
+    if start_date >= end_date:
+        return 0
+    cur = start_date + timedelta(days=1)
+    b_days = 0
+    while cur <= end_date:
+        if cur.weekday() < 5:
+            b_days += 1
+        cur += timedelta(days=1)
+    return b_days
+
+def fetch_actual_data_yfinance(saham, waktu_str):
+    """
+    Mengambil data High, Low, Close historis dari yfinance sejak tanggal sinyal s/d hari ini.
+    """
+    try:
+        ticker_input = saham if saham.endswith(".JK") else f"{saham}.JK"
+        dt_part = waktu_str.split()[0]
+        dt_sinyal = datetime.strptime(dt_part, "%Y-%m-%d").date()
+        start_str = (dt_sinyal - timedelta(days=1)).strftime("%Y-%m-%d")
+        df_hist = yf.download(ticker_input, start=start_str, progress=False)
+        if df_hist is None or df_hist.empty:
+            return None
+        if isinstance(df_hist.columns, pd.MultiIndex):
+            try:
+                df_hist = df_hist.xs(ticker_input, axis=1, level=1)
+            except:
+                df_hist.columns = [c[0] for c in df_hist.columns]
+
+        df_filtered = df_hist[df_hist.index.date >= dt_sinyal]
+        if df_filtered.empty:
+            df_filtered = df_hist
+
+        max_hi = float(df_filtered['High'].max())
+        min_lo = float(df_filtered['Low'].min())
+        last_cl = float(df_filtered['Close'].iloc[-1])
+
+        return {
+            'Actual_High': f"{max_hi:,.0f}".replace(",", ""),
+            'Actual_Low': f"{min_lo:,.0f}".replace(",", ""),
+            'Actual_Close': f"{last_cl:,.0f}".replace(",", "")
+        }
+    except Exception as e:
+        return None
+
+def dapatkan_sinyal_perlu_dicatat(riwayat_data, riwayat_actual):
+    urgent_items = []
+    active_swing_items = []
+    now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
+    today_date = now_jkt.date()
+
+    for r in riwayat_data:
+        waktu_str = r.get('Waktu', '')
+        saham = r.get('Saham', '')
+        gaya = r.get('Gaya', 'SW')
+        mode_actual = "swing" if gaya == "SW" else "daytrade"
+
+        actual_data = (
+            riwayat_actual.get((waktu_str, saham, gaya)) or
+            riwayat_actual.get((waktu_str, saham, mode_actual)) or
+            riwayat_actual.get((waktu_str, saham))
+        )
+
+        has_actual = False
+        if actual_data:
+            if (actual_data.get('Actual_High') or 
+                actual_data.get('Actual_Low') or 
+                actual_data.get('Actual_Close') or 
+                actual_data.get('Outcome') or 
+                actual_data.get('Entry_Miss') == 'Yes'):
+                has_actual = True
+
+        if has_actual:
+            continue
+
+        try:
+            dt_sinyal = datetime.strptime(waktu_str.split()[0], "%Y-%m-%d").date()
+        except:
+            dt_sinyal = today_date
+
+        b_days = hitung_hari_bursa(dt_sinyal, today_date)
+
+        item = {
+            'record': r,
+            'waktu': waktu_str,
+            'saham': saham,
+            'gaya': gaya,
+            'mode_actual': mode_actual,
+            'b_days': b_days,
+            'dt_sinyal': dt_sinyal
+        }
+
+        if gaya == "DT" or mode_actual == "daytrade":
+            if dt_sinyal < today_date:
+                item['alasan'] = f"Daytrade Sesi Sebelumnya ({waktu_str})"
+                urgent_items.append(item)
+        else:
+            if b_days >= 7:
+                item['alasan'] = f"Mencapai Batas Maksimal 7 Hari Bursa ({b_days} hari kerja)"
+                urgent_items.append(item)
+            elif b_days >= 1:
+                item['alasan'] = f"Swing Berjalan (Hari bursa ke-{b_days})"
+                active_swing_items.append(item)
+
+    return urgent_items, active_swing_items
+
+def render_notifikasi_evaluasi_riwayat():
+    riwayat_data = st.session_state.get('riwayat', [])
+    riwayat_actual = st.session_state.get('riwayat_actual', {})
+
+    if not riwayat_data:
+        return
+
+    urgent_items, active_swing_items = dapatkan_sinyal_perlu_dicatat(riwayat_data, riwayat_actual)
+
+    if not urgent_items and not active_swing_items:
+        return
+
+    n_urgent = len(urgent_items)
+    n_active = len(active_swing_items)
+
+    st.markdown("""
+        <style>
+        .notif-box {
+            background: linear-gradient(135deg, #1e1b4b 0%, #311042 100%);
+            border-left: 5px solid #a855f7;
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin-bottom: 18px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    title_text = "🔔 **Pengingat Evaluasi Outcome Trading**"
+    details = []
+    if n_urgent > 0:
+        details.append(f"⚠️ **{n_urgent} sinyal perlu dicatat** (Daytrade atau Swing ≥7 hari bursa)")
+    if n_active > 0:
+        details.append(f"⏳ **{n_active} Swing aktif** (1-6 hari bursa)")
+
+    st.markdown(f"""
+    <div class="notif-box">
+        <div style="font-size:15px; font-weight:bold; color:#f472b6;">
+            {title_text}
+        </div>
+        <div style="font-size:13px; color:#e2e8f0; margin-top:4px;">
+            {' | '.join(details)}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.expander("📝 Form Evaluasi Sinyal (Quick Outcome Journal)", expanded=(n_urgent > 0)):
+        tab_urgent, tab_active = st.tabs([
+            f"🚨 Perlu Catat Immediate ({n_urgent})",
+            f"⏳ Swing Aktif ({n_active})"
+        ])
+
+        with tab_urgent:
+            if not urgent_items:
+                st.success("🎉 Semua sinyal jatuh tempo sudah dicatat!")
+            else:
+                for idx, item in enumerate(urgent_items):
+                    r = item['record']
+                    waktu_key = item['waktu']
+                    saham_key = item['saham']
+                    gaya_key = item['gaya']
+                    mode_actual = item['mode_actual']
+                    alasan = item['alasan']
+
+                    st.markdown(f"**📌 {saham_key} ({gaya_key}) - {waktu_key}** | `{alasan}`")
+                    st.caption(f"Sinyal: {r.get('Sinyal','?')} | Entry: {r.get('Entry_Zone','?')} | TP: {r.get('TP_Range','?')} | SL: Rp {r.get('SL_Harga','?')}")
+
+                    fetch_key = f"fetch_urg_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                    form_key = f"form_urg_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+
+                    col_auto, _ = st.columns([2, 1])
+                    with col_auto:
+                        if st.button(f"⚡ Fetch Otomatis Data Harga ({saham_key})", key=fetch_key):
+                            fetched = fetch_actual_data_yfinance(saham_key, waktu_key)
+                            if fetched:
+                                st.session_state[f"hi_{fetch_key}"] = fetched['Actual_High']
+                                st.session_state[f"lo_{fetch_key}"] = fetched['Actual_Low']
+                                st.session_state[f"cl_{fetch_key}"] = fetched['Actual_Close']
+                                st.success(f"Data harga {saham_key} berhasil ditarik!")
+                            else:
+                                st.error(f"Gagal mengambil data {saham_key} dari yfinance")
+
+                    with st.form(key=form_key):
+                        def_hi = st.session_state.get(f"hi_{fetch_key}", "")
+                        def_lo = st.session_state.get(f"lo_{fetch_key}", "")
+                        def_cl = st.session_state.get(f"cl_{fetch_key}", "")
+
+                        c1, c2, c3 = st.columns(3)
+                        actual_high = c1.text_input("Actual High", value=def_hi, placeholder="contoh: 5350")
+                        actual_low = c2.text_input("Actual Low", value=def_lo, placeholder="contoh: 5050")
+                        actual_close = c3.text_input("Actual Close", value=def_cl, placeholder="contoh: 5200")
+
+                        c4, c5 = st.columns(2)
+                        entry_miss = c4.checkbox("🚫 Entry Tidak Tersentuh", value=False)
+                        if entry_miss:
+                            outcome = "Not Touched"
+                        else:
+                            outcome = c5.selectbox("Outcome", ["", "Win", "Loss", "Not Touched"], format_func=lambda x: "Pilih Outcome" if x=="" else x)
+
+                        submitted = st.form_submit_button("💾 Simpan Outcome")
+                        if submitted:
+                            if not entry_miss and outcome == "":
+                                st.error("Pilih Outcome terlebih dahulu.")
+                            else:
+                                data = {
+                                    'Actual_High': actual_high.strip(),
+                                    'Actual_Low': actual_low.strip(),
+                                    'Actual_Close': actual_close.strip(),
+                                    'Outcome': outcome,
+                                    'Entry_Miss': 'Yes' if entry_miss else 'No',
+                                    'Mode': mode_actual
+                                }
+                                simpan_riwayat_actual(waktu_key, saham_key, data, mode=mode_actual)
+                                st.success(f"✅ Outcome {saham_key} berhasil disimpan!")
+                                st.rerun()
+                    st.divider()
+
+        with tab_active:
+            if not active_swing_items:
+                st.info("Tidak ada posisi Swing aktif (1-6 hari bursa) yang sedang berjalan.")
+            else:
+                for idx, item in enumerate(active_swing_items):
+                    r = item['record']
+                    waktu_key = item['waktu']
+                    saham_key = item['saham']
+                    gaya_key = item['gaya']
+                    mode_actual = item['mode_actual']
+                    alasan = item['alasan']
+
+                    st.markdown(f"**⏳ {saham_key} ({gaya_key}) - {waktu_key}** | `{alasan}`")
+                    st.caption(f"Sinyal: {r.get('Sinyal','?')} | Entry: {r.get('Entry_Zone','?')} | TP: {r.get('TP_Range','?')} | SL: Rp {r.get('SL_Harga','?')}")
+
+                    fetch_key = f"fetch_act_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                    form_key = f"form_act_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+
+                    col_auto, _ = st.columns([2, 1])
+                    with col_auto:
+                        if st.button(f"⚡ Fetch Otomatis Data Harga ({saham_key})", key=fetch_key):
+                            fetched = fetch_actual_data_yfinance(saham_key, waktu_key)
+                            if fetched:
+                                st.session_state[f"hi_{fetch_key}"] = fetched['Actual_High']
+                                st.session_state[f"lo_{fetch_key}"] = fetched['Actual_Low']
+                                st.session_state[f"cl_{fetch_key}"] = fetched['Actual_Close']
+                                st.success(f"Data harga {saham_key} berhasil ditarik!")
+                            else:
+                                st.error(f"Gagal mengambil data {saham_key} dari yfinance")
+
+                    with st.form(key=form_key):
+                        def_hi = st.session_state.get(f"hi_{fetch_key}", "")
+                        def_lo = st.session_state.get(f"lo_{fetch_key}", "")
+                        def_cl = st.session_state.get(f"cl_{fetch_key}", "")
+
+                        c1, c2, c3 = st.columns(3)
+                        actual_high = c1.text_input("Actual High", value=def_hi, placeholder="contoh: 5350")
+                        actual_low = c2.text_input("Actual Low", value=def_lo, placeholder="contoh: 5050")
+                        actual_close = c3.text_input("Actual Close", value=def_cl, placeholder="contoh: 5200")
+
+                        c4, c5 = st.columns(2)
+                        entry_miss = c4.checkbox("🚫 Entry Tidak Tersentuh", value=False)
+                        if entry_miss:
+                            outcome = "Not Touched"
+                        else:
+                            outcome = c5.selectbox("Outcome", ["", "Win", "Loss", "Not Touched"], format_func=lambda x: "Pilih Outcome" if x=="" else x)
+
+                        submitted = st.form_submit_button("💾 Simpan Outcome (Early Exit)")
+                        if submitted:
+                            if not entry_miss and outcome == "":
+                                st.error("Pilih Outcome terlebih dahulu.")
+                            else:
+                                data = {
+                                    'Actual_High': actual_high.strip(),
+                                    'Actual_Low': actual_low.strip(),
+                                    'Actual_Close': actual_close.strip(),
+                                    'Outcome': outcome,
+                                    'Entry_Miss': 'Yes' if entry_miss else 'No',
+                                    'Mode': mode_actual
+                                }
+                                simpan_riwayat_actual(waktu_key, saham_key, data, mode=mode_actual)
+                                st.success(f"✅ Outcome {saham_key} berhasil disimpan!")
+                                st.rerun()
+                    st.divider()
+
 def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
     try:
         ticker = saham
@@ -972,6 +1264,8 @@ with st.sidebar:
         st.session_state.riwayat_page = 0
     if "prev_search" not in st.session_state:
         st.session_state.prev_search = ""
+    
+    render_notifikasi_evaluasi_riwayat()
     
     search_query = st.text_input("🔎 Cari Saham", key="search_riwayat", placeholder="Ketik kode saham...")
     
@@ -3745,6 +4039,7 @@ if st.session_state.get('scan_results'):
                             st.error("Gagal mengakses Gemini.")
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
+    render_notifikasi_evaluasi_riwayat()
     st.title("📊 Quant & Risk Engine Pro")
     st.markdown("""
     ## Selamat Datang di Dashboard Analisis Saham IHSG
