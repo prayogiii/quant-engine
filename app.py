@@ -448,6 +448,53 @@ def hitung_statistik_riwayat_actual(riwayat_actual):
         'eval_dt': eval_dt
     }
 
+def hitung_winrate_ticker_actual(ticker_raw, riwayat_actual):
+    """Menghitung Win Rate riwayat_actual khusus untuk 1 ticker saham."""
+    if not riwayat_actual or not isinstance(riwayat_actual, dict):
+        return None
+    
+    ticker_clean = str(ticker_raw).replace(".JK", "").upper().strip()
+    seen_ids = set()
+    win, loss, not_touched = 0, 0, 0
+    
+    for key, val in riwayat_actual.items():
+        if not isinstance(val, dict):
+            continue
+            
+        saham_key = ""
+        if isinstance(key, tuple) and len(key) >= 2:
+            saham_key = str(key[1]).replace(".JK", "").upper().strip()
+        elif isinstance(key, str):
+            saham_key = str(val.get('Saham', '')).replace(".JK", "").upper().strip()
+            
+        if saham_key != ticker_clean:
+            continue
+            
+        obj_id = id(val)
+        if obj_id in seen_ids:
+            continue
+        seen_ids.add(obj_id)
+        
+        outcome = val.get('Outcome', '')
+        if outcome == 'Win':
+            win += 1
+        elif outcome == 'Loss':
+            loss += 1
+        elif outcome == 'Not Touched' or val.get('Entry_Miss') == 'Yes':
+            not_touched += 1
+            
+    total = win + loss
+    if total == 0:
+        return {'win': 0, 'loss': 0, 'total': 0, 'win_rate': None, 'not_touched': not_touched}
+    
+    return {
+        'win': win,
+        'loss': loss,
+        'total': total,
+        'win_rate': (win / total) * 100,
+        'not_touched': not_touched
+    }
+
 def hapus_riwayat_item(waktu, saham, gaya=None):
     try:
         sheet = get_gsheet().worksheet("riwayat")
@@ -3183,6 +3230,15 @@ def display_analysis_result(res):
         if extra:
             at += f"<br><br><b>📌 Status Posisi:</b> {extra}"
 
+    win_bt_str = f"{win_bt:.1%}" if trades_bt > 0 else "N/A"
+    bt_str = f"{win_bt_str} <span style=\"font-size:12px;color:#8892b0;\">({trades_bt} Trade | PF {pf_bt:.2f})</span>" if trades_bt > 0 else "<span style=\"font-size:12px;color:#8892b0;\">N/A</span>"
+    
+    act_ticker_data = hitung_winrate_ticker_actual(ticker_raw, st.session_state.get('riwayat_actual', {}))
+    if act_ticker_data and act_ticker_data['total'] > 0:
+        act_ticker_str = f"{act_ticker_data['win_rate']:.1f}% <span style=\"font-size:12px;color:#8892b0;\">({act_ticker_data['win']} Win / {act_ticker_data['loss']} Loss)</span>"
+    else:
+        act_ticker_str = "<span style=\"font-size:12px;color:#8892b0;\">Belum ada evaluasi</span>"
+
     col1, col2 = st.columns([1, 1])
     with col1:
         if "AVOID" not in signal:
@@ -3194,8 +3250,10 @@ def display_analysis_result(res):
                     <div class="summary-item">🎯 <b>Take Profit Range:</b> Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}<br>
                         <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
                     <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
-                    <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
+                    <div class="summary-item">🏆 <b>Win Rate Backtest:</b> {bt_str}</div>
+                    <div class="summary-item">🎯 <b>Actual Record ({ticker_raw}):</b> {act_ticker_str}</div>
                     <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
+                    <div class="summary-item">📊 <b>ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</b></div>
                     <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
                 </div>
             ''', unsafe_allow_html=True)
@@ -3205,8 +3263,10 @@ def display_analysis_result(res):
                     <div class="summary-item">🕒 <b>Waktu Scan:</b> {waktu_str}</div>
                     <div class="section-title">⛔ Sinyal AVOID</div>
                     <div class="summary-item">Tidak ada rekomendasi entry untuk saat ini.</div>
-                    <div class="summary-item" style="color:#8892b0;">📊 ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</div>
+                    <div class="summary-item">🏆 <b>Win Rate Backtest:</b> {bt_str}</div>
+                    <div class="summary-item">🎯 <b>Actual Record ({ticker_raw}):</b> {act_ticker_str}</div>
                     <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
+                    <div class="summary-item">📊 <b>ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</b></div>
                     <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
                 </div>
             ''', unsafe_allow_html=True)
