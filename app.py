@@ -1090,6 +1090,7 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Estimasi: Rp {data_saham['Estimasi']}
 - Beta terhadap IHSG: {data_saham.get('Beta', 'N/A')}
 - Win Rate Backtest: {data_saham.get('WinRate', 'N/A')}
+- Actual Track Record Saham Ini: {data_saham.get('Actual_WinRate_Ticker', 'Belum ada evaluasi')}
 - Profit Factor Backtest: {data_saham.get('ProfitFactor', 'N/A')}
 - Max Drawdown Backtest: {data_saham.get('MaxDD', 'N/A')}
 - Alokasi Kelly Maks: {data_saham.get('Kelly', 'N/A')}%
@@ -3606,6 +3607,7 @@ def display_analysis_result(res):
                 "Estimasi": f"{est_besok_f:,.0f}",
                 "Beta": f"{beta_ihsg:.2f}x",
                 "WinRate": f"{win_bt:.1%}" if trades_bt else "N/A",
+                "Actual_WinRate_Ticker": f"{act_ticker_data['win_rate']:.1f}% ({act_ticker_data['win']} Win / {act_ticker_data['loss']} Loss)" if (act_ticker_data and act_ticker_data['total'] > 0) else "Belum ada evaluasi",
                 "ProfitFactor": f"{pf_bt:.2f}" if trades_bt else "N/A",
                 "MaxDD": f"{max_dd_bt:.2f}%" if trades_bt else "N/A",
                 "Kelly": f"{kelly_adj*100:.1f}",
