@@ -374,6 +374,80 @@ def muat_riwayat_actual():
         st.error(f"Gagal memuat actual: {e}")
     return data
 
+def hitung_statistik_riwayat_actual(riwayat_actual):
+    """Menghitung statistik Win Rate aktual dari st.session_state.riwayat_actual."""
+    if not riwayat_actual or not isinstance(riwayat_actual, dict):
+        return None
+    
+    seen_ids = set()
+    total_win = 0
+    total_loss = 0
+    total_not_touched = 0
+    
+    win_sw, loss_sw = 0, 0
+    win_dt, loss_dt = 0, 0
+    
+    for val in riwayat_actual.values():
+        if not isinstance(val, dict):
+            continue
+        obj_id = id(val)
+        if obj_id in seen_ids:
+            continue
+        seen_ids.add(obj_id)
+        
+        outcome = val.get('Outcome', '')
+        gaya = str(val.get('Mode', '')).upper()
+        
+        if outcome == 'Win':
+            total_win += 1
+            if gaya == 'SW':
+                win_sw += 1
+            elif gaya == 'DT':
+                win_dt += 1
+        elif outcome == 'Loss':
+            total_loss += 1
+            if gaya == 'SW':
+                loss_sw += 1
+            elif gaya == 'DT':
+                loss_dt += 1
+        elif outcome == 'Not Touched' or val.get('Entry_Miss') == 'Yes':
+            total_not_touched += 1
+            
+    total_eval = total_win + total_loss
+    
+    eval_sw = win_sw + loss_sw
+    wr_sw = (win_sw / eval_sw * 100) if eval_sw > 0 else None
+    
+    eval_dt = win_dt + loss_dt
+    wr_dt = (win_dt / eval_dt * 100) if eval_dt > 0 else None
+    
+    if total_eval == 0:
+        return {
+            'total_eval': 0,
+            'total_win': 0,
+            'total_loss': 0,
+            'total_not_touched': total_not_touched,
+            'win_rate': None,
+            'wr_sw': wr_sw,
+            'eval_sw': eval_sw,
+            'wr_dt': wr_dt,
+            'eval_dt': eval_dt
+        }
+        
+    win_rate = (total_win / total_eval) * 100
+    
+    return {
+        'total_eval': total_eval,
+        'total_win': total_win,
+        'total_loss': total_loss,
+        'total_not_touched': total_not_touched,
+        'win_rate': win_rate,
+        'wr_sw': wr_sw,
+        'eval_sw': eval_sw,
+        'wr_dt': wr_dt,
+        'eval_dt': eval_dt
+    }
+
 def hapus_riwayat_item(waktu, saham, gaya=None):
     try:
         sheet = get_gsheet().worksheet("riwayat")
@@ -589,12 +663,12 @@ def render_notifikasi_evaluasi_riwayat():
         </style>
     """, unsafe_allow_html=True)
 
-    title_text = "🔔 Pengingat Evaluasi Outcome Trading"
+    title_text = "🔔 **Pengingat Evaluasi Outcome Trading**"
     details = []
     if n_urgent > 0:
-        details.append(f"⚠️ {n_urgent} sinyal perlu dicatat (Daytrade atau Swing ≥7 hari bursa)")
+        details.append(f"⚠️ **{n_urgent} sinyal perlu dicatat** (Daytrade atau Swing ≥7 hari bursa)")
     if n_active > 0:
-        details.append(f"⏳ {n_active} Swing aktif (1-6 hari bursa)")
+        details.append(f"⏳ **{n_active} Swing aktif** (1-6 hari bursa)")
 
     st.markdown(f"""
     <div class="notif-box">
@@ -4060,6 +4134,44 @@ else:
     
     > **Disclaimer:** Dashboard ini merupakan alat bantu analisis kuantitatif. Keputusan investasi tetap tanggung jawab masing-masing. Data historis tidak menjamin performa masa depan.
     """)
+
+    st.markdown("---")
+    st.subheader("🏆 Track Record System (Win Rate Live Engine)")
+    st.caption("Statistik akurasi sinyal berdasarkan evaluasi outcome riil yang tersimpan di `riwayat_actual`.")
+
+    stats_actual = hitung_statistik_riwayat_actual(st.session_state.get('riwayat_actual', {}))
+    
+    if stats_actual and stats_actual['total_eval'] > 0:
+        c_wr1, c_wr2, c_wr3, c_wr4 = st.columns(4)
+        
+        wr_val = stats_actual['win_rate']
+        c_wr1.metric(
+            "System Win Rate",
+            f"{wr_val:.1f}%",
+            delta=f"{stats_actual['total_eval']} Sinyal Ter-evaluasi",
+            delta_color="normal" if wr_val >= 50 else "inverse"
+        )
+        
+        c_wr2.metric(
+            "Hasil Evaluation",
+            f"🟢 {stats_actual['total_win']} Win / 🔴 {stats_actual['total_loss']} Loss",
+            delta=f"⚪ {stats_actual['total_not_touched']} Not Touched" if stats_actual['total_not_touched'] > 0 else None,
+            delta_color="off"
+        )
+        
+        sw_text = f"{stats_actual['wr_sw']:.1f}% ({stats_actual['eval_sw']} trade)" if stats_actual['wr_sw'] is not None else "Belum ada data"
+        c_wr3.metric(
+            "Swing Trade Win Rate",
+            sw_text
+        )
+        
+        dt_text = f"{stats_actual['wr_dt']:.1f}% ({stats_actual['eval_dt']} trade)" if stats_actual['wr_dt'] is not None else "Belum ada data"
+        c_wr4.metric(
+            "Day Trade Win Rate",
+            dt_text
+        )
+    else:
+        st.info("ℹ️ Belum ada data outcome riil di `riwayat_actual`. Isi **Form Evaluasi Sinyal (Outcome Journal)** setelah sinyal berjalan untuk merekam Win Rate live engine.")
 
     st.markdown("---")
     st.subheader("📈 Informasi Pasar Terkini (IHSG)")
