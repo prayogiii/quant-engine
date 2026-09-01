@@ -302,16 +302,38 @@ def bersihkan_untuk_json(obj):
     elif isinstance(obj, (np.bool_,)): return bool(obj)
     return obj
 
-def simpan_riwayat(ringkasan):
+def simpan_riwayat(ringkasan, aksi_mode="simpan_baru", target_saham=None):
+    if aksi_mode == "lewati":
+        st.info("ℹ️ Riwayat tidak disimpan (Opsi 'Lewati Simpan' aktif untuk Swing Aktif).")
+        return
+
     try:
         sheet = get_gsheet().worksheet("riwayat")
         items_to_add = ringkasan if isinstance(ringkasan, list) else [ringkasan]
         records = sheet.get_all_records()
         valid_records = [r for r in records if any(str(v).strip() for v in r.values())]
         data = list(valid_records)
-        for item in reversed(items_to_add):
-            ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
-            data.insert(0, ringkasan_bersih)
+
+        if aksi_mode == "update" and target_saham:
+            saham_target_clean = str(target_saham).replace(".JK", "").strip().upper()
+            for item_new in items_to_add:
+                gaya_new = str(item_new.get("Gaya", "SW")).strip().upper()
+                ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item_new.items()}
+                updated = False
+                for idx, record in enumerate(data):
+                    s_rec = str(record.get("Saham", "")).replace(".JK", "").strip().upper()
+                    g_rec = str(record.get("Gaya", "SW")).strip().upper()
+                    if s_rec == saham_target_clean and g_rec == gaya_new:
+                        data[idx] = ringkasan_bersih
+                        updated = True
+                        break
+                if not updated:
+                    data.insert(0, ringkasan_bersih)
+        else:
+            for item in reversed(items_to_add):
+                ringkasan_bersih = {k: bersihkan_untuk_json(v) for k, v in item.items()}
+                data.insert(0, ringkasan_bersih)
+
         data = data[:3000]
         if data:
             headers = list(data[0].keys())
@@ -319,6 +341,10 @@ def simpan_riwayat(ringkasan):
             sheet.clear()
             sheet.update([headers] + rows, value_input_option='RAW')
         st.session_state.riwayat = data
+        if aksi_mode == "update":
+            st.success("✅ Catatan Swing Aktif berhasil diperbarui di riwayat!")
+        else:
+            st.success("✅ Riwayat berhasil disimpan!")
     except Exception as e:
         st.error(f"❌ Gagal menyimpan riwayat: {e}")
 
@@ -682,6 +708,71 @@ def dapatkan_sinyal_perlu_dicatat(riwayat_data, riwayat_actual):
                 active_swing_items.append(item)
 
     return urgent_items, active_swing_items
+
+def dapatkan_dict_swing_aktif(riwayat_data=None, riwayat_actual=None):
+    """
+    Mengembalikan dict {saham_clean: item_info} untuk emiten-emiten yang memiliki
+    posisi Swing (SW) aktif (belum diisi outcome actual dan belum kadaluarsa/lewat 7 hari bursa).
+    """
+    if riwayat_data is None:
+        riwayat_data = st.session_state.get('riwayat', [])
+    if riwayat_actual is None:
+        riwayat_actual = st.session_state.get('riwayat_actual', {})
+
+    active_map = {}
+    now_jkt = datetime.now(pytz.timezone("Asia/Jakarta"))
+    today_date = now_jkt.date()
+
+    for r in riwayat_data:
+        waktu_str = str(r.get('Waktu', ''))
+        saham = str(r.get('Saham', '')).strip().upper()
+        saham_clean = saham.replace(".JK", "")
+        gaya = str(r.get('Gaya', 'SW')).strip().upper()
+
+        if gaya not in ('SW', 'SWING'):
+            continue
+
+        mode_actual = "swing"
+
+        actual_data = (
+            riwayat_actual.get((waktu_str, saham, gaya)) or
+            riwayat_actual.get((waktu_str, saham_clean, gaya)) or
+            riwayat_actual.get((waktu_str, saham, mode_actual)) or
+            riwayat_actual.get((waktu_str, saham_clean, mode_actual)) or
+            riwayat_actual.get((waktu_str, saham)) or
+            riwayat_actual.get((waktu_str, saham_clean))
+        )
+
+        has_actual = False
+        if actual_data:
+            if (actual_data.get('Actual_High') or 
+                actual_data.get('Actual_Low') or 
+                actual_data.get('Actual_Close') or 
+                actual_data.get('Outcome') or 
+                actual_data.get('Entry_Miss') == 'Yes'):
+                has_actual = True
+
+        if has_actual:
+            continue
+
+        try:
+            dt_sinyal = datetime.strptime(waktu_str.split()[0], "%Y-%m-%d").date()
+        except:
+            dt_sinyal = today_date
+
+        b_days = hitung_hari_bursa(dt_sinyal, today_date)
+
+        if b_days < 7 and saham_clean not in active_map:
+            active_map[saham_clean] = {
+                'record': r,
+                'waktu': waktu_str,
+                'saham': saham_clean,
+                'gaya': gaya,
+                'b_days': b_days,
+                'dt_sinyal': dt_sinyal
+            }
+
+    return active_map
 
 def render_notifikasi_evaluasi_riwayat():
     riwayat_data = st.session_state.get('riwayat', [])
@@ -1229,6 +1320,37 @@ with st.sidebar:
     else:
         ticker_input = ticker_raw
 
+    # --- Cek Swing Aktif untuk Ticker ---
+    ticker_clean = ticker_raw.replace(".JK", "").strip().upper()
+    dict_active_swings = dapatkan_dict_swing_aktif()
+    aksi_simpan_mode = "simpan_baru"
+
+    if ticker_clean in dict_active_swings:
+        active_info = dict_active_swings[ticker_clean]
+        st.warning(
+            f"⏳ **{ticker_clean} memiliki Swing Aktif!**\n\n"
+            f"Entry tanggal: `{active_info['waktu']}` (Hari bursa ke-{active_info['b_days']})\n"
+            f"Status outcome belum diisi."
+        )
+        pilihan_aksi = st.radio(
+            "📋 Tindakan Penyimpanan Riwayat:",
+            [
+                "🛡️ Lewati Simpan (Hanya Lihat Analisis)",
+                "🔄 Update Entry Swing Aktif",
+                "➕ Simpan Setup Baru (Re-entry / Add Lot)"
+            ],
+            index=0,
+            key="pilihan_aksi_riwayat_active"
+        )
+        if "Lewati" in pilihan_aksi:
+            aksi_simpan_mode = "lewati"
+        elif "Update" in pilihan_aksi:
+            aksi_simpan_mode = "update"
+        else:
+            aksi_simpan_mode = "simpan_baru"
+    
+    st.session_state['aksi_simpan_mode'] = aksi_simpan_mode
+
     # --- Input Harga Manual ---
     harga_manual = st.text_input("💵 Harga Pasar Saat Ini (opsional)", placeholder="Kosongkan jika pakai harga data")
     if harga_manual:
@@ -1277,6 +1399,12 @@ with st.sidebar:
     likuiditas_min = st.number_input(
         "Filter Likuiditas Minimum (Rp/hari, rata2 20 hari)",
         min_value=0, value=300_000_000, step=100_000_000, key="likuiditas_min"
+    )
+    hide_active_swings = st.checkbox(
+        "🚫 Sembunyikan emiten dengan Swing Aktif",
+        value=False,
+        key="hide_active_swings",
+        help="Jika dicentang, saham yang posisi swing-nya masih aktif di riwayat tidak akan ditampilkan di hasil scan."
     )
     ai_rerank = st.checkbox("Sertakan Scanner AI Re-Rank (Top 15 kandidat teknikal)", value=False, key="ai_rerank")
     if ai_rerank:
@@ -3743,7 +3871,11 @@ if run_btn:
             st.warning(f"Gagal menyimpan prediksi {res['mode']}: {e}")
 
     # ----- SIMPAN RIWAYAT UNTUK KEDUA MODE (SWING & DAYTRADE) -----
-    simpan_riwayat([res_swing['ringkasan'], res_day['ringkasan']])
+    simpan_riwayat(
+        [res_swing['ringkasan'], res_day['ringkasan']],
+        aksi_mode=st.session_state.get('aksi_simpan_mode', 'simpan_baru'),
+        target_saham=ticker_raw
+    )
 
     st.stop()
 # ==================== SCANNER SAHAM IDX (V12 TECH SCORE) ====================
@@ -3852,6 +3984,11 @@ if st.session_state.get('scan_results'):
     total        = sr['total']
     hasil_scan_count = sr['hasil_scan_count']
     daftar_saham_count = sr['daftar_saham_count']
+
+    dict_active_swings_scan = dapatkan_dict_swing_aktif()
+    if st.session_state.get('hide_active_swings', False):
+        buy_signals = [r for r in buy_signals if r['ticker'].replace(".JK", "").strip().upper() not in dict_active_swings_scan]
+        top_buys    = [r for r in top_buys if r['ticker'].replace(".JK", "").strip().upper() not in dict_active_swings_scan]
 
     st.title("🔍 Scanner Saham IDX (V12 Tech Score)")
     st.write(f"Mode: {mode_scan} | Likuiditas Min: Rp {likuiditas_min:,.0f}/hari")
@@ -3980,13 +4117,22 @@ if st.session_state.get('scan_results'):
     # ---------- Kartu BUY (mirip UI Kotlin) ----------
     for idx, r in enumerate(top_buys):
         rank = idx + 1
+        tick_clean = r['ticker'].replace(".JK", "").strip().upper()
+        active_info = dict_active_swings_scan.get(tick_clean)
+
         with st.container():
             col1, col2 = st.columns([3, 1])
             with col1:
                 badge = ["🥇", "🥈", "🥉"][idx] if idx < 3 else f"#{rank}"
-                st.markdown(f"### {badge} {r['ticker']}  —  **{r['signal']}**")
+                title_text = f"### {badge} {r['ticker']}  —  **{r['signal']}**"
+                if active_info:
+                    title_text += f" &nbsp; ⏳ `[SWING AKTIF - Hari ke-{active_info['b_days']}]`"
+                st.markdown(title_text)
             with col2:
                 st.metric("Harga", f"Rp {r['lastPrice']:,.0f}")
+
+            if active_info:
+                st.caption(f"⏳ **Swing Aktif dari {active_info['waktu']}** (Hari bursa ke-{active_info['b_days']}) — Target belum tersentuh / outcome belum diisi.")
 
             # Bar skor + badge konfirmasi AI (jika ada)
             bar_len = int(abs(r['techScore']) * 10)
