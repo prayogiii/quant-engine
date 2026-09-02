@@ -1319,8 +1319,8 @@ KONTEKS EMITEN:
 TUGAS ANDA:
 Berikan evaluasi dalam format JSON murni (tanpa tag markdown ```json) dengan struktur persis seperti ini:
 {{
-  "swing_score": <angka 0-10>,
-  "day_score": <angka 0-10>,
+  "swing_score": <angka 0-100>,
+  "day_score": <angka 0-100>,
   "recommended_mode": "<Swing Trade atau Day Trade>",
   "reasoning": "<penjelasan singkat 1-2 kalimat alasan pemilihan mode>"
 }}
@@ -1328,13 +1328,13 @@ Berikan evaluasi dalam format JSON murni (tanpa tag markdown ```json) dengan str
     try:
         response = model.generate_content(prompt)
         raw_text = response.text.strip()
-        if "```json" in raw_text:
-            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in raw_text:
-            raw_text = raw_text.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(raw_text)
-        return data, None
+        start_idx = raw_text.find('{')
+        end_idx = raw_text.rfind('}')
+        if start_idx != -1 and end_idx != -1:
+            json_str = raw_text[start_idx:end_idx+1]
+            data = json.loads(json_str)
+            return data, None
+        return None, "JSON tidak ditemukan dalam respon AI"
     except Exception as e:
         return None, str(e)
 
@@ -3912,9 +3912,11 @@ if run_btn:
 
     # ----- REKOMENDASI MODE HYBRID (KUANTITATIF + AI) -----
     def skor_mode_math(res):
-        sig = res.get('signal_score', 0)
-        rrr_score = min(res.get('rrr', 0), 5.0) * 20.0
-        conf = res.get('confidence', 0)
+        sig_raw = res.get('signal_score', 0)
+        sig = sig_raw * 100.0 if sig_raw <= 1.0 else sig_raw
+        rrr_score = min(max(res.get('rrr', 0), 0.0), 5.0) * 20.0
+        conf_raw = res.get('confidence', 0)
+        conf = conf_raw * 100.0 if conf_raw <= 1.0 else conf_raw
         return (sig * 0.5) + (rrr_score * 0.2) + (conf * 0.3)
 
     skor_math_swing = skor_mode_math(res_swing)
@@ -3946,7 +3948,12 @@ if run_btn:
         final_swing_score = skor_math_swing
         final_day_score = skor_math_day
         ai_reason = ""
-        mode_badge = "📊 Kuantitatif Only"
+        if not gemini_key:
+            mode_badge = "📊 Kuantitatif Only (Gemini API Key belum diisi di Sidebar)"
+        elif ai_err:
+            mode_badge = f"📊 Kuantitatif Only (AI Error: {ai_err})"
+        else:
+            mode_badge = "📊 Kuantitatif Only"
 
     if final_swing_score >= final_day_score:
         mode_terbaik = "Swing Trade"
