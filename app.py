@@ -617,24 +617,56 @@ def hitung_hari_bursa(start_date, end_date):
 def fetch_actual_data_yfinance(saham, waktu_str):
     """
     Mengambil data High, Low, Close historis dari yfinance sejak tanggal sinyal s/d hari ini.
+    Jika analisis dilakukan malam hari (setelah jam 16:00 WIB / pasar tutup),
+    maka perhitungan actual data secara otomatis dimulai dari H+1 (hari bursa berikutnya).
     """
     try:
         ticker_input = saham if saham.endswith(".JK") else f"{saham}.JK"
-        dt_part = waktu_str.split()[0]
-        dt_sinyal = datetime.strptime(dt_part, "%Y-%m-%d").date()
-        start_str = (dt_sinyal - timedelta(days=1)).strftime("%Y-%m-%d")
+        clean_waktu = str(waktu_str).strip()
+
+        dt_obj = None
+        formats = [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%d %B %Y, %H:%M WIB",
+            "%d %B %Y, %H:%M:%S WIB",
+            "%Y-%m-%d"
+        ]
+
+        for fmt in formats:
+            try:
+                dt_obj = datetime.strptime(clean_waktu, fmt)
+                break
+            except ValueError:
+                continue
+
+        if dt_obj is None:
+            try:
+                dt_part = clean_waktu.split()[0]
+                dt_obj = datetime.strptime(dt_part, "%Y-%m-%d")
+            except Exception:
+                dt_obj = datetime.now()
+
+        effective_date = dt_obj.date()
+        # Jika analisis dibuat jam 16:00 WIB ke atas (setelah jam tutup bursa),
+        # sinyal berlaku untuk hari bursa berikutnya (H+1).
+        if dt_obj.hour >= 16:
+            effective_date += timedelta(days=1)
+
+        start_str = (effective_date - timedelta(days=1)).strftime("%Y-%m-%d")
         df_hist = yf.download(ticker_input, start=start_str, progress=False)
         if df_hist is None or df_hist.empty:
             return None
+
         if isinstance(df_hist.columns, pd.MultiIndex):
             try:
                 df_hist = df_hist.xs(ticker_input, axis=1, level=1)
-            except:
+            except Exception:
                 df_hist.columns = [c[0] for c in df_hist.columns]
 
-        df_filtered = df_hist[df_hist.index.date >= dt_sinyal]
+        df_filtered = df_hist[df_hist.index.date >= effective_date]
         if df_filtered.empty:
-            df_filtered = df_hist
+            return None
 
         max_hi = float(df_filtered['High'].max())
         min_lo = float(df_filtered['Low'].min())
@@ -1256,6 +1288,55 @@ def bersihkan_teks_ai(teks):
     teks = re.sub(r'\*', '', teks)
     teks = teks.replace('\n', '<br>')
     return teks
+
+def evaluasi_mode_dengan_ai(res_swing, res_day, ticker_raw, api_key):
+    """
+    Evaluasi AI Gemini untuk membandingkan kesesuaian mode Swing Trade vs Day Trade (Hybrid Scoring).
+    """
+    model, error = dapatkan_model_gemini(api_key)
+    if error or not model:
+        return None, error
+
+    prompt = f"""
+Anda adalah analis kuantitatif pasar saham profesional. Evaluasi emiten {ticker_raw} untuk menentukan apakah lebih cocok diperdagangkan secara **Swing Trade (SW)** atau **Day Trade (DT)**.
+
+DATA SWING TRADE:
+- Sinyal: {res_swing.get('signal', 'N/A')}
+- RRR: {res_swing.get('rrr', 0):.2f}
+- Confidence: {res_swing.get('confidence', 0):.1f}%
+- Win Rate Backtest: {res_swing.get('win_bt', 0)*100 if res_swing.get('win_bt') else 0:.1f}%
+
+DATA DAY TRADE:
+- Sinyal: {res_day.get('signal', 'N/A')}
+- RRR: {res_day.get('rrr', 0):.2f}
+- Confidence: {res_day.get('confidence', 0):.1f}%
+- Win Rate Backtest: {res_day.get('win_bt', 0)*100 if res_day.get('win_bt') else 0:.1f}%
+
+KONTEKS EMITEN:
+- Beta IHSG: {res_swing.get('beta_ihsg', 1.0):.2f}
+- Harga Terakhir: Rp {res_swing.get('harga_terakhir', 0):,.0f}
+
+TUGAS ANDA:
+Berikan evaluasi dalam format JSON murni (tanpa tag markdown ```json) dengan struktur persis seperti ini:
+{{
+  "swing_score": <angka 0-100>,
+  "day_score": <angka 0-100>,
+  "recommended_mode": "<Swing Trade atau Day Trade>",
+  "reasoning": "<penjelasan singkat 1-2 kalimat alasan pemilihan mode>"
+}}
+"""
+    try:
+        response = model.generate_content(prompt)
+        raw_text = response.text.strip()
+        if "```json" in raw_text:
+            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_text:
+            raw_text = raw_text.split("```")[1].split("```")[0].strip()
+
+        data = json.loads(raw_text)
+        return data, None
+    except Exception as e:
+        return None, str(e)
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
@@ -3829,23 +3910,62 @@ if run_btn:
         st.error("❌ Gagal mengambil data untuk salah satu mode.")
         st.stop()
 
-    # ----- REKOMENDASI MODE -----
-    def skor_mode(res):
-        return res['signal_score'] * 0.5 + min(res['rrr'], 5) * 0.2 + res['confidence'] * 0.3
+    # ----- REKOMENDASI MODE HYBRID (KUANTITATIF + AI) -----
+    def skor_mode_math(res):
+        sig = res.get('signal_score', 0)
+        rrr_score = min(res.get('rrr', 0), 5.0) * 20.0
+        conf = res.get('confidence', 0)
+        return (sig * 0.5) + (rrr_score * 0.2) + (conf * 0.3)
 
-    skor_swing = skor_mode(res_swing)
-    skor_day = skor_mode(res_day)
+    skor_math_swing = skor_mode_math(res_swing)
+    skor_math_day = skor_mode_math(res_day)
 
-    if skor_swing >= skor_day:
+    ai_data = None
+    ai_err = None
+    gemini_key = st.session_state.get("gemini_api_key")
+    if gemini_key:
+        with st.spinner("🤖 AI Gemini sedang mengevaluasi rekomendasi mode..."):
+            ai_data, ai_err = evaluasi_mode_dengan_ai(res_swing, res_day, ticker_raw, gemini_key)
+
+    if ai_data and isinstance(ai_data, dict) and 'swing_score' in ai_data and 'day_score' in ai_data:
+        try:
+            ai_swing_score = float(ai_data.get('swing_score', 50))
+            ai_day_score = float(ai_data.get('day_score', 50))
+            
+            final_swing_score = (skor_math_swing * 0.7) + (ai_swing_score * 0.3)
+            final_day_score = (skor_math_day * 0.7) + (ai_day_score * 0.3)
+            
+            ai_reason = str(ai_data.get('reasoning', '')).strip()
+            mode_badge = "🤖 Hybrid (Kuantitatif 70% + AI 30%)"
+        except Exception:
+            final_swing_score = skor_math_swing
+            final_day_score = skor_math_day
+            ai_reason = ""
+            mode_badge = "📊 Kuantitatif Only"
+    else:
+        final_swing_score = skor_math_swing
+        final_day_score = skor_math_day
+        ai_reason = ""
+        mode_badge = "📊 Kuantitatif Only"
+
+    if final_swing_score >= final_day_score:
         mode_terbaik = "Swing Trade"
-        alasan = "Sinyal swing lebih kuat dan RRR lebih baik."
+        alasan_default = "Sinyal swing lebih kuat dan RRR lebih baik."
         res_terbaik = res_swing
+        best_final_score = final_swing_score
     else:
         mode_terbaik = "Day Trade"
-        alasan = "Sinyal intraday lebih kuat dan probabilitas naik lebih tinggi."
+        alasan_default = "Sinyal intraday lebih kuat dan probabilitas naik lebih tinggi."
         res_terbaik = res_day
+        best_final_score = final_day_score
 
-    st.success(f"🏆 **Rekomendasi Mode: {mode_terbaik}** — {alasan}")
+    alasan_final = ai_reason if ai_reason else alasan_default
+
+    st.success(
+        f"🏆 **Rekomendasi Mode: {mode_terbaik}** — {alasan_final}\n\n"
+        f"`{mode_badge}` | Skor Final: **{best_final_score:.1f}/100** "
+        f"(Swing: {final_swing_score:.1f} vs Day: {final_day_score:.1f})"
+    )
 
     # ----- TAMPILKAN HASIL KEDUA MODE DALAM TAB -----
     tab_swing, tab_day = st.tabs(["📆 Swing Trade", "⏱️ Day Trade"])
