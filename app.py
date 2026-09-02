@@ -1319,8 +1319,8 @@ KONTEKS EMITEN:
 TUGAS ANDA:
 Berikan evaluasi dalam format JSON murni (tanpa tag markdown ```json) dengan struktur persis seperti ini:
 {{
-  "swing_score": <angka 0-100>,
-  "day_score": <angka 0-100>,
+  "swing_score": <angka 0-10>,
+  "day_score": <angka 0-10>,
   "recommended_mode": "<Swing Trade atau Day Trade>",
   "reasoning": "<penjelasan singkat 1-2 kalimat alasan pemilihan mode>"
 }}
