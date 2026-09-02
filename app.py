@@ -1317,24 +1317,59 @@ KONTEKS EMITEN:
 - Harga Terakhir: Rp {res_swing.get('harga_terakhir', 0):,.0f}
 
 TUGAS ANDA:
-Berikan evaluasi dalam format JSON murni (tanpa tag markdown ```json) dengan struktur persis seperti ini:
+Berikan evaluasi dalam format JSON murni dengan struktur persis seperti ini (tanpa tanda petik ganda di dalam string reasoning):
 {{
-  "swing_score": <angka 0-100>,
-  "day_score": <angka 0-100>,
-  "recommended_mode": "<Swing Trade atau Day Trade>",
-  "reasoning": "<penjelasan singkat 1-2 kalimat alasan pemilihan mode>"
+  "swing_score": 60,
+  "day_score": 80,
+  "recommended_mode": "Day Trade",
+  "reasoning": "Alasan singkat 1-2 kalimat tanpa tanda petik ganda."
 }}
 """
     try:
-        response = model.generate_content(prompt)
+        gen_config = {"response_mime_type": "application/json"}
+        try:
+            response = model.generate_content(prompt, generation_config=gen_config)
+        except Exception:
+            response = model.generate_content(prompt)
+
         raw_text = response.text.strip()
-        start_idx = raw_text.find('{')
-        end_idx = raw_text.rfind('}')
-        if start_idx != -1 and end_idx != -1:
-            json_str = raw_text[start_idx:end_idx+1]
-            data = json.loads(json_str)
+
+        # Tier 1: Direct JSON load
+        try:
+            data = json.loads(raw_text)
+            if isinstance(data, dict) and 'swing_score' in data:
+                return data, None
+        except Exception:
+            pass
+
+        # Tier 2: Extract specific JSON object using regex
+        match = re.search(r'\{[^{}]*"swing_score"[^{}]*\}', raw_text, re.DOTALL)
+        if not match:
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+
+        if match:
+            json_str = match.group(0)
+            try:
+                data = json.loads(json_str, strict=False)
+                if isinstance(data, dict) and 'swing_score' in data:
+                    return data, None
+            except Exception:
+                pass
+
+        # Tier 3: Regex fallbacks for fields
+        swing_match = re.search(r'"swing_score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
+        day_match = re.search(r'"day_score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
+        reason_match = re.search(r'"reasoning"\s*:\s*"([^"]+)"', raw_text)
+
+        if swing_match and day_match:
+            data = {
+                "swing_score": float(swing_match.group(1)),
+                "day_score": float(day_match.group(1)),
+                "reasoning": reason_match.group(1) if reason_match else "Evaluasi AI Gemini untuk kesesuaian mode."
+            }
             return data, None
-        return None, "JSON tidak ditemukan dalam respon AI"
+
+        return None, "Format JSON AI tidak dapat diparse"
     except Exception as e:
         return None, str(e)
 
