@@ -2945,6 +2945,16 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     else:
         rrr_status = "Buruk (< 1.0) 🔴"
 
+    # Dynamic Dip Target untuk RRR Ideal 1:2.0
+    if tp_low > sl_harga:
+        entry_ideal_raw = (tp_low + 2 * sl_harga) / 3.0
+        entry_ideal_f = fraksi_bei(entry_ideal_raw)
+        entry_ideal_f = min(entry_ideal_f, harga_terakhir)
+        entry_ideal_f = max(entry_ideal_f, fraksi_bei(sl_harga + 2 * fraksi_step(sl_harga)))
+    else:
+        entry_ideal_f = fraksi_bei(entry_low)
+
+
     # Breakout
     if is_daytrade:
         bars_per_day = bars_per_day_map.get(actual_interval, 54)
@@ -3045,6 +3055,9 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     ret_kurt = float(kurtosis(returns_thresh, fisher=True))
     kurt_penalty = 0.5 if ret_kurt > 3 else 1.0
     kelly_adj = min(0.25, max(0.0, kelly_raw * 0.3 * (0.5 if ret_skew < -0.5 else 1) * kurt_penalty))
+    target_risk_pct = 1.5
+    risk_adjusted_alloc = min(kelly_adj * 100, (target_risk_pct / sl_pct) * 100) if sl_pct > 0 else kelly_adj * 100
+
 
     # ------------------------------------------------------------------
     # 16. MONTE CARLO
@@ -3211,6 +3224,8 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "Beta": f"{beta_ihsg:.2f}",
         "Momentum": f"{df['Mom5D'].iloc[-1]:.2f}%",
         "Entry_Zone": entry_zone_f,
+        "Entry_Ideal_RRR2": f"Rp {entry_ideal_f:,.0f}",
+        "Risk_Adjusted_Alloc": f"{risk_adjusted_alloc:.1f}%",
         "Gaya": "DT" if is_daytrade else "SW",
         "Status_Posisi": "Sudah Beli" if sudah_beli else "Belum",
         "Harga_Beli": f"{harga_beli_float:,.0f}" if harga_beli_float else "",
@@ -3226,7 +3241,10 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "harga_terakhir": harga_terakhir,
         "signal": signal,
         "entry_zone_f": entry_zone_f,
+        "entry_ideal_f": entry_ideal_f,
+        "risk_adjusted_alloc": risk_adjusted_alloc,
         "sl_harga_f": sl_harga_f,
+
         "tp_low_f": tp_low_f,
         "tp_high_f": tp_high_f,
         "rrr": rrr,
@@ -3314,7 +3332,10 @@ def display_analysis_result(res):
     harga_terakhir = res['harga_terakhir']
     signal = res['signal']
     entry_zone_f = res['entry_zone_f']
+    entry_ideal_f = res.get('entry_ideal_f', fraksi_bei(harga_terakhir))
+    risk_adjusted_alloc = res.get('risk_adjusted_alloc', res['kelly_adj'] * 100)
     sl_harga_f = res['sl_harga_f']
+
     tp_low_f = res['tp_low_f']
     tp_high_f = res['tp_high_f']
     rrr = res['rrr']
@@ -3449,6 +3470,13 @@ def display_analysis_result(res):
         ac, ai = "#ef4444", "🔴"
         at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
 
+    # Catatan Adaptif RRR & Manajemen Risiko SL Lebar
+    if "BUY" in signal:
+        if rrr < 1.5:
+            at += f"<br><br>💡 <b>Tips Dip Entry (RRR 1:2.0):</b> Untuk RRR ideal 1:2.0, disarankan antri beli di <b>Rp {entry_ideal_f:,.0f}</b> atau lebih rendah."
+        if sl_pct > 10.0:
+            at += f"<br><br>⚠️ <b>Manajemen Risiko SL Lebar:</b> Karena SL% cukup lebar (-{sl_pct:.1f}%), sesuaikan ukuran posisi maksimal <b>{risk_adjusted_alloc:.1f}%</b> dari modal agar risiko total terjaga (~1.5%)."
+
     # Tambahan untuk status kepemilikan
     if sudah_beli:
         if "AVOID" in signal:
@@ -3495,11 +3523,12 @@ def display_analysis_result(res):
                     <div class="summary-item">🎯 <b>Take Profit Range:</b> Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}<br>
                         <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
                     <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
+                    <div class="summary-item">💡 <b>Entry Ideal (RRR 1:2.0):</b> Rp {entry_ideal_f:,.0f}</div>
                     <div class="summary-item">🏆 <b>Win Rate Backtest:</b> {bt_str}</div>
                     <div class="summary-item">🎯 <b>Actual Record ({ticker_raw}):</b> {act_ticker_str}</div>
                     <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
                     <div class="summary-item">📊 <b>ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</b></div>
-                    <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
+                    <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% | <b>Risk-Adjusted:</b> {risk_adjusted_alloc:.1f}%</div>
                 </div>
             ''', unsafe_allow_html=True)
         else:
@@ -3512,9 +3541,10 @@ def display_analysis_result(res):
                     <div class="summary-item">🎯 <b>Actual Record ({ticker_raw}):</b> {act_ticker_str}</div>
                     <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
                     <div class="summary-item">📊 <b>ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</b></div>
-                    <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% dari Total Ekuitas</div>
+                    <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% | <b>Risk-Adjusted:</b> {risk_adjusted_alloc:.1f}%</div>
                 </div>
             ''', unsafe_allow_html=True)
+
     with col2:
         st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
 
