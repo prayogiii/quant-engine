@@ -806,6 +806,39 @@ def dapatkan_dict_swing_aktif(riwayat_data=None, riwayat_actual=None):
 
     return active_map
 
+def get_dip_entry(r):
+    """
+    Mengembalikan string harga entry ideal / dip entry (misal 'Rp 5,000') dari record riwayat.
+    Jika 'Entry_Ideal_RRR2' tidak tersedia, dihitung secara otomatis dari TP dan SL.
+    """
+    if not r or not isinstance(r, dict):
+        return ""
+    val = r.get('Entry_Ideal_RRR2', '')
+    if val and str(val).strip() and str(val).strip() != '?':
+        val_str = str(val).strip()
+        return val_str if val_str.startswith("Rp") else f"Rp {val_str}"
+    
+    # Fallback: Hitung dari TP_Harga/TP_Range dan SL_Harga jika belum tersimpan
+    try:
+        tp_str = r.get('TP_Harga') or r.get('TP_Range', '')
+        sl_str = r.get('SL_Harga', '')
+        
+        clean_tp = str(tp_str).replace("Rp", "").replace(".", "").replace(",", "").strip()
+        clean_sl = str(sl_str).replace("Rp", "").replace(".", "").replace(",", "").strip()
+        
+        tp_matches = re.findall(r'\d+', clean_tp)
+        sl_matches = re.findall(r'\d+', clean_sl)
+        
+        if tp_matches and sl_matches:
+            tp_val = float(tp_matches[0])
+            sl_val = float(sl_matches[0])
+            if tp_val > sl_val:
+                dip_val = (tp_val + 2 * sl_val) / 3.0
+                return f"Rp {dip_val:,.0f}"
+    except Exception:
+        pass
+    return ""
+
 def render_notifikasi_evaluasi_riwayat():
     riwayat_data = st.session_state.get('riwayat', [])
     riwayat_actual = st.session_state.get('riwayat_actual', {})
@@ -868,9 +901,11 @@ def render_notifikasi_evaluasi_riwayat():
                     gaya_key = item['gaya']
                     mode_actual = item['mode_actual']
                     alasan = item['alasan']
+                    dip_entry = get_dip_entry(r)
+                    dip_str = f" | 💡 Dip Entry: {dip_entry}" if dip_entry else ""
 
                     st.markdown(f"**📌 {saham_key} ({gaya_key}) - {waktu_key}** | `{alasan}`")
-                    st.caption(f"Sinyal: {r.get('Sinyal','?')} | Entry: {r.get('Entry_Zone','?')} | TP: {r.get('TP_Range','?')} | SL: Rp {r.get('SL_Harga','?')}")
+                    st.caption(f"Sinyal: {r.get('Sinyal','?')} | 🎯 Entry: {r.get('Entry_Zone','?')}{dip_str} | TP: {r.get('TP_Range','?')} | SL: Rp {r.get('SL_Harga','?')}")
 
                     fetch_key = f"fetch_urg_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
                     form_key = f"form_urg_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
@@ -883,11 +918,16 @@ def render_notifikasi_evaluasi_riwayat():
                                 st.session_state[f"hi_{fetch_key}"] = fetched['Actual_High']
                                 st.session_state[f"lo_{fetch_key}"] = fetched['Actual_Low']
                                 st.session_state[f"cl_{fetch_key}"] = fetched['Actual_Close']
-                                st.success(f"Data harga {saham_key} berhasil ditarik!")
+                                msg = f"Data harga {saham_key} berhasil ditarik!"
+                                if dip_entry:
+                                    msg += f" (Dip Entry Target: {dip_entry})"
+                                st.success(msg)
                             else:
                                 st.error(f"Gagal mengambil data {saham_key} dari yfinance")
 
                     with st.form(key=form_key):
+                        if dip_entry:
+                            st.caption(f"💡 Target Dip Entry: **{dip_entry}** | 🎯 Entry Zone: **{r.get('Entry_Zone', '-')}**")
                         def_hi = st.session_state.get(f"hi_{fetch_key}", "")
                         def_lo = st.session_state.get(f"lo_{fetch_key}", "")
                         def_cl = st.session_state.get(f"cl_{fetch_key}", "")
@@ -933,9 +973,11 @@ def render_notifikasi_evaluasi_riwayat():
                     gaya_key = item['gaya']
                     mode_actual = item['mode_actual']
                     alasan = item['alasan']
+                    dip_entry = get_dip_entry(r)
+                    dip_str = f" | 💡 Dip Entry: {dip_entry}" if dip_entry else ""
 
                     st.markdown(f"**⏳ {saham_key} ({gaya_key}) - {waktu_key}** | `{alasan}`")
-                    st.caption(f"Sinyal: {r.get('Sinyal','?')} | Entry: {r.get('Entry_Zone','?')} | TP: {r.get('TP_Range','?')} | SL: Rp {r.get('SL_Harga','?')}")
+                    st.caption(f"Sinyal: {r.get('Sinyal','?')} | 🎯 Entry: {r.get('Entry_Zone','?')}{dip_str} | TP: {r.get('TP_Range','?')} | SL: Rp {r.get('SL_Harga','?')}")
 
                     fetch_key = f"fetch_act_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
                     form_key = f"form_act_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
@@ -948,11 +990,16 @@ def render_notifikasi_evaluasi_riwayat():
                                 st.session_state[f"hi_{fetch_key}"] = fetched['Actual_High']
                                 st.session_state[f"lo_{fetch_key}"] = fetched['Actual_Low']
                                 st.session_state[f"cl_{fetch_key}"] = fetched['Actual_Close']
-                                st.success(f"Data harga {saham_key} berhasil ditarik!")
+                                msg = f"Data harga {saham_key} berhasil ditarik!"
+                                if dip_entry:
+                                    msg += f" (Dip Entry Target: {dip_entry})"
+                                st.success(msg)
                             else:
                                 st.error(f"Gagal mengambil data {saham_key} dari yfinance")
 
                     with st.form(key=form_key):
+                        if dip_entry:
+                            st.caption(f"💡 Target Dip Entry: **{dip_entry}** | 🎯 Entry Zone: **{r.get('Entry_Zone', '-')}**")
                         def_hi = st.session_state.get(f"hi_{fetch_key}", "")
                         def_lo = st.session_state.get(f"lo_{fetch_key}", "")
                         def_cl = st.session_state.get(f"cl_{fetch_key}", "")
@@ -1545,11 +1592,13 @@ with st.sidebar:
                 st.caption(f"💰 Beli: Rp {harga_beli_r} | Float: {r.get('Floating_PL', '')}")
 
             entry_zone = r.get('Entry_Zone', '')
+            dip_entry  = get_dip_entry(r)
             tp_range   = r.get('TP_Range', '')
             sl_harga   = r.get('SL_Harga', '')
-            if entry_zone or tp_range or sl_harga:
+            if entry_zone or dip_entry or tp_range or sl_harga:
                 info_teknis = []
                 if entry_zone: info_teknis.append(f"🎯 Entry: {entry_zone}")
+                if dip_entry: info_teknis.append(f"💡 Dip Entry: {dip_entry}")
                 if tp_range: info_teknis.append(f"TP: {tp_range}")
                 if sl_harga: info_teknis.append(f"SL: Rp {sl_harga}")
                 st.caption(" | ".join(info_teknis))
@@ -1597,6 +1646,8 @@ with st.sidebar:
 
                 if st.session_state.get(show_key, False):
                     with st.form(key=form_key):
+                        if dip_entry:
+                            st.caption(f"💡 Target Dip Entry: **{dip_entry}** | 🎯 Entry Zone: **{entry_zone}**")
                         actual_high = st.text_input("Actual High", placeholder="6250")
                         actual_low = st.text_input("Actual Low", placeholder="6100")
                         actual_close = st.text_input("Actual Close", placeholder="6200")
@@ -1772,13 +1823,23 @@ with st.sidebar:
                     # Likuiditas
                     st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
                 
-                    # Entry Zone (bila ada)
+                    # Entry Zone (bila ada) & Dip Entry
                     entry_zone_val = r.get('Entry_Zone', '?')
-                    if entry_zone_val and entry_zone_val != '?':
-                        st.markdown(f"""<div style="margin-top: 8px;">
-                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">🎯 Entry Zone</label>
-                            <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{entry_zone_val}</div>
-                        </div>""", unsafe_allow_html=True)
+                    dip_entry_val = get_dip_entry(r)
+                    if (entry_zone_val and entry_zone_val != '?') or dip_entry_val:
+                        ce1, ce2 = st.columns(2)
+                        with ce1:
+                            if entry_zone_val and entry_zone_val != '?':
+                                st.markdown(f"""<div style="margin-top: 8px;">
+                                    <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">🎯 Entry Zone</label>
+                                    <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:22px; font-weight:700; line-height:1.2;">{entry_zone_val}</div>
+                                </div>""", unsafe_allow_html=True)
+                        with ce2:
+                            if dip_entry_val:
+                                st.markdown(f"""<div style="margin-top: 8px;">
+                                    <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">💡 Dip Entry (Ideal RRR 1:2.0)</label>
+                                    <div data-testid="stMetricValue" style="color:rgb(250, 204, 21); font-size:22px; font-weight:700; line-height:1.2;">{dip_entry_val}</div>
+                                </div>""", unsafe_allow_html=True)
                 
                     # Indikator tambahan
                     ind1, ind2, ind3, ind4 = st.columns(4)
@@ -1843,6 +1904,9 @@ with st.sidebar:
 
                         if st.session_state.get(show_key, False):
                             with st.form(key=form_key):
+                                dip_entry_form = get_dip_entry(r)
+                                if dip_entry_form:
+                                    st.caption(f"💡 Target Dip Entry: **{dip_entry_form}** | 🎯 Entry Zone: **{r.get('Entry_Zone', '-')}**")
                                 actual_high = st.text_input("Actual High", placeholder="contoh: 6250")
                                 actual_low = st.text_input("Actual Low (opsional)", placeholder="contoh: 6100")
                                 actual_close = st.text_input("Actual Close (opsional)", placeholder="contoh: 6200")
