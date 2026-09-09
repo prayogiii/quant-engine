@@ -1653,13 +1653,13 @@ def buat_chart_broker_flow(buyers, sellers):
         height=460,
         margin=dict(l=10, r=75, t=44, b=50),
         hovermode='x unified',
-        hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family='monospace'),
+        hoverlabel=dict(bgcolor='#1e293b', font=dict(size=11, family='monospace')),
         dragmode='pan',
         legend=dict(
             orientation='h', x=0, y=-0.15,
             bgcolor='rgba(0,0,0,0)',
             font=dict(size=11),
-            itemclick='togglevisibility',
+            itemclick='toggle',
         ),
         xaxis=dict(
             showgrid=True,
@@ -1677,7 +1677,6 @@ def buat_chart_broker_flow(buyers, sellers):
             range=[-y_span, y_span],
             tickformat='.3s',
             side='left',
-            title=None,
         ),
         yaxis2=dict(
             overlaying='y',
@@ -1688,7 +1687,6 @@ def buat_chart_broker_flow(buyers, sellers):
             tickformat=',.0f',
             range=[float(price_walk.min()) * 0.997,
                    float(price_walk.max()) * 1.003],
-            title=None,
         ),
     )
     return fig
