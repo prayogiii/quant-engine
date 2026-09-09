@@ -1586,7 +1586,7 @@ def buat_chart_broker_flow(buyers, sellers):
         marker_color=bar_colors,
         opacity=0.5,
         name='Net Bars',
-        yaxis='y1',
+        yaxis='y',
         showlegend=False,
         hovertemplate='%{x}<br>Net: %{y:,.0f}<extra></extra>',
     ))
@@ -1612,7 +1612,7 @@ def buat_chart_broker_flow(buyers, sellers):
             mode='lines',
             name=brk,
             line=dict(color=color, width=2),
-            yaxis='y1',
+            yaxis='y',
             hovertemplate=f'<b>{brk}</b> %{{x}}<br>Kum: {_fmt(net)}<extra></extra>',
         ))
 
@@ -1634,7 +1634,7 @@ def buat_chart_broker_flow(buyers, sellers):
         hovertemplate='Harga: %{y:,.0f}<extra></extra>',
     ))
 
-    fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1, yref='y1')
+    fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1, yref='y')
 
     y_span = max(abs(e['net']) for e in all_entries) * 1.35
 
