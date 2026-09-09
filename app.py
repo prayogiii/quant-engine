@@ -1655,7 +1655,7 @@ def simpan_riwayat_broksum(saham, res_broksum):
         try:
             ws = gs.worksheet("riwayat_broksum")
         except Exception:
-            ws = gs.add_worksheet(title="riwayat_broksum", rows="1000", cols="10")
+            ws = gs.add_worksheet(title="riwayat_broksum", rows="10000", cols="10")
             ws.append_row([
                 "Waktu", "Saham", "Status_Bandarmology", "Foreign_Flow",
                 "Top_Buyer", "Top_Seller", "Summary_Narrative", "Raw_JSON"
