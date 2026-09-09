@@ -2272,6 +2272,65 @@ with st.sidebar:
         help="Upload SS Broksum Stockbit/Broker lain untuk dihitung ke skor sinyal & bandarmology."
     )
 
+    # Auto-analisis saat file baru diupload
+    if uploaded_broksum_sidebar is not None:
+        _sid_file_id = f"{uploaded_broksum_sidebar.name}_{uploaded_broksum_sidebar.size}"
+        if st.session_state.get("_sid_broksum_file_id") != _sid_file_id:
+            st.session_state["_sid_broksum_file_id"] = _sid_file_id
+            st.session_state["_sid_broksum_result"]  = None
+            st.session_state["_sid_broksum_error"]   = None
+            _gem_key = st.session_state.get("gemini_api_key", "")
+            if not _gem_key:
+                st.session_state["_sid_broksum_error"] = "API Key Gemini belum diset."
+            else:
+                with st.spinner("🧠 Menganalisis Broksum..."):
+                    try:
+                        _img = Image.open(uploaded_broksum_sidebar)
+                        _res, _err = analisis_broksum_gemini_vision(_img, _gem_key)
+                        if _err:
+                            st.session_state["_sid_broksum_error"] = _err
+                        else:
+                            st.session_state["_sid_broksum_result"] = _res
+                            st.toast("✅ Broksum siap dianalisis!", icon="🐋")
+                    except Exception as _ex:
+                        st.session_state["_sid_broksum_error"] = str(_ex)
+
+    if st.session_state.get("_sid_broksum_error"):
+        st.error(f"❌ Broksum gagal: {st.session_state['_sid_broksum_error']}")
+        with st.expander("📝 Input Manual Broksum", expanded=False):
+            _n = st.number_input("Jumlah broker per sisi", 1, 10, 5, key="_sid_n_broker")
+            st.caption("🟢 Top Buyers")
+            _buyers_m = []
+            for _i in range(int(_n)):
+                _ca, _cb, _cc, _cd = st.columns([2,2,3,2])
+                _brk = _ca.text_input("", key=f"_sid_b_brk_{_i}", placeholder=f"B{_i+1}", label_visibility="collapsed")
+                _vol = _cb.number_input("", key=f"_sid_b_vol_{_i}", min_value=0, value=0, label_visibility="collapsed")
+                _val = _cc.number_input("", key=f"_sid_b_val_{_i}", min_value=0, value=0, label_visibility="collapsed")
+                _avg = _cd.number_input("", key=f"_sid_b_avg_{_i}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
+                if _brk.strip():
+                    _buyers_m.append({"broker": _brk.strip(), "volume_lot": int(_vol), "value_idr": int(_val), "avg_price": float(_avg)})
+            st.caption("🔴 Top Sellers")
+            _sellers_m = []
+            for _i in range(int(_n)):
+                _ca, _cb, _cc, _cd = st.columns([2,2,3,2])
+                _brk = _ca.text_input("", key=f"_sid_s_brk_{_i}", placeholder=f"S{_i+1}", label_visibility="collapsed")
+                _vol = _cb.number_input("", key=f"_sid_s_vol_{_i}", min_value=0, value=0, label_visibility="collapsed")
+                _val = _cc.number_input("", key=f"_sid_s_val_{_i}", min_value=0, value=0, label_visibility="collapsed")
+                _avg = _cd.number_input("", key=f"_sid_s_avg_{_i}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
+                if _brk.strip():
+                    _sellers_m.append({"broker": _brk.strip(), "volume_lot": int(_vol), "value_idr": int(_val), "avg_price": float(_avg)})
+            _bs = st.selectbox("Status Bandarmologi", ["Akumulasi","Distribusi","Sideways/Tidak Jelas","Mixed"], key="_sid_m_status")
+            _ff = st.selectbox("Foreign Flow", ["Net Buy","Net Sell","Neutral"], key="_sid_m_foreign")
+            if st.button("✅ Gunakan Data Manual", key="_sid_m_submit", use_container_width=True):
+                if _buyers_m or _sellers_m:
+                    st.session_state["_sid_broksum_result"] = {
+                        "top_buyers": _buyers_m, "top_sellers": _sellers_m,
+                        "bandarmology_status": _bs, "foreign_flow_status": _ff,
+                        "summary_narrative": f"Input manual: {_bs}, Foreign {_ff}."
+                    }
+                    st.session_state["_sid_broksum_error"] = None
+                    st.rerun()
+
     col1, col2 = st.columns(2)
     with col1:
         run_btn = st.button("🚀 ANALISIS", use_container_width=True)
@@ -4741,23 +4800,15 @@ if run_btn:
     broksum_status = "N/A"
     broksum_foreign = "N/A"
 
-    if uploaded_broksum_sidebar is not None:
+    # Ambil hasil broksum dari session_state (sudah diproses saat upload)
+    res_broksum_main = st.session_state.get("_sid_broksum_result")
+    if res_broksum_main:
         try:
-            with st.spinner("🔍 Gemini Vision sedang menganalisis Broksum..."):
-                img_sidebar = Image.open(uploaded_broksum_sidebar)
-                gem_key = st.session_state.get("gemini_api_key", "")
-                if gem_key:
-                    res_broksum_main, err_brk = analisis_broksum_gemini_vision(img_sidebar, gem_key)
-                    if res_broksum_main:
-                        broksum_bonus, broksum_status, broksum_foreign = hitung_skor_bandarmology(res_broksum_main)
-                        simpan_riwayat_broksum(ticker_raw, res_broksum_main)
-                        st.toast(f"✅ Broksum Teranalisis: {broksum_status} (Skor: {broksum_bonus:+.1f})", icon="🐋")
-                    elif err_brk:
-                        st.warning(f"⚠️ Broksum gagal di-parse (dilewati): {err_brk}")
-                else:
-                    st.warning("⚠️ API Key Gemini belum terhubung, analisis Broksum dilewati.")
+            broksum_bonus, broksum_status, broksum_foreign = hitung_skor_bandarmology(res_broksum_main)
+            simpan_riwayat_broksum(ticker_raw, res_broksum_main)
+            st.toast(f"✅ Broksum: {broksum_status} (Skor: {broksum_bonus:+.1f})", icon="🐋")
         except Exception as e_b:
-            st.warning(f"⚠️ Gagal membaca SS Broksum (dilewati): {e_b}")
+            st.warning(f"⚠️ Gagal proses skor Broksum: {e_b}")
 
     with st.spinner("🤖 Menganalisis mode Swing dan Daytrade secara paralel..."):
         from concurrent.futures import ThreadPoolExecutor
