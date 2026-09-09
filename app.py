@@ -21,6 +21,13 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # ====================== FALLBACK HANDLERS ======================
+PIL_AVAILABLE = True
+try:
+    from PIL import Image
+    import io
+except ImportError:
+    PIL_AVAILABLE = False
+
 PLOTLY_AVAILABLE = True
 try: import plotly.graph_objects as go
 except ImportError: PLOTLY_AVAILABLE = False
@@ -1421,6 +1428,194 @@ Berikan evaluasi dalam format JSON murni dengan struktur persis seperti ini (tan
         return None, str(e)
 
 # ==========================================
+# FUNGSI BANDARMOLOGY & BROKSUM (GEMINI VISION)
+# ==========================================
+def analisis_broksum_gemini_vision(image, api_key):
+    """
+    Menganalisis screenshot Broker Summary (Broksum) / Trade Flow / Broker Flow menggunakan Gemini Vision AI.
+    Mengembalikan dict data terstruktur (JSON) & error jika ada.
+    """
+    if not PIL_AVAILABLE:
+        return None, "Library Pillow (PIL) belum terpasang."
+    if not api_key:
+        return None, "Gemini API Key belum diisi di sidebar."
+
+    try:
+        genai.configure(api_key=api_key)
+        
+        # Dapatkan model yang tersedia
+        available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        vision_candidates = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite']
+        
+        selected_model_name = None
+        for cand in vision_candidates:
+            if cand in available:
+                selected_model_name = cand
+                break
+        if not selected_model_name:
+            if available:
+                selected_model_name = available[0]
+            else:
+                return None, "Tidak ada model Gemini yang mendukung eksekusi saat ini."
+
+        model = genai.GenerativeModel(selected_model_name)
+
+        prompt = """
+Anda adalah pakar Bandarmology & Pasar Modal Indonesia (BEI/IDX).
+Tugas Anda: Analisis screenshot Broker Summary (Broksum) / Broker Flow / Trade Flow ini dengan SANGAT AKURAT.
+
+Ekstrak seluruh informasi tabel dan berikan analisis terstruktur dalam format JSON MURNI tanpa teks di luar JSON:
+{
+  "ticker": "KODE_SAHAM (contoh: BBRI, tulis N/A jika tidak terlihat)",
+  "periode": "TANGGAL / PERIODE (contoh: 09 Sep 2026 atau Net 1D, tulis N/A jika tidak terlihat)",
+  "bandarmology_status": "Big Accumulation / Normal Accumulation / Neutral / Normal Distribution / Big Distribution",
+  "foreign_flow_status": "Net Buy / Net Sell / Neutral / N/A",
+  "summary_narrative": "Penjelasan singkat 2-3 kalimat mengenai siapa pembeli/penjual utama (broker mana), konsentrasi pembeli (top 1 vs top 3/5), dan implikasi pergerakan harga.",
+  "top_buyers": [
+    {"broker": "YP", "volume_lot": 15000, "value_idr": 1500000000, "avg_price": 1250},
+    {"broker": "CC", "volume_lot": 12000, "value_idr": 1200000000, "avg_price": 1245}
+  ],
+  "top_sellers": [
+    {"broker": "AK", "volume_lot": 20000, "value_idr": 2000000000, "avg_price": 1260},
+    {"broker": "ZP", "volume_lot": 10000, "value_idr": 1000000000, "avg_price": 1255}
+  ]
+}
+
+Aturan:
+1. Konversikan angka Milyar (B/M) atau Juta (M/K) ke nilai penuh jika bisa (misal 1.5B = 1500000000). Jika tidak pasti, tulis sesuai string tertera.
+2. Ambil hingga 5-10 broker pembeli dan penjual yang terlihat di screenshot.
+3. Kembalikan HANYA JSON yang valid.
+"""
+
+        response = model.generate_content([prompt, image])
+        raw_text = response.text.strip()
+
+        # Pembersihan JSON
+        if "```json" in raw_text:
+            raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_text:
+            raw_text = raw_text.split("```")[1].split("```")[0].strip()
+
+        # Regex fallback jika JSON mengandung karakter ilegal
+        try:
+            parsed = json.loads(raw_text, strict=False)
+            return parsed, None
+        except Exception:
+            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            if match:
+                parsed = json.loads(match.group(0), strict=False)
+                return parsed, None
+            return {"summary_narrative": raw_text, "bandarmology_status": "Raw AI Response"}, None
+
+    except Exception as e:
+        return None, f"Error Gemini Vision: {str(e)}"
+
+
+def render_broksum_vision_ui(api_key, key_prefix="broksum"):
+    st.markdown("### 📸 Scan Broker Summary (Broksum) via AI Vision")
+    st.caption("Upload screenshot Broksum / Broker Flow dari Stockbit, IPOT, Neo HOTS, atau broker manapun.")
+
+    uploaded_file = st.file_uploader(
+        "Pilih Foto / Screenshot Broksum",
+        type=["png", "jpg", "jpeg", "webp"],
+        key=f"{key_prefix}_file_uploader"
+    )
+
+    if uploaded_file is not None:
+        try:
+            image = Image.open(uploaded_file)
+            col_img, col_info = st.columns([1, 2])
+            with col_img:
+                st.image(image, caption="Preview Broksum", use_container_width=True)
+
+            with col_info:
+                st.info("💡 **Tips:** Pastikan tabel Top Buyer & Top Seller terlihat jelas.")
+                analyze_btn = st.button("🚀 Analisis Broksum Dgn AI Vision", key=f"{key_prefix}_analyze_btn", use_container_width=True)
+
+            if analyze_btn:
+                if not api_key:
+                    st.error("🔑 Masukkan Gemini API Key terlebih dahulu di sidebar!")
+                else:
+                    with st.spinner("🧠 Gemini Vision sedang membaca & menganalisis Broksum..."):
+                        res_json, err = analisis_broksum_gemini_vision(image, api_key)
+
+                    if err:
+                        st.error(f"❌ {err}")
+                    elif res_json:
+                        st.success("✅ Broksum Berhasil Dianalisis!")
+
+                        ticker_vis = res_json.get("ticker", "N/A")
+                        periode_vis = res_json.get("periode", "N/A")
+                        status_bandar = res_json.get("bandarmology_status", "Neutral")
+                        foreign_status = res_json.get("foreign_flow_status", "N/A")
+                        narrative = res_json.get("summary_narrative", "")
+
+                        # Badge warna status bandarmology
+                        if "Big Accum" in status_bandar:
+                            badge_color = "#10b981"
+                            bandar_icon = "🔥"
+                        elif "Normal Accum" in status_bandar:
+                            badge_color = "#34d399"
+                            bandar_icon = "📈"
+                        elif "Big Dist" in status_bandar:
+                            badge_color = "#ef4444"
+                            bandar_icon = "🚨"
+                        elif "Normal Dist" in status_bandar:
+                            badge_color = "#f87171"
+                            bandar_icon = "📉"
+                        else:
+                            badge_color = "#f59e0b"
+                            bandar_icon = "⏸️"
+
+                        st.markdown(
+                            f"""
+                            <div style="background-color: #1e293b; border-left: 5px solid {badge_color}; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
+                                <h3 style="margin:0; color: {badge_color};">{bandar_icon} Status Bandarmology: {status_bandar}</h3>
+                                <p style="margin: 5px 0 0 0; color: #cbd5e1;"><b>Ticker:</b> {ticker_vis} | <b>Periode:</b> {periode_vis} | <b>Foreign Flow:</b> {foreign_status}</p>
+                                <p style="margin-top: 10px; font-size: 14px; color: #e2e8f0;">{narrative}</p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                        # Tampilkan Tabel Top Buyer vs Top Seller
+                        buyers = res_json.get("top_buyers", [])
+                        sellers = res_json.get("top_sellers", [])
+
+                        col_b, col_s = st.columns(2)
+
+                        with col_b:
+                            st.markdown("#### 🟢 Top Buyer (Pembeli)")
+                            if buyers:
+                                df_b = pd.DataFrame(buyers)
+                                df_b_clean = df_b.rename(columns={
+                                    "broker": "Broker",
+                                    "volume_lot": "Volume (Lot)",
+                                    "value_idr": "Value (Rp)",
+                                    "avg_price": "Avg Price"
+                                })
+                                st.dataframe(df_b_clean, use_container_width=True)
+                            else:
+                                st.caption("Tidak ada data buyer terurai.")
+
+                        with col_s:
+                            st.markdown("#### 🔴 Top Seller (Penjual)")
+                            if sellers:
+                                df_s = pd.DataFrame(sellers)
+                                df_s_clean = df_s.rename(columns={
+                                    "broker": "Broker",
+                                    "volume_lot": "Volume (Lot)",
+                                    "value_idr": "Value (Rp)",
+                                    "avg_price": "Avg Price"
+                                })
+                                st.dataframe(df_s_clean, use_container_width=True)
+                            else:
+                                st.caption("Tidak ada data seller terurai.")
+
+        except Exception as e_img:
+            st.error(f"Gagal memuat gambar: {e_img}")
+
+# ==========================================
 # KONFIGURASI HALAMAN & STYLING
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
@@ -1966,6 +2161,8 @@ with st.sidebar:
         st.session_state.gemini_api_key = get_api_key()
     api_key = st.text_input("Gemini API Key", type="password", value=st.session_state.gemini_api_key, placeholder="AIza...", help="Kunci API Gemini. Disimpan di secrets atau env.")
     if api_key: st.session_state.gemini_api_key = api_key
+    with st.expander("📸 Scan Broksum (Gemini Vision)", expanded=False):
+        render_broksum_vision_ui(st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
@@ -4104,13 +4301,16 @@ if run_btn:
     )
 
     # ----- TAMPILKAN HASIL KEDUA MODE DALAM TAB -----
-    tab_swing, tab_day = st.tabs(["📆 Swing Trade", "⏱️ Day Trade"])
+    tab_swing, tab_day, tab_broksum = st.tabs(["📆 Swing Trade", "⏱️ Day Trade", "📸 Broksum Vision AI"])
 
     with tab_swing:
         display_analysis_result(res_swing)
 
     with tab_day:
         display_analysis_result(res_day)
+
+    with tab_broksum:
+        render_broksum_vision_ui(st.session_state.get("gemini_api_key", ""), key_prefix="main_broksum")
 
     # ----- SIMPAN PREDIKSI V12 UNTUK KEDUA MODE -----
     for res in [res_swing, res_day]:
