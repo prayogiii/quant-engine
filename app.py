@@ -1511,6 +1511,269 @@ Aturan:
         return None, f"Error Gemini Vision: {str(e)}"
 
 
+# ==========================================
+# CHARTS & SKORING BANDARMOLOGY / BROKSUM
+# ==========================================
+def buat_chart_broker_flow(buyers, sellers):
+    """
+    Membuat Horizontal Bar Chart (Plotly) Net Broker Flow.
+    Buyer = Bar Hijau ke kanan, Seller = Bar Merah ke kiri.
+    """
+    if not PLOTLY_AVAILABLE:
+        return None
+    
+    brokers = []
+    values = []
+    colors = []
+    hover_texts = []
+
+    # Buyers (Nilai positif)
+    for b in buyers:
+        brk = b.get('broker', '?')
+        val = safe_float(b.get('value_idr') or b.get('volume_lot'), 0)
+        brokers.append(f"{brk} (Buy)")
+        values.append(val)
+        colors.append('#10b981')
+        hover_texts.append(f"Broker: {brk}<br>Buy Val/Vol: {val:,.0f}")
+
+    # Sellers (Nilai negatif)
+    for s in sellers:
+        brk = s.get('broker', '?')
+        val = safe_float(s.get('value_idr') or s.get('volume_lot'), 0)
+        brokers.append(f"{brk} (Sell)")
+        values.append(-abs(val))
+        colors.append('#ef4444')
+        hover_texts.append(f"Broker: {brk}<br>Sell Val/Vol: {val:,.0f}")
+
+    if not brokers:
+        return None
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=brokers,
+        x=values,
+        orientation='h',
+        marker_color=colors,
+        hoverinfo='text',
+        hovertext=hover_texts
+    ))
+
+    fig.update_layout(
+        title=dict(text="📊 Broker Flow Chart (Net Transaksi Broker)", font=dict(size=14, color='#e0e0e0')),
+        template="plotly_dark",
+        paper_bgcolor='#0f1116',
+        plot_bgcolor='#0f1116',
+        height=330,
+        margin=dict(l=80, r=20, t=40, b=20),
+        xaxis=dict(title=None, showgrid=True, gridcolor='rgba(128,128,128,0.1)', zeroline=True, zerolinecolor='rgba(255,255,255,0.3)'),
+        yaxis=dict(title=None, showgrid=False),
+        showlegend=False
+    )
+    return fig
+
+
+def buat_chart_trade_flow(buyers, sellers):
+    """
+    Membuat Donut Chart (Plotly) Konsentrasi Pembeli (Trade Flow Concentration).
+    """
+    if not PLOTLY_AVAILABLE or not buyers:
+        return None
+
+    labels = []
+    values = []
+    
+    total_val = sum(safe_float(b.get('value_idr') or b.get('volume_lot'), 0) for b in buyers)
+    
+    if total_val <= 0:
+        return None
+
+    for b in buyers:
+        brk = b.get('broker', '?')
+        val = safe_float(b.get('value_idr') or b.get('volume_lot'), 0)
+        labels.append(f"Broker {brk}")
+        values.append(val)
+
+    fig = go.Figure(data=[go.Pie(
+        labels=labels,
+        values=values,
+        hole=.45,
+        marker=dict(colors=['#10b981', '#059669', '#34d399', '#6ee7b7', '#a7f3d0', '#64748b']),
+        hovertemplate='<b>%{label}</b><br>Nilai: %{value:,.0f} (%{percent})<extra></extra>'
+    )])
+
+    fig.update_layout(
+        title=dict(text="🎯 Trade Flow: Konsentrasi Pembeli Utama", font=dict(size=14, color='#e0e0e0')),
+        template="plotly_dark",
+        paper_bgcolor='#0f1116',
+        plot_bgcolor='#0f1116',
+        height=330,
+        margin=dict(l=20, r=20, t=40, b=20),
+        showlegend=True
+    )
+    return fig
+
+
+def hitung_skor_bandarmology(res_broksum):
+    """
+    Menghitung penyesuaian skor teknikal (Skor Bandarmology: -20 s/d +20)
+    dan mendeteksi status konflik.
+    """
+    if not res_broksum or not isinstance(res_broksum, dict):
+        return 0.0, "N/A", "Neutral"
+
+    status = str(res_broksum.get("bandarmology_status", "")).strip()
+    foreign = str(res_broksum.get("foreign_flow_status", "")).strip()
+
+    bonus = 0.0
+    if "Big Accum" in status:
+        bonus = 15.0
+    elif "Normal Accum" in status:
+        bonus = 7.5
+    elif "Big Dist" in status:
+        bonus = -15.0
+    elif "Normal Dist" in status:
+        bonus = -7.5
+
+    if "Net Buy" in foreign:
+        bonus += 3.0
+    elif "Net Sell" in foreign:
+        bonus -= 3.0
+
+    bonus = max(-20.0, min(20.0, bonus))
+    return bonus, status, foreign
+
+
+def simpan_riwayat_broksum(saham, res_broksum):
+    """
+    Menyimpan hasil analisis Broksum & Bandarmology ke Google Sheets di tab `riwayat_broksum`.
+    """
+    if not res_broksum or not isinstance(res_broksum, dict):
+        return False
+    try:
+        gs = get_gsheet()
+        if not gs: return False
+        try:
+            ws = gs.worksheet("riwayat_broksum")
+        except Exception:
+            ws = gs.add_worksheet(title="riwayat_broksum", rows="1000", cols="10")
+            ws.append_row([
+                "Waktu", "Saham", "Status_Bandarmology", "Foreign_Flow",
+                "Top_Buyer", "Top_Seller", "Summary_Narrative", "Raw_JSON"
+            ])
+
+        now_str = datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
+        status = res_broksum.get("bandarmology_status", "N/A")
+        foreign = res_broksum.get("foreign_flow_status", "N/A")
+        
+        buyers = res_broksum.get("top_buyers", [])
+        sellers = res_broksum.get("top_sellers", [])
+        
+        top_b_str = ", ".join([b.get('broker', '') for b in buyers[:3]])
+        top_s_str = ", ".join([s.get('broker', '') for s in sellers[:3]])
+        narrative = res_broksum.get("summary_narrative", "")
+        raw_json_str = json.dumps(res_broksum)
+
+        ws.append_row([
+            now_str, saham.upper(), status, foreign,
+            top_b_str, top_s_str, narrative, raw_json_str
+        ])
+        return True
+    except Exception as e:
+        return False
+
+
+def render_tab_bandarmology_content(res_json):
+    """Render lengkap UI Bandarmology (Metrics, Charts, Tabel & Narasi)."""
+    if not res_json:
+        st.info("ℹ️ Belum ada data Broksum. Silakan upload screenshot Broksum untuk dianalisis.")
+        return
+
+    ticker_vis = res_json.get("ticker", "N/A")
+    periode_vis = res_json.get("periode", "N/A")
+    status_bandar = res_json.get("bandarmology_status", "Neutral")
+    foreign_status = res_json.get("foreign_flow_status", "N/A")
+    narrative = res_json.get("summary_narrative", "")
+    bonus_skor, _, _ = hitung_skor_bandarmology(res_json)
+
+    if "Big Accum" in status_bandar:
+        badge_color = "#10b981"
+        bandar_icon = "🔥"
+    elif "Normal Accum" in status_bandar:
+        badge_color = "#34d399"
+        bandar_icon = "📈"
+    elif "Big Dist" in status_bandar:
+        badge_color = "#ef4444"
+        bandar_icon = "🚨"
+    elif "Normal Dist" in status_bandar:
+        badge_color = "#f87171"
+        bandar_icon = "📉"
+    else:
+        badge_color = "#f59e0b"
+        bandar_icon = "⏸️"
+
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("Status Bandarmology", f"{bandar_icon} {status_bandar}")
+    col_m2.metric("Foreign Flow", f"🌐 {foreign_status}")
+    col_m3.metric("Dampak Skor Sinyal", f"{bonus_skor:+.1f} Poin")
+
+    st.markdown(
+        f"""
+        <div style="background-color: #1e293b; border-left: 5px solid {badge_color}; padding: 15px; border-radius: 10px; margin: 10px 0 15px 0;">
+            <h4 style="margin:0; color: {badge_color};">{bandar_icon} Analisis Bandarmology: {status_bandar}</h4>
+            <p style="margin: 5px 0 0 0; color: #cbd5e1;"><b>Ticker:</b> {ticker_vis} | <b>Periode:</b> {periode_vis} | <b>Foreign Flow:</b> {foreign_status}</p>
+            <p style="margin-top: 10px; font-size: 14px; color: #e2e8f0;">{narrative}</p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    buyers = res_json.get("top_buyers", [])
+    sellers = res_json.get("top_sellers", [])
+
+    # CHARTS BROKER FLOW & TRADE FLOW
+    if PLOTLY_AVAILABLE and (buyers or sellers):
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            fig_bf = buat_chart_broker_flow(buyers, sellers)
+            if fig_bf:
+                st.plotly_chart(fig_bf, use_container_width=True)
+        with col_c2:
+            fig_tf = buat_chart_trade_flow(buyers, sellers)
+            if fig_tf:
+                st.plotly_chart(fig_tf, use_container_width=True)
+
+    # TABEL TOP BUYER & SELLER
+    col_b, col_s = st.columns(2)
+
+    with col_b:
+        st.markdown("#### 🟢 Top Buyer (Pembeli)")
+        if buyers:
+            df_b = pd.DataFrame(buyers)
+            df_b_clean = df_b.rename(columns={
+                "broker": "Broker",
+                "volume_lot": "Volume (Lot)",
+                "value_idr": "Value (Rp)",
+                "avg_price": "Avg Price"
+            })
+            st.dataframe(df_b_clean, use_container_width=True)
+        else:
+            st.caption("Tidak ada data buyer terurai.")
+
+    with col_s:
+        st.markdown("#### 🔴 Top Seller (Penjual)")
+        if sellers:
+            df_s = pd.DataFrame(sellers)
+            df_s_clean = df_s.rename(columns={
+                "broker": "Broker",
+                "volume_lot": "Volume (Lot)",
+                "value_idr": "Value (Rp)",
+                "avg_price": "Avg Price"
+            })
+            st.dataframe(df_s_clean, use_container_width=True)
+        else:
+            st.caption("Tidak ada data seller terurai.")
+
+
 def render_broksum_vision_ui(api_key, key_prefix="broksum"):
     st.markdown("### 📸 Scan Broker Summary (Broksum) via AI Vision")
     st.caption("Upload screenshot Broksum / Broker Flow dari Stockbit, IPOT, Neo HOTS, atau broker manapun.")
@@ -1543,74 +1806,7 @@ def render_broksum_vision_ui(api_key, key_prefix="broksum"):
                         st.error(f"❌ {err}")
                     elif res_json:
                         st.success("✅ Broksum Berhasil Dianalisis!")
-
-                        ticker_vis = res_json.get("ticker", "N/A")
-                        periode_vis = res_json.get("periode", "N/A")
-                        status_bandar = res_json.get("bandarmology_status", "Neutral")
-                        foreign_status = res_json.get("foreign_flow_status", "N/A")
-                        narrative = res_json.get("summary_narrative", "")
-
-                        # Badge warna status bandarmology
-                        if "Big Accum" in status_bandar:
-                            badge_color = "#10b981"
-                            bandar_icon = "🔥"
-                        elif "Normal Accum" in status_bandar:
-                            badge_color = "#34d399"
-                            bandar_icon = "📈"
-                        elif "Big Dist" in status_bandar:
-                            badge_color = "#ef4444"
-                            bandar_icon = "🚨"
-                        elif "Normal Dist" in status_bandar:
-                            badge_color = "#f87171"
-                            bandar_icon = "📉"
-                        else:
-                            badge_color = "#f59e0b"
-                            bandar_icon = "⏸️"
-
-                        st.markdown(
-                            f"""
-                            <div style="background-color: #1e293b; border-left: 5px solid {badge_color}; padding: 15px; border-radius: 10px; margin-bottom: 15px;">
-                                <h3 style="margin:0; color: {badge_color};">{bandar_icon} Status Bandarmology: {status_bandar}</h3>
-                                <p style="margin: 5px 0 0 0; color: #cbd5e1;"><b>Ticker:</b> {ticker_vis} | <b>Periode:</b> {periode_vis} | <b>Foreign Flow:</b> {foreign_status}</p>
-                                <p style="margin-top: 10px; font-size: 14px; color: #e2e8f0;">{narrative}</p>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
-
-                        # Tampilkan Tabel Top Buyer vs Top Seller
-                        buyers = res_json.get("top_buyers", [])
-                        sellers = res_json.get("top_sellers", [])
-
-                        col_b, col_s = st.columns(2)
-
-                        with col_b:
-                            st.markdown("#### 🟢 Top Buyer (Pembeli)")
-                            if buyers:
-                                df_b = pd.DataFrame(buyers)
-                                df_b_clean = df_b.rename(columns={
-                                    "broker": "Broker",
-                                    "volume_lot": "Volume (Lot)",
-                                    "value_idr": "Value (Rp)",
-                                    "avg_price": "Avg Price"
-                                })
-                                st.dataframe(df_b_clean, use_container_width=True)
-                            else:
-                                st.caption("Tidak ada data buyer terurai.")
-
-                        with col_s:
-                            st.markdown("#### 🔴 Top Seller (Penjual)")
-                            if sellers:
-                                df_s = pd.DataFrame(sellers)
-                                df_s_clean = df_s.rename(columns={
-                                    "broker": "Broker",
-                                    "volume_lot": "Volume (Lot)",
-                                    "value_idr": "Value (Rp)",
-                                    "avg_price": "Avg Price"
-                                })
-                                st.dataframe(df_s_clean, use_container_width=True)
-                            else:
-                                st.caption("Tidak ada data seller terurai.")
+                        render_tab_bandarmology_content(res_json)
 
         except Exception as e_img:
             st.error(f"Gagal memuat gambar: {e_img}")
@@ -1738,6 +1934,14 @@ with st.sidebar:
             fee_beli_pct = st.number_input("Fee Beli (%)", min_value=0.0, max_value=2.0, value=0.15, step=0.05, key="fee_beli_pct")
         with col_f2:
             fee_jual_pct = st.number_input("Fee Jual (%)", min_value=0.0, max_value=2.0, value=0.25, step=0.05, key="fee_jual_pct")
+
+    # ---- Upload Screenshot Broksum Opsional ----
+    uploaded_broksum_sidebar = st.file_uploader(
+        "📸 Screenshot Broksum (Opsional)",
+        type=["png", "jpg", "jpeg", "webp"],
+        key="sidebar_main_broksum_uploader",
+        help="Upload SS Broksum Stockbit/Broker lain untuk dihitung ke skor sinyal & bandarmology."
+    )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -4202,6 +4406,30 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!")
         st.stop()
 
+    # ----- PROSES BROKSUM (JIKA SS DI-UPLOAD DI SIDEBAR) -----
+    res_broksum_main = None
+    broksum_bonus = 0.0
+    broksum_status = "N/A"
+    broksum_foreign = "N/A"
+
+    if uploaded_broksum_sidebar is not None:
+        try:
+            with st.spinner("🔍 Gemini Vision sedang menganalisis Broksum..."):
+                img_sidebar = Image.open(uploaded_broksum_sidebar)
+                gem_key = st.session_state.get("gemini_api_key", "")
+                if gem_key:
+                    res_broksum_main, err_brk = analisis_broksum_gemini_vision(img_sidebar, gem_key)
+                    if res_broksum_main:
+                        broksum_bonus, broksum_status, broksum_foreign = hitung_skor_bandarmology(res_broksum_main)
+                        simpan_riwayat_broksum(ticker_raw, res_broksum_main)
+                        st.toast(f"✅ Broksum Teranalisis: {broksum_status} (Skor: {broksum_bonus:+.1f})", icon="🐋")
+                    elif err_brk:
+                        st.warning(f"⚠️ Broksum gagal di-parse (dilewati): {err_brk}")
+                else:
+                    st.warning("⚠️ API Key Gemini belum terhubung, analisis Broksum dilewati.")
+        except Exception as e_b:
+            st.warning(f"⚠️ Gagal membaca SS Broksum (dilewati): {e_b}")
+
     with st.spinner("🤖 Menganalisis mode Swing dan Daytrade secara paralel..."):
         from concurrent.futures import ThreadPoolExecutor
         try:
@@ -4241,7 +4469,7 @@ if run_btn:
         st.error("❌ Gagal mengambil data untuk salah satu mode.")
         st.stop()
 
-    # ----- REKOMENDASI MODE HYBRID (KUANTITATIF + AI) -----
+    # ----- REKOMENDASI MODE HYBRID (KUANTITATIF + AI + BANDARMOLOGY) -----
     def skor_mode_math(res):
         sig_raw = res.get('signal_score', 0)
         sig = sig_raw * 100.0 if sig_raw <= 1.0 else sig_raw
@@ -4250,8 +4478,8 @@ if run_btn:
         conf = conf_raw * 100.0 if conf_raw <= 1.0 else conf_raw
         return (sig * 0.5) + (rrr_score * 0.2) + (conf * 0.3)
 
-    skor_math_swing = skor_mode_math(res_swing)
-    skor_math_day = skor_mode_math(res_day)
+    skor_math_swing = skor_mode_math(res_swing) + broksum_bonus
+    skor_math_day = skor_mode_math(res_day) + broksum_bonus
 
     ai_data = None
     ai_err = None
@@ -4305,8 +4533,22 @@ if run_btn:
         f"(Swing: {final_swing_score:.1f} vs Day: {final_day_score:.1f})"
     )
 
+    # ----- ALERT KONFLIK BANDARMOLOGY VS TEKNIKAL -----
+    if res_broksum_main:
+        if "Big Dist" in broksum_status and "BUY" in res_terbaik.get('signal', ''):
+            st.error(
+                f"🚨 **PERINGATAN KONFLIK BANDARMOLOGY (POTENSI BULL TRAP!)**\n\n"
+                f"Sinyal Teknikal adalah **{res_terbaik.get('signal')}**, tetapi Broksum terdeteksi **{broksum_status}** ({broksum_bonus:+.1f} poin)! "
+                f"Saran: Berhati-hati dan turunkan alokasi posisi."
+            )
+        elif "Big Accum" in broksum_status and "BUY" in res_terbaik.get('signal', ''):
+            st.success(
+                f"🔥 **KONFIRMASI BANDARMOLOGY SANGAT KUAT!**\n\n"
+                f"Sinyal Teknikal **{res_terbaik.get('signal')}** terkonfirmasi oleh **{broksum_status}** ({broksum_bonus:+.1f} poin)! Keyakinan tinggi."
+            )
+
     # ----- TAMPILKAN HASIL KEDUA MODE DALAM TAB -----
-    tab_swing, tab_day, tab_broksum = st.tabs(["📆 Swing Trade", "⏱️ Day Trade", "📸 Broksum Vision AI"])
+    tab_swing, tab_day, tab_broksum = st.tabs(["📆 Swing Trade", "⏱️ Day Trade", "🐋 Bandarmology & Broksum"])
 
     with tab_swing:
         display_analysis_result(res_swing)
@@ -4315,7 +4557,10 @@ if run_btn:
         display_analysis_result(res_day)
 
     with tab_broksum:
-        render_broksum_vision_ui(st.session_state.get("gemini_api_key", ""), key_prefix="main_broksum")
+        if res_broksum_main:
+            render_tab_bandarmology_content(res_broksum_main)
+        else:
+            render_broksum_vision_ui(st.session_state.get("gemini_api_key", ""), key_prefix="main_tab_broksum")
 
     # ----- SIMPAN PREDIKSI V12 UNTUK KEDUA MODE -----
     for res in [res_swing, res_day]:
