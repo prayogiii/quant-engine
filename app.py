@@ -2153,14 +2153,22 @@ with st.sidebar:
     st.subheader("🧠 AI (Gemini)")
     def get_api_key():
         try: return st.secrets["GEMINI_API_KEY"]
-        except KeyError: pass
+        except Exception: pass
         env_key = os.getenv("GEMINI_API_KEY")
         if env_key: return env_key
         return st.session_state.get("gemini_api_key", "")
-    if "gemini_api_key" not in st.session_state:
-        st.session_state.gemini_api_key = get_api_key()
-    api_key = st.text_input("Gemini API Key", type="password", value=st.session_state.gemini_api_key, placeholder="AIza...", help="Kunci API Gemini. Disimpan di secrets atau env.")
-    if api_key: st.session_state.gemini_api_key = api_key
+
+    api_key_loaded = get_api_key()
+    st.session_state.gemini_api_key = api_key_loaded
+
+    if api_key_loaded:
+        masked_key = f"{api_key_loaded[:6]}...{api_key_loaded[-4:]}" if len(api_key_loaded) > 10 else "••••••••"
+        st.success(f"🔑 Gemini API: `{masked_key}`")
+        with st.expander("👁️ Intip API Key", expanded=False):
+            st.code(api_key_loaded, language=None)
+    else:
+        st.warning("⚠️ Gemini API Key belum ada di Secrets / ENV.")
+
     with st.expander("📸 Scan Broksum (Gemini Vision)", expanded=False):
         render_broksum_vision_ui(st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
