@@ -1628,9 +1628,9 @@ def analisis_broksum_ocr(image):
     return res_json, None
 
 
-def render_broksum_ocr_ui(key_prefix="broksum"):
-    st.markdown("### 📸 Scan Broker Summary (Broksum) via OCR")
-    st.caption("Upload screenshot Broksum secara hemat kuota (menggunakan OCR lokal EasyOCR / PyTesseract).")
+def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
+    st.markdown("### 📸 Scan Broker Summary (Broksum)")
+    st.caption("Upload screenshot Broksum (Stockbit, IPOT, HOTS, dll) untuk dianalisis.")
 
     uploaded_file = st.file_uploader(
         "Pilih Foto / Screenshot Broksum",
@@ -1643,38 +1643,99 @@ def render_broksum_ocr_ui(key_prefix="broksum"):
             image = Image.open(uploaded_file)
             st.image(image, caption="Preview Broksum", use_container_width=True)
 
-            file_id     = f"{uploaded_file.name}_{uploaded_file.size}"
-            last_id_key = f"{key_prefix}_last_file_id"
             result_key  = f"{key_prefix}_result"
             error_key   = f"{key_prefix}_error"
 
-            if st.session_state.get(last_id_key) != file_id:
-                st.session_state[last_id_key] = file_id
-                st.session_state[result_key]  = None
-                st.session_state[error_key]   = None
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                btn_gemini = st.button("🤖 Scan AI Gemini (Akurat)", key=f"{key_prefix}_btn_gemini", use_container_width=True)
+            with col_btn2:
+                btn_ocr = st.button("⚡ Scan Offline (OCR)", key=f"{key_prefix}_btn_ocr", use_container_width=True)
 
+            if btn_gemini:
+                if not api_key:
+                    st.error("⚠️ Gemini API Key belum diisi di sidebar.")
+                else:
+                    with st.spinner("🧠 Gemini Vision sedang membaca tabel Broksum..."):
+                        res_json, err = analisis_broksum_gemini_vision(image, api_key)
+                    if err:
+                        st.session_state[error_key] = err
+                    else:
+                        st.session_state[result_key] = res_json
+                        st.session_state[error_key]  = None
+
+            elif btn_ocr:
                 with st.spinner("🔍 Membaca screenshot Broksum via OCR..."):
                     res_json, err = analisis_broksum_ocr(image)
                 if err:
                     st.session_state[error_key] = err
                 else:
                     st.session_state[result_key] = res_json
+                    st.session_state[error_key]  = None
 
             res_json = st.session_state.get(result_key)
             err      = st.session_state.get(error_key)
 
             if res_json:
-                st.success(f"✅ {res_json.get('summary_narrative', 'Broksum Terbaca')}")
-                if res_json.get("top_buyers"):
-                    st.markdown("**Top Buyers:** " + ", ".join([b['broker'] for b in res_json['top_buyers']]))
-                if res_json.get("top_sellers"):
-                    st.markdown("**Top Sellers:** " + ", ".join([s['broker'] for s in res_json['top_sellers']]))
+                st.success(f"✅ **Status:** {res_json.get('bandarmology_status', 'N/A')}")
+                if res_json.get("summary_narrative"):
+                    st.info(f"📝 {res_json.get('summary_narrative')}")
+
+                col_b, col_s = st.columns(2)
+                with col_b:
+                    st.markdown("**🟢 Top Buyers:**")
+                    for b in res_json.get("top_buyers", []):
+                        st.caption(f"- **{b.get('broker')}**: {b.get('volume_lot', 0):,} lot")
+                with col_s:
+                    st.markdown("**🔴 Top Sellers:**")
+                    for s in res_json.get("top_sellers", []):
+                        st.caption(f"- **{s.get('broker')}**: {s.get('volume_lot', 0):,} lot")
 
             elif err:
                 st.warning(f"⚠️ {err}")
 
         except Exception as e_img:
             st.error(f"Gagal memuat gambar: {e_img}")
+
+    with st.expander("📝 Input Manual Broksum", expanded=True if uploaded_file is None else False):
+        st.caption("Isi data Top Buyers & Top Sellers secara manual.")
+        n_broker = st.number_input("Jumlah broker per sisi", min_value=1, max_value=10, value=5, key=f"{key_prefix}_n_broker")
+
+        st.markdown("**🟢 Top Buyers**")
+        buyers_manual = []
+        for idx in range(int(n_broker)):
+            ca, cb = st.columns([2, 3])
+            brk = ca.text_input("", key=f"{key_prefix}_b_brk_{idx}", placeholder=f"Broker {idx+1}", label_visibility="collapsed")
+            vol = cb.number_input("", key=f"{key_prefix}_b_vol_{idx}", min_value=0, value=0, label_visibility="collapsed")
+            if brk.strip():
+                buyers_manual.append({"broker": brk.strip(), "volume_lot": int(vol)})
+
+        st.markdown("**🔴 Top Sellers**")
+        sellers_manual = []
+        for idx in range(int(n_broker)):
+            ca, cb = st.columns([2, 3])
+            brk = ca.text_input("", key=f"{key_prefix}_s_brk_{idx}", placeholder=f"Broker {idx+1}", label_visibility="collapsed")
+            vol = cb.number_input("", key=f"{key_prefix}_s_vol_{idx}", min_value=0, value=0, label_visibility="collapsed")
+            if brk.strip():
+                sellers_manual.append({"broker": brk.strip(), "volume_lot": int(vol)})
+
+        bandarmology_status = st.selectbox(
+            "Status Bandarmologi",
+            ["Akumulasi", "Distribusi", "Sideways/Tidak Jelas", "Mixed"],
+            key=f"{key_prefix}_manual_status"
+        )
+
+        if st.button("✅ Simpan Data Manual", key=f"{key_prefix}_manual_submit", use_container_width=True):
+            if buyers_manual or sellers_manual:
+                st.session_state[f"{key_prefix}_result"] = {
+                    "top_buyers": buyers_manual,
+                    "top_sellers": sellers_manual,
+                    "bandarmology_status": bandarmology_status,
+                    "summary_narrative": f"Input manual: Status {bandarmology_status}."
+                }
+                st.session_state[f"{key_prefix}_error"] = None
+                st.success("✅ Data manual berhasil disimpan.")
+                st.rerun()
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
@@ -2229,8 +2290,8 @@ with st.sidebar:
     else:
         st.warning("⚠️ Gemini API Key belum ada di Secrets / ENV.")
 
-    with st.expander("📸 Scan Broksum (OCR - Hemat Limit API)", expanded=False):
-        render_broksum_ocr_ui(key_prefix="sb_broksum")
+    with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
+        render_broksum_scan_ui(api_key=st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
