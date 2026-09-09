@@ -1512,529 +1512,125 @@ Aturan:
 
 
 # ==========================================
-# CHARTS & SKORING BANDARMOLOGY / BROKSUM
+
+
+
 # ==========================================
-def buat_chart_broker_flow(buyers, sellers):
+# FUNGSI BANDARMOLOGY & BROKSUM (OCR METODE LOCAL)
+# ==========================================
+EASYOCR_AVAILABLE = False
+PYTESSERACT_AVAILABLE = False
+
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except Exception:
+    EASYOCR_AVAILABLE = False
+
+try:
+    import pytesseract
+    PYTESSERACT_AVAILABLE = True
+except Exception:
+    PYTESSERACT_AVAILABLE = False
+
+
+def analisis_broksum_ocr(image):
     """
-    Membuat Stockbit-style Cumulative Broker Flow Chart (Plotly).
-    Setiap broker ditampilkan sebagai cumulative net line sepanjang
-    waktu intraday BEI (09:00-16:15), plus bar periodal & price line.
+    Menganalisis screenshot Broker Summary (Broksum) / Trade Flow menggunakan OCR (EasyOCR / PyTesseract).
+    Metode offline ini hemat kuota dan tidak menggunakan API Key Gemini.
     """
-    if not PLOTLY_AVAILABLE:
-        return None
+    if not PIL_AVAILABLE:
+        return None, "Library Pillow (PIL) belum terpasang."
 
-    # Kumpulkan data net per broker
-    all_entries = []
-    seen_buyers = {b.get('broker') for b in buyers}
-    for b in buyers:
-        brk = b.get('broker', '?')
-        val = safe_float(b.get('value_idr') or b.get('volume_lot'), 0)
-        if val > 0:
-            all_entries.append({'broker': brk, 'net': val,
-                                'avg_price': safe_float(b.get('avg_price'), 0)})
-    for s in sellers:
-        brk = s.get('broker', '?')
-        val = safe_float(s.get('value_idr') or s.get('volume_lot'), 0)
-        if val > 0:
-            net_val = val if brk in seen_buyers else -abs(val)
-            all_entries.append({'broker': brk, 'net': net_val,
-                                'avg_price': safe_float(s.get('avg_price'), 0)})
+    extracted_text = ""
+    engine_used = ""
 
-    if not all_entries:
-        return None
-
-    # Timeline intraday BEI: 09:00-12:00 sesi 1, 13:30-16:15 sesi 2 (step 5 mnt)
-    times_s1 = []
-    h, m = 9, 0
-    while (h, m) <= (12, 0):
-        times_s1.append(f"{h:02d}:{m:02d}")
-        m += 5
-        if m >= 60:
-            h += 1
-            m = 0
-    times_s2 = []
-    h, m = 13, 30
-    while (h, m) <= (16, 15):
-        times_s2.append(f"{h:02d}:{m:02d}")
-        m += 5
-        if m >= 60:
-            h += 1
-            m = 0
-    time_labels = times_s1 + times_s2
-    n_bars = len(time_labels)
-
-    # Bobot distribusi volume (puncak di open & close)
-    weights = np.ones(n_bars, dtype=float)
-    weights[:6]  *= 3.5
-    weights[-6:] *= 2.5
-    weights[30:36] *= 1.4
-    weights /= weights.sum()
-
-    # Palet warna Stockbit-like
-    COLORS = ['#00e5cc','#c084fc','#facc15','#fb923c','#f87171',
-              '#60a5fa','#34d399','#f472b6','#a78bfa','#94a3b8']
-
-    fig = go.Figure()
-
-    # Bar periodal agregat (total net semua broker)
-    total_net = sum(e['net'] for e in all_entries)
-    bar_vals = total_net * weights
-    bar_colors = ['#26a69a' if v >= 0 else '#ef5350' for v in bar_vals]
-    fig.add_trace(go.Bar(
-        x=time_labels,
-        y=bar_vals,
-        marker_color=bar_colors,
-        opacity=0.5,
-        name='Net Bars',
-        yaxis='y',
-        showlegend=False,
-        hovertemplate='%{x}<br>Net: %{y:,.0f}<extra></extra>',
-    ))
-
-    # Cumulative line per broker
-    for i, entry in enumerate(all_entries):
-        brk  = entry['broker']
-        net  = entry['net']
-        color = COLORS[i % len(COLORS)]
-        rng = np.random.default_rng(seed=abs(hash(brk)) % (2**32))
-        noise = rng.dirichlet(np.ones(n_bars) * 5)
-        cumulative = np.cumsum(net * noise)
-
-        def _fmt(v):
-            av = abs(v)
-            if av >= 1e9:  return f"Rp {v/1e9:.2f}M"
-            if av >= 1e6:  return f"Rp {v/1e6:.1f}Jt"
-            return f"{v:,.0f}"
-
-        fig.add_trace(go.Scatter(
-            x=time_labels,
-            y=cumulative,
-            mode='lines',
-            name=brk,
-            line=dict(color=color, width=2),
-            yaxis='y',
-            hovertemplate=f'<b>{brk}</b> %{{x}}<br>Kum: {_fmt(net)}<extra></extra>',
-        ))
-
-    # Price line di axis kanan
-    avg_prices = [e['avg_price'] for e in all_entries if e['avg_price'] > 0]
-    base_price = float(np.mean(avg_prices)) if avg_prices else 1000.0
-    rng_p = np.random.default_rng(seed=99)
-    pw = rng_p.normal(0, base_price * 0.003, n_bars)
-    price_walk = np.clip(base_price + np.cumsum(pw),
-                         base_price * 0.97, base_price * 1.04)
-
-    fig.add_trace(go.Scatter(
-        x=time_labels,
-        y=price_walk,
-        mode='lines',
-        name='Price',
-        line=dict(color='#ef5350', width=1.8),
-        yaxis='y2',
-        hovertemplate='Harga: %{y:,.0f}<extra></extra>',
-    ))
-
-    fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1, yref='y')
-
-    y_span = max(abs(e['net']) for e in all_entries) * 1.35
-
-    # Tick labels yang ditampilkan (setiap ~30 menit)
-    tick_show = time_labels[::6]
-
-    fig.update_layout(
-        title=dict(
-            text="📊 Broker Flow Chart – Kumulatif Net Transaksi (Intraday Style)",
-            font=dict(size=13, color='#e2e8f0'),
-            x=0.01, xanchor='left'
-        ),
-        template="plotly_dark",
-        paper_bgcolor='#0d1117',
-        plot_bgcolor='#0d1117',
-        height=460,
-        margin=dict(l=10, r=75, t=44, b=50),
-        hovermode='x unified',
-        hoverlabel=dict(bgcolor='#1e293b', font=dict(size=11, family='monospace')),
-        dragmode='pan',
-        legend=dict(
-            orientation='h', x=0, y=-0.15,
-            bgcolor='rgba(0,0,0,0)',
-            font=dict(size=11),
-            itemclick='toggle',
-        ),
-        xaxis=dict(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.06)',
-            zeroline=False,
-            tickfont=dict(size=10, color='#94a3b8'),
-            tickvals=tick_show,
-            tickangle=0,
-        ),
-        yaxis=dict(
-            showgrid=True,
-            gridcolor='rgba(255,255,255,0.06)',
-            zeroline=False,
-            tickfont=dict(size=10, color='#94a3b8'),
-            range=[-y_span, y_span],
-            tickformat='.3s',
-            side='left',
-        ),
-        yaxis2=dict(
-            overlaying='y',
-            side='right',
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(size=10, color='#f87171'),
-            tickformat=',.0f',
-            range=[float(price_walk.min()) * 0.997,
-                   float(price_walk.max()) * 1.003],
-        ),
-    )
-    return fig
-
-
-def buat_chart_trade_flow(buyers, sellers):
-    """
-    Stockbit-style Trade Flow Chart:
-    - Bar hijau (Net Buy) di atas zero line
-    - Bar merah (Net Sell) di bawah zero line
-    - Line biru (Price) di secondary axis kanan
-    - Gradient bar bawah: Net Dist (merah) → Net Acc (hijau) + sentiment marker
-    """
-    if not PLOTLY_AVAILABLE:
-        return None
-
-    try:
-        from plotly.subplots import make_subplots as _msub
-    except ImportError:
-        return None
-
-    total_buy  = sum(safe_float(b.get('value_idr') or b.get('volume_lot'), 0) for b in buyers)
-    total_sell = sum(safe_float(s.get('value_idr') or s.get('volume_lot'), 0) for s in sellers)
-
-    if total_buy == 0 and total_sell == 0:
-        return None
-
-    # ── Timeline intraday BEI 09:00–12:00 + 13:30–16:15 step 5 mnt ──
-    def _make_timeline():
-        tl = []
-        for (sh, sm), (eh, em) in [((9,0),(12,0)),((13,30),(16,15))]:
-            h, m = sh, sm
-            while (h, m) <= (eh, em):
-                tl.append(f"{h:02d}:{m:02d}")
-                m += 5
-                if m >= 60: h += 1; m = 0
-        return tl
-
-    time_labels = _make_timeline()
-    n = len(time_labels)
-
-    # ── Bobot distribusi volume realistis ──
-    w = np.ones(n, dtype=float)
-    w[:6] *= 3.5; w[-6:] *= 2.5; w[30:36] *= 1.4
-    w /= w.sum()
-
-    rng = np.random.default_rng(seed=77)
-
-    # Per-period bars
-    buy_bars  =  total_buy  * rng.dirichlet(np.ones(n) * 3) * w * n
-    sell_bars = -total_sell * rng.dirichlet(np.ones(n) * 3) * w * n
-
-    # ── Price line dari avg_price broker ──
-    avg_prices = [
-        safe_float(item.get('avg_price'), 0)
-        for lst in (buyers, sellers) for item in lst
-        if safe_float(item.get('avg_price'), 0) > 0
-    ]
-    base_price = float(np.mean(avg_prices)) if avg_prices else 1000.0
-    rng_p = np.random.default_rng(seed=42)
-    price_walk = np.clip(
-        base_price + np.cumsum(rng_p.normal(0, base_price * 0.003, n)),
-        base_price * 0.97, base_price * 1.04
-    )
-
-    # ── Figure dengan secondary y ──
-    fig = _msub(rows=1, cols=1, specs=[[{"secondary_y": True}]])
-
-    fig.add_trace(go.Bar(
-        x=time_labels, y=buy_bars,
-        name='Net Buy', marker_color='#26a69a', opacity=0.85,
-        hovertemplate='%{x}<br>Net Buy: %{y:,.0f}<extra></extra>',
-    ), secondary_y=False)
-
-    fig.add_trace(go.Bar(
-        x=time_labels, y=sell_bars,
-        name='Net Sell', marker_color='#ef5350', opacity=0.85,
-        hovertemplate='%{x}<br>Net Sell: %{y:,.0f}<extra></extra>',
-    ), secondary_y=False)
-
-    fig.add_trace(go.Scatter(
-        x=time_labels, y=price_walk,
-        name='Price', mode='lines',
-        line=dict(color='#60a5fa', width=1.8),
-        hovertemplate='Price: %{y:,.0f}<extra></extra>',
-    ), secondary_y=True)
-
-    # ── Zero line ──
-    fig.add_hline(y=0, line_color='rgba(255,255,255,0.2)', line_width=1)
-
-    # ── Gradient bar bawah (paper-referenced shapes) ──
-    N_GRAD = 80
-    for i in range(N_GRAD):
-        frac = i / N_GRAD
-        if frac < 0.5:
-            r = 239; g = int(frac * 2 * 83); b = int(frac * 2 * 80)
-        else:
-            f2 = (frac - 0.5) * 2
-            r = max(0, int(239 * (1 - f2)))
-            g = int(83 + f2 * (166 - 83))
-            b = int(80  + f2 * (154 - 80))
-        fig.add_shape(
-            type='rect', xref='paper', yref='paper',
-            x0=i/N_GRAD, x1=(i+1)/N_GRAD,
-            y0=-0.18, y1=-0.09,
-            fillcolor=f'rgb({r},{g},{b})',
-            line=dict(width=0), layer='above',
-        )
-
-    # Sentiment marker position
-    total = total_buy + total_sell
-    sentiment_x = (total_buy / total) if total > 0 else 0.5
-    fig.add_shape(
-        type='line', xref='paper', yref='paper',
-        x0=sentiment_x, x1=sentiment_x,
-        y0=-0.21, y1=-0.06,
-        line=dict(color='white', width=2.5), layer='above',
-    )
-
-    # Labels Net Dist / Net Acc
-    fig.add_annotation(x=0.0, y=-0.26, xref='paper', yref='paper',
-        text='Net Dist', showarrow=False,
-        font=dict(size=10, color='#ef5350'), xanchor='left')
-    fig.add_annotation(x=1.0, y=-0.26, xref='paper', yref='paper',
-        text='Net Acc', showarrow=False,
-        font=dict(size=10, color='#26a69a'), xanchor='right')
-
-    # ── Axis & Layout ──
-    max_val = max(float(buy_bars.max()), float(abs(sell_bars.min()))) * 1.5
-    tick_show = time_labels[::6]
-
-    fig.update_layout(
-        title=dict(
-            text="📈 Trade Flow Chart – Net Buy/Sell Intraday",
-            font=dict(size=13, color='#e2e8f0'),
-            x=0.01, xanchor='left'
-        ),
-        template="plotly_dark",
-        paper_bgcolor='#0d1117',
-        plot_bgcolor='#0d1117',
-        height=500,
-        barmode='overlay',
-        margin=dict(l=10, r=75, t=44, b=80),
-        hovermode='x unified',
-        hoverlabel=dict(bgcolor='#1e293b', font_size=11, font_family='monospace'),
-        dragmode='pan',
-        legend=dict(
-            orientation='h', x=0.5, y=-0.30,
-            xanchor='center',
-            bgcolor='rgba(0,0,0,0)',
-            font=dict(size=11),
-        ),
-    )
-    fig.update_xaxes(
-        showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-        zeroline=False,
-        tickfont=dict(size=10, color='#94a3b8'),
-        tickvals=tick_show, tickangle=0,
-    )
-    fig.update_yaxes(
-        showgrid=True, gridcolor='rgba(255,255,255,0.06)',
-        zeroline=True, zerolinecolor='rgba(255,255,255,0.2)',
-        tickfont=dict(size=10, color='#94a3b8'),
-        range=[-max_val, max_val], tickformat='.3s',
-        secondary_y=False, title_text=None,
-    )
-    fig.update_yaxes(
-        showgrid=False, zeroline=False,
-        tickfont=dict(size=10, color='#60a5fa'),
-        tickformat=',.0f',
-        range=[float(price_walk.min()) * 0.997,
-               float(price_walk.max()) * 1.003],
-        secondary_y=True, title_text=None,
-    )
-    return fig
-
-
-def hitung_skor_bandarmology(res_broksum):
-    """
-    Menghitung penyesuaian skor teknikal (Skor Bandarmology: -20 s/d +20)
-    dan mendeteksi status konflik.
-    """
-    if not res_broksum or not isinstance(res_broksum, dict):
-        return 0.0, "N/A", "Neutral"
-
-    status = str(res_broksum.get("bandarmology_status", "")).strip()
-    foreign = str(res_broksum.get("foreign_flow_status", "")).strip()
-
-    bonus = 0.0
-    if "Big Accum" in status:
-        bonus = 15.0
-    elif "Normal Accum" in status:
-        bonus = 7.5
-    elif "Big Dist" in status:
-        bonus = -15.0
-    elif "Normal Dist" in status:
-        bonus = -7.5
-
-    if "Net Buy" in foreign:
-        bonus += 3.0
-    elif "Net Sell" in foreign:
-        bonus -= 3.0
-
-    bonus = max(-20.0, min(20.0, bonus))
-    return bonus, status, foreign
-
-
-def simpan_riwayat_broksum(saham, res_broksum):
-    """
-    Menyimpan hasil analisis Broksum & Bandarmology ke Google Sheets di tab `riwayat_broksum`.
-    """
-    if not res_broksum or not isinstance(res_broksum, dict):
-        return False
-    try:
-        gs = get_gsheet()
-        if not gs: return False
+    # Strategy 1: Try EasyOCR if available
+    if EASYOCR_AVAILABLE:
         try:
-            ws = gs.worksheet("riwayat_broksum")
+            reader = easyocr.Reader(['id', 'en'], gpu=False)
+            img_np = np.array(image.convert('RGB'))
+            results = reader.readtext(img_np, detail=0)
+            extracted_text = "\n".join(results)
+            engine_used = "EasyOCR"
         except Exception:
-            ws = gs.add_worksheet(title="riwayat_broksum", rows="10000", cols="10")
-            ws.append_row([
-                "Waktu", "Saham", "Status_Bandarmology", "Foreign_Flow",
-                "Top_Buyer", "Top_Seller", "Summary_Narrative", "Raw_JSON"
-            ])
+            extracted_text = ""
 
-        now_str = datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
-        status = res_broksum.get("bandarmology_status", "N/A")
-        foreign = res_broksum.get("foreign_flow_status", "N/A")
+    # Strategy 2: Try PyTesseract if available
+    if not extracted_text and PYTESSERACT_AVAILABLE:
+        try:
+            extracted_text = pytesseract.image_to_string(image)
+            engine_used = "PyTesseract"
+        except Exception:
+            extracted_text = ""
+
+    if not extracted_text:
+        return None, "Library OCR (EasyOCR / PyTesseract) belum terpasang di server. Anda dapat mengisi data manual di bawah."
+
+    # Parse extracted text to identify broker codes and numerical values
+    known_brokers = {
+        "YP", "BK", "ZP", "AK", "KZ", "NI", "GR", "RX", "PD", "CC", "CP", "DX", "AZ", "DR",
+        "LG", "IF", "OD", "XC", "EP", "YU", "XL", "AI", "DB", "IU", "TP", "HD", "YJ", "CS",
+        "KK", "MG", "SQ", "XA", "LS", "BD", "AT", "AN", "OD", "YU", "GA", "RG", "CD"
+    }
+
+    buyers = []
+    sellers = []
+    lines = extracted_text.split('\n')
+    is_seller = False
+
+    for line in lines:
+        u_line = line.upper()
+        if "SELL" in u_line or "SELLER" in u_line or "NET SELL" in u_line:
+            is_seller = True
         
-        buyers = res_broksum.get("top_buyers", [])
-        sellers = res_broksum.get("top_sellers", [])
-        
-        top_b_str = ", ".join([b.get('broker', '') for b in buyers[:3]])
-        top_s_str = ", ".join([s.get('broker', '') for s in sellers[:3]])
-        narrative = res_broksum.get("summary_narrative", "")
-        raw_json_str = json.dumps(res_broksum)
+        found_brks = re.findall(r'\b([A-Z]{2})\b', u_line)
+        numbers = re.findall(r'\b(\d+[\d\.,]*)\b', line)
 
-        ws.append_row([
-            now_str, saham.upper(), status, foreign,
-            top_b_str, top_s_str, narrative, raw_json_str
-        ])
-        return True
-    except Exception as e:
-        return False
+        for brk in found_brks:
+            if brk in known_brokers or len(found_brks) == 1:
+                val = 0
+                if numbers:
+                    try:
+                        val = int(numbers[0].replace('.', '').replace(',', ''))
+                    except Exception:
+                        val = 0
+                item = {"broker": brk, "volume_lot": val, "value_idr": val * 100, "avg_price": 0.0}
+                if is_seller:
+                    sellers.append(item)
+                else:
+                    buyers.append(item)
 
+    tot_b = sum(b["volume_lot"] for b in buyers)
+    tot_s = sum(s["volume_lot"] for s in sellers)
 
-def render_tab_bandarmology_content(res_json):
-    """Render lengkap UI Bandarmology (Metrics, Charts, Tabel & Narasi)."""
-    if not res_json:
-        st.info("ℹ️ Belum ada data Broksum. Silakan upload screenshot Broksum untuk dianalisis.")
-        return
-
-    ticker_vis = res_json.get("ticker", "N/A")
-    periode_vis = res_json.get("periode", "N/A")
-    status_bandar = res_json.get("bandarmology_status", "Neutral")
-    foreign_status = res_json.get("foreign_flow_status", "N/A")
-    narrative = res_json.get("summary_narrative", "")
-    bonus_skor, _, _ = hitung_skor_bandarmology(res_json)
-
-    if "Big Accum" in status_bandar:
-        badge_color = "#10b981"
-        bandar_icon = "🔥"
-    elif "Normal Accum" in status_bandar:
-        badge_color = "#34d399"
-        bandar_icon = "📈"
-    elif "Big Dist" in status_bandar:
-        badge_color = "#ef4444"
-        bandar_icon = "🚨"
-    elif "Normal Dist" in status_bandar:
-        badge_color = "#f87171"
-        bandar_icon = "📉"
+    if tot_b > tot_s * 1.5:
+        status = "Big Accumulation"
+    elif tot_b > tot_s * 1.1:
+        status = "Normal Accumulation"
+    elif tot_s > tot_b * 1.5:
+        status = "Big Distribution"
+    elif tot_s > tot_b * 1.1:
+        status = "Normal Distribution"
     else:
-        badge_color = "#f59e0b"
-        bandar_icon = "⏸️"
+        status = "Neutral"
 
-    col_m1, col_m2, col_m3 = st.columns(3)
-    col_m1.metric("Status Bandarmology", f"{bandar_icon} {status_bandar}")
-    col_m2.metric("Foreign Flow", f"🌐 {foreign_status}")
-    col_m3.metric("Dampak Skor Sinyal", f"{bonus_skor:+.1f} Poin")
+    narrative = f"Hasil OCR ({engine_used}): Terbaca {len(buyers)} Buyer, {len(sellers)} Seller. Status: {status}."
 
-    st.markdown(
-        f"""
-        <div style="background-color: #1e293b; border-left: 5px solid {badge_color}; padding: 15px; border-radius: 10px; margin: 10px 0 15px 0;">
-            <h4 style="margin:0; color: {badge_color};">{bandar_icon} Analisis Bandarmology: {status_bandar}</h4>
-            <p style="margin: 5px 0 0 0; color: #cbd5e1;"><b>Ticker:</b> {ticker_vis} | <b>Periode:</b> {periode_vis} | <b>Foreign Flow:</b> {foreign_status}</p>
-            <p style="margin-top: 10px; font-size: 14px; color: #e2e8f0;">{narrative}</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    res_json = {
+        "bandarmology_status": status,
+        "foreign_flow_status": "Neutral",
+        "summary_narrative": narrative,
+        "top_buyers": buyers[:5],
+        "top_sellers": sellers[:5]
+    }
 
-    buyers = res_json.get("top_buyers", [])
-    sellers = res_json.get("top_sellers", [])
-
-    # CHARTS BROKER FLOW & TRADE FLOW
-    if PLOTLY_AVAILABLE and (buyers or sellers):
-        # Broker Flow Chart – full width (Stockbit style, needs horizontal space)
-        fig_bf = buat_chart_broker_flow(buyers, sellers)
-        if fig_bf:
-            st.plotly_chart(fig_bf, use_container_width=True, config={
-                'modeBarButtonSize': 4,
-                'displaylogo': False,
-                'scrollZoom': True,
-            })
-        # Trade Flow Chart – full width (Stockbit style)
-        fig_tf = buat_chart_trade_flow(buyers, sellers)
-        if fig_tf:
-            st.plotly_chart(fig_tf, use_container_width=True, config={
-                'modeBarButtonSize': 4,
-                'displaylogo': False,
-                'scrollZoom': True,
-            })
-
-    # TABEL TOP BUYER & SELLER
-    col_b, col_s = st.columns(2)
-
-    with col_b:
-        st.markdown("#### 🟢 Top Buyer (Pembeli)")
-        if buyers:
-            df_b = pd.DataFrame(buyers)
-            df_b_clean = df_b.rename(columns={
-                "broker": "Broker",
-                "volume_lot": "Volume (Lot)",
-                "value_idr": "Value (Rp)",
-                "avg_price": "Avg Price"
-            })
-            st.dataframe(df_b_clean, use_container_width=True)
-        else:
-            st.caption("Tidak ada data buyer terurai.")
-
-    with col_s:
-        st.markdown("#### 🔴 Top Seller (Penjual)")
-        if sellers:
-            df_s = pd.DataFrame(sellers)
-            df_s_clean = df_s.rename(columns={
-                "broker": "Broker",
-                "volume_lot": "Volume (Lot)",
-                "value_idr": "Value (Rp)",
-                "avg_price": "Avg Price"
-            })
-            st.dataframe(df_s_clean, use_container_width=True)
-        else:
-            st.caption("Tidak ada data seller terurai.")
+    return res_json, None
 
 
-def render_broksum_vision_ui(api_key, key_prefix="broksum"):
-    st.markdown("### 📸 Scan Broker Summary (Broksum) via AI Vision")
-    st.caption("Upload screenshot Broksum / Broker Flow dari Stockbit, IPOT, Neo HOTS, atau broker manapun.")
+def render_broksum_ocr_ui(key_prefix="broksum"):
+    st.markdown("### 📸 Scan Broker Summary (Broksum) via OCR")
+    st.caption("Upload screenshot Broksum secara hemat kuota (menggunakan OCR lokal EasyOCR / PyTesseract).")
 
     uploaded_file = st.file_uploader(
         "Pilih Foto / Screenshot Broksum",
@@ -2047,95 +1643,35 @@ def render_broksum_vision_ui(api_key, key_prefix="broksum"):
             image = Image.open(uploaded_file)
             st.image(image, caption="Preview Broksum", use_container_width=True)
 
-            # Deteksi file baru via name+size
-            file_id       = f"{uploaded_file.name}_{uploaded_file.size}"
-            last_id_key   = f"{key_prefix}_last_file_id"
-            result_key    = f"{key_prefix}_result"
-            error_key     = f"{key_prefix}_error"
+            file_id     = f"{uploaded_file.name}_{uploaded_file.size}"
+            last_id_key = f"{key_prefix}_last_file_id"
+            result_key  = f"{key_prefix}_result"
+            error_key   = f"{key_prefix}_error"
 
             if st.session_state.get(last_id_key) != file_id:
-                # File baru — langsung analisis otomatis
                 st.session_state[last_id_key] = file_id
                 st.session_state[result_key]  = None
                 st.session_state[error_key]   = None
 
-                if not api_key:
-                    st.session_state[error_key] = "API Key belum diset. Masukkan Gemini API Key di sidebar."
+                with st.spinner("🔍 Membaca screenshot Broksum via OCR..."):
+                    res_json, err = analisis_broksum_ocr(image)
+                if err:
+                    st.session_state[error_key] = err
                 else:
-                    with st.spinner("🧠 Gemini Vision sedang membaca & menganalisis Broksum..."):
-                        res_json, err = analisis_broksum_gemini_vision(image, api_key)
-                    if err:
-                        st.session_state[error_key] = err
-                    else:
-                        st.session_state[result_key] = res_json
+                    st.session_state[result_key] = res_json
 
             res_json = st.session_state.get(result_key)
             err      = st.session_state.get(error_key)
 
             if res_json:
-                st.success("✅ Broksum Berhasil Dianalisis!")
-                render_tab_bandarmology_content(res_json)
+                st.success(f"✅ {res_json.get('summary_narrative', 'Broksum Terbaca')}")
+                if res_json.get("top_buyers"):
+                    st.markdown("**Top Buyers:** " + ", ".join([b['broker'] for b in res_json['top_buyers']]))
+                if res_json.get("top_sellers"):
+                    st.markdown("**Top Sellers:** " + ", ".join([s['broker'] for s in res_json['top_sellers']]))
 
             elif err:
-                st.error(f"❌ AI Vision gagal: {err}")
-                st.warning("⚠️ Silakan input data Broksum secara manual di bawah.")
-
-                with st.expander("📝 Input Manual Broksum", expanded=True):
-                    st.caption("Isi data Top Buyers & Top Sellers dari screenshot kamu.")
-                    n_broker = st.number_input("Jumlah broker per sisi", min_value=1, max_value=10, value=5, key=f"{key_prefix}_n_broker")
-
-                    st.markdown("**🟢 Top Buyers**")
-                    c0, c1, c2, c3 = st.columns([2, 2, 3, 2])
-                    c0.markdown("**Broker**"); c1.markdown("**Vol (Lot)**"); c2.markdown("**Value (Rp)**"); c3.markdown("**Avg Price**")
-                    buyers_manual = []
-                    for idx in range(int(n_broker)):
-                        ca, cb, cc, cd = st.columns([2, 2, 3, 2])
-                        brk = ca.text_input("", key=f"{key_prefix}_b_brk_{idx}", placeholder=f"B{idx+1}", label_visibility="collapsed")
-                        vol = cb.number_input("", key=f"{key_prefix}_b_vol_{idx}", min_value=0, value=0, label_visibility="collapsed")
-                        val = cc.number_input("", key=f"{key_prefix}_b_val_{idx}", min_value=0, value=0, label_visibility="collapsed")
-                        avg = cd.number_input("", key=f"{key_prefix}_b_avg_{idx}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
-                        if brk.strip():
-                            buyers_manual.append({"broker": brk.strip(), "volume_lot": int(vol), "value_idr": int(val), "avg_price": float(avg)})
-
-                    st.markdown("**🔴 Top Sellers**")
-                    d0, d1, d2, d3 = st.columns([2, 2, 3, 2])
-                    d0.markdown("**Broker**"); d1.markdown("**Vol (Lot)**"); d2.markdown("**Value (Rp)**"); d3.markdown("**Avg Price**")
-                    sellers_manual = []
-                    for idx in range(int(n_broker)):
-                        ca, cb, cc, cd = st.columns([2, 2, 3, 2])
-                        brk = ca.text_input("", key=f"{key_prefix}_s_brk_{idx}", placeholder=f"S{idx+1}", label_visibility="collapsed")
-                        vol = cb.number_input("", key=f"{key_prefix}_s_vol_{idx}", min_value=0, value=0, label_visibility="collapsed")
-                        val = cc.number_input("", key=f"{key_prefix}_s_val_{idx}", min_value=0, value=0, label_visibility="collapsed")
-                        avg = cd.number_input("", key=f"{key_prefix}_s_avg_{idx}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
-                        if brk.strip():
-                            sellers_manual.append({"broker": brk.strip(), "volume_lot": int(vol), "value_idr": int(val), "avg_price": float(avg)})
-
-                    bandarmology_status = st.selectbox(
-                        "Status Bandarmologi",
-                        ["Akumulasi", "Distribusi", "Sideways/Tidak Jelas", "Mixed"],
-                        key=f"{key_prefix}_manual_status"
-                    )
-                    foreign_flow = st.selectbox(
-                        "Foreign Flow",
-                        ["Net Buy", "Net Sell", "Neutral"],
-                        key=f"{key_prefix}_manual_foreign"
-                    )
-                    narrative = st.text_area("Narasi / Catatan (opsional)", key=f"{key_prefix}_manual_narrative", height=80)
-
-                    if st.button("✅ Analisis Data Manual", key=f"{key_prefix}_manual_submit", use_container_width=True):
-                        if not buyers_manual and not sellers_manual:
-                            st.error("Minimal isi 1 broker buyer atau seller.")
-                        else:
-                            manual_json = {
-                                "top_buyers": buyers_manual,
-                                "top_sellers": sellers_manual,
-                                "bandarmology_status": bandarmology_status,
-                                "foreign_flow_status": foreign_flow,
-                                "summary_narrative": narrative or f"Input manual: {bandarmology_status}, Foreign {foreign_flow}.",
-                            }
-                            st.session_state[result_key] = manual_json
-                            st.session_state[error_key]  = None
-                            st.rerun()
+                st.warning(f"⚠️ {err}")
 
         except Exception as e_img:
             st.error(f"Gagal memuat gambar: {e_img}")
@@ -2264,72 +1800,7 @@ with st.sidebar:
         with col_f2:
             fee_jual_pct = st.number_input("Fee Jual (%)", min_value=0.0, max_value=2.0, value=0.25, step=0.05, key="fee_jual_pct")
 
-    # ---- Upload Screenshot Broksum Opsional ----
-    uploaded_broksum_sidebar = st.file_uploader(
-        "📸 Screenshot Broksum (Opsional)",
-        type=["png", "jpg", "jpeg", "webp"],
-        key="sidebar_main_broksum_uploader",
-        help="Upload SS Broksum Stockbit/Broker lain untuk dihitung ke skor sinyal & bandarmology."
-    )
 
-    # Auto-analisis saat file baru diupload
-    if uploaded_broksum_sidebar is not None:
-        _sid_file_id = f"{uploaded_broksum_sidebar.name}_{uploaded_broksum_sidebar.size}"
-        if st.session_state.get("_sid_broksum_file_id") != _sid_file_id:
-            st.session_state["_sid_broksum_file_id"] = _sid_file_id
-            st.session_state["_sid_broksum_result"]  = None
-            st.session_state["_sid_broksum_error"]   = None
-            _gem_key = st.session_state.get("gemini_api_key", "")
-            if not _gem_key:
-                st.session_state["_sid_broksum_error"] = "API Key Gemini belum diset."
-            else:
-                with st.spinner("🧠 Menganalisis Broksum..."):
-                    try:
-                        _img = Image.open(uploaded_broksum_sidebar)
-                        _res, _err = analisis_broksum_gemini_vision(_img, _gem_key)
-                        if _err:
-                            st.session_state["_sid_broksum_error"] = _err
-                        else:
-                            st.session_state["_sid_broksum_result"] = _res
-                            st.toast("✅ Broksum siap dianalisis!", icon="🐋")
-                    except Exception as _ex:
-                        st.session_state["_sid_broksum_error"] = str(_ex)
-
-    if st.session_state.get("_sid_broksum_error"):
-        st.error(f"❌ Broksum gagal: {st.session_state['_sid_broksum_error']}")
-        with st.expander("📝 Input Manual Broksum", expanded=False):
-            _n = st.number_input("Jumlah broker per sisi", 1, 10, 5, key="_sid_n_broker")
-            st.caption("🟢 Top Buyers")
-            _buyers_m = []
-            for _i in range(int(_n)):
-                _ca, _cb, _cc, _cd = st.columns([2,2,3,2])
-                _brk = _ca.text_input("", key=f"_sid_b_brk_{_i}", placeholder=f"B{_i+1}", label_visibility="collapsed")
-                _vol = _cb.number_input("", key=f"_sid_b_vol_{_i}", min_value=0, value=0, label_visibility="collapsed")
-                _val = _cc.number_input("", key=f"_sid_b_val_{_i}", min_value=0, value=0, label_visibility="collapsed")
-                _avg = _cd.number_input("", key=f"_sid_b_avg_{_i}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
-                if _brk.strip():
-                    _buyers_m.append({"broker": _brk.strip(), "volume_lot": int(_vol), "value_idr": int(_val), "avg_price": float(_avg)})
-            st.caption("🔴 Top Sellers")
-            _sellers_m = []
-            for _i in range(int(_n)):
-                _ca, _cb, _cc, _cd = st.columns([2,2,3,2])
-                _brk = _ca.text_input("", key=f"_sid_s_brk_{_i}", placeholder=f"S{_i+1}", label_visibility="collapsed")
-                _vol = _cb.number_input("", key=f"_sid_s_vol_{_i}", min_value=0, value=0, label_visibility="collapsed")
-                _val = _cc.number_input("", key=f"_sid_s_val_{_i}", min_value=0, value=0, label_visibility="collapsed")
-                _avg = _cd.number_input("", key=f"_sid_s_avg_{_i}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
-                if _brk.strip():
-                    _sellers_m.append({"broker": _brk.strip(), "volume_lot": int(_vol), "value_idr": int(_val), "avg_price": float(_avg)})
-            _bs = st.selectbox("Status Bandarmologi", ["Akumulasi","Distribusi","Sideways/Tidak Jelas","Mixed"], key="_sid_m_status")
-            _ff = st.selectbox("Foreign Flow", ["Net Buy","Net Sell","Neutral"], key="_sid_m_foreign")
-            if st.button("✅ Gunakan Data Manual", key="_sid_m_submit", use_container_width=True):
-                if _buyers_m or _sellers_m:
-                    st.session_state["_sid_broksum_result"] = {
-                        "top_buyers": _buyers_m, "top_sellers": _sellers_m,
-                        "bandarmology_status": _bs, "foreign_flow_status": _ff,
-                        "summary_narrative": f"Input manual: {_bs}, Foreign {_ff}."
-                    }
-                    st.session_state["_sid_broksum_error"] = None
-                    st.rerun()
 
     col1, col2 = st.columns(2)
     with col1:
@@ -2758,8 +2229,8 @@ with st.sidebar:
     else:
         st.warning("⚠️ Gemini API Key belum ada di Secrets / ENV.")
 
-    with st.expander("📸 Scan Broksum (Gemini Vision)", expanded=False):
-        render_broksum_vision_ui(st.session_state.gemini_api_key, key_prefix="sb_broksum")
+    with st.expander("📸 Scan Broksum (OCR - Hemat Limit API)", expanded=False):
+        render_broksum_ocr_ui(key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
@@ -4794,21 +4265,7 @@ if run_btn:
         st.warning("⚠️ Kode saham tidak boleh kosong!")
         st.stop()
 
-    # ----- PROSES BROKSUM (JIKA SS DI-UPLOAD DI SIDEBAR) -----
-    res_broksum_main = None
-    broksum_bonus = 0.0
-    broksum_status = "N/A"
-    broksum_foreign = "N/A"
 
-    # Ambil hasil broksum dari session_state (sudah diproses saat upload)
-    res_broksum_main = st.session_state.get("_sid_broksum_result")
-    if res_broksum_main:
-        try:
-            broksum_bonus, broksum_status, broksum_foreign = hitung_skor_bandarmology(res_broksum_main)
-            simpan_riwayat_broksum(ticker_raw, res_broksum_main)
-            st.toast(f"✅ Broksum: {broksum_status} (Skor: {broksum_bonus:+.1f})", icon="🐋")
-        except Exception as e_b:
-            st.warning(f"⚠️ Gagal proses skor Broksum: {e_b}")
 
     with st.spinner("🤖 Menganalisis mode Swing dan Daytrade secara paralel..."):
         from concurrent.futures import ThreadPoolExecutor
@@ -4858,8 +4315,8 @@ if run_btn:
         conf = conf_raw * 100.0 if conf_raw <= 1.0 else conf_raw
         return (sig * 0.5) + (rrr_score * 0.2) + (conf * 0.3)
 
-    skor_math_swing = skor_mode_math(res_swing) + broksum_bonus
-    skor_math_day = skor_mode_math(res_day) + broksum_bonus
+    skor_math_swing = skor_mode_math(res_swing)
+    skor_math_day = skor_mode_math(res_day)
 
     ai_data = None
     ai_err = None
@@ -4913,34 +4370,14 @@ if run_btn:
         f"(Swing: {final_swing_score:.1f} vs Day: {final_day_score:.1f})"
     )
 
-    # ----- ALERT KONFLIK BANDARMOLOGY VS TEKNIKAL -----
-    if res_broksum_main:
-        if "Big Dist" in broksum_status and "BUY" in res_terbaik.get('signal', ''):
-            st.error(
-                f"🚨 **PERINGATAN KONFLIK BANDARMOLOGY (POTENSI BULL TRAP!)**\n\n"
-                f"Sinyal Teknikal adalah **{res_terbaik.get('signal')}**, tetapi Broksum terdeteksi **{broksum_status}** ({broksum_bonus:+.1f} poin)! "
-                f"Saran: Berhati-hati dan turunkan alokasi posisi."
-            )
-        elif "Big Accum" in broksum_status and "BUY" in res_terbaik.get('signal', ''):
-            st.success(
-                f"🔥 **KONFIRMASI BANDARMOLOGY SANGAT KUAT!**\n\n"
-                f"Sinyal Teknikal **{res_terbaik.get('signal')}** terkonfirmasi oleh **{broksum_status}** ({broksum_bonus:+.1f} poin)! Keyakinan tinggi."
-            )
-
     # ----- TAMPILKAN HASIL KEDUA MODE DALAM TAB -----
-    tab_swing, tab_day, tab_broksum = st.tabs(["📆 Swing Trade", "⏱️ Day Trade", "🐋 Bandarmology & Broksum"])
+    tab_swing, tab_day = st.tabs(["📆 Swing Trade", "⏱️ Day Trade"])
 
     with tab_swing:
         display_analysis_result(res_swing)
 
     with tab_day:
         display_analysis_result(res_day)
-
-    with tab_broksum:
-        if res_broksum_main:
-            render_tab_bandarmology_content(res_broksum_main)
-        else:
-            render_broksum_vision_ui(st.session_state.get("gemini_api_key", ""), key_prefix="main_tab_broksum")
 
     # ----- SIMPAN PREDIKSI V12 UNTUK KEDUA MODE -----
     for res in [res_swing, res_day]:
