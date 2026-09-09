@@ -3,6 +3,7 @@ yfinance>=0.2.38
 pandas
 numpy
 scipy
+pillow
 nltk
 deep-translator
 feedparser
