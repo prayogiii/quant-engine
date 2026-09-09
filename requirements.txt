@@ -12,3 +12,5 @@ google-generativeai
 pytz
 gspread==6.1.2
 google-auth==2.36.0
+pytesseract
+easyocr
