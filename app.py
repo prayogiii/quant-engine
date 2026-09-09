@@ -2864,13 +2864,17 @@ def generate_regime_insight(regime, adx, ofi_raw, ihsg_cond):
     base = REGIME_INFO.get(regime, "Rezim tidak terdefinisi.")
     notes = []
 
-    # Analisis OFI
+    # Analisis OFI (Enhanced dengan shadow-weighted volume)
     if ofi_raw > 0.5:
-        notes.append("🔹 OFI positif kuat → akumulasi tinggi, konfirmasi bullish.")
-    elif ofi_raw < -0.5:
-        notes.append("🔹 OFI negatif signifikan → tekanan jual, waspadai potensi distribusi.")
-    elif ofi_raw < 0:
-        notes.append("🔹 OFI sedikit negatif → aliran dana netral cenderung keluar.")
+        notes.append("🔹 OFI sangat positif → akumulasi agresif, bullish kuat.")
+    elif ofi_raw > 0.2:
+        notes.append("🔹 OFI moderat positif → akumulasi bertahap, bias bullish.")
+    elif ofi_raw > -0.2:
+        notes.append("🔹 OFI netral/fluktuasi → pasar balance, indecision.")
+    elif ofi_raw > -0.5:
+        notes.append("🔹 OFI moderat negatif → distribusi bertahap, bias bearish.")
+    else:
+        notes.append("🔹 OFI sangat negatif → distribusi agresif, tekanan jual kuat.")
 
     # Analisis ADX (selalu tampil)
     if adx > 40:
@@ -2954,10 +2958,33 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     df['ZScore'] = (df['Close'] - df['Close'].rolling(20).mean()) / df['Close'].rolling(20).std()
     df['Vol_MA20'] = df['Volume'].rolling(20).mean() if 'Volume' in df.columns else 0
 
-    # OFI
+    # OFI - Original (Simple)
     df['Delta'] = np.where(df['Close'] > df['Open'], df['Volume'], -df['Volume'])
     df['Cumulative_OFI'] = df['Delta'].cumsum()
     df['OFI_raw'] = df['Delta'] / df['Volume'].rolling(20).mean().fillna(1)
+
+    # OFI - Enhanced (Shadow-based Volume Allocation)
+    # Upper shadow = High - Close (rejection at top)
+    # Lower shadow = Open - Low (support testing)
+    df['Upper_Shadow'] = df['High'] - df['Close']
+    df['Lower_Shadow'] = df['Open'] - df['Low']
+    df['Range'] = df['High'] - df['Low'] + 0.0001  # Avoid division by zero
+    
+    # Shadow ratio (0-1): larger shadow = more rejection/support
+    df['Upper_Shadow_Ratio'] = df['Upper_Shadow'] / df['Range']
+    df['Lower_Shadow_Ratio'] = df['Lower_Shadow'] / df['Range']
+    
+    # Weighted Delta: reduce volume if candle has large shadow (less conviction)
+    df['Delta_Enhanced'] = np.where(
+        df['Close'] > df['Open'],
+        # Bullish candle: reduce by upper shadow (rejeksi di atas)
+        df['Volume'] * (1 - df['Upper_Shadow_Ratio']),
+        # Bearish candle: reduce by lower shadow (support di bawah)
+        -df['Volume'] * (1 - df['Lower_Shadow_Ratio'])
+    )
+    
+    df['Cumulative_OFI_Enhanced'] = df['Delta_Enhanced'].cumsum()
+    df['OFI_Enhanced'] = df['Cumulative_OFI_Enhanced'] / (df['Volume'].rolling(20).mean().fillna(1))
 
     # VWAP hanya untuk daytrade
     if is_daytrade:
@@ -3194,7 +3221,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
         "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),
         "Coppock": coppock_val / 10.0,
-        "OFI": df['OFI_raw'].iloc[-1] / 3.0
+        "OFI": df['OFI_Enhanced'].iloc[-1] / 5.0  # Enhanced OFI dengan shadow-weighted volume
     }
     norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
     total_score = sum(norm_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
@@ -3697,7 +3724,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     result["estimasi_label"] = estimasi_label
     result["prob_label"] = prob_label
     result["backtest_window"] = backtest_window
-    result["ofi_now"] = df['OFI_raw'].iloc[-1]
+    result["ofi_now"] = df['OFI_Enhanced'].iloc[-1]  # Enhanced OFI dengan shadow weighting
     result["adaptive_w"] = adaptive_w
     result["returns"] = returns
     result["mom_median_th"] = mom_median_th
