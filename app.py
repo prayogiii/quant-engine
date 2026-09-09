@@ -2162,10 +2162,7 @@ with st.sidebar:
     st.session_state.gemini_api_key = api_key_loaded
 
     if api_key_loaded:
-        masked_key = f"{api_key_loaded[:6]}...{api_key_loaded[-4:]}" if len(api_key_loaded) > 10 else "••••••••"
-        st.success(f"🔑 Gemini API: `{masked_key}`")
-        with st.expander("👁️ Intip API Key", expanded=False):
-            st.code(api_key_loaded, language=None)
+        st.success("🟢 Gemini API Key Terhubung")
     else:
         st.warning("⚠️ Gemini API Key belum ada di Secrets / ENV.")
 
