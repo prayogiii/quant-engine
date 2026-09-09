@@ -2045,26 +2045,97 @@ def render_broksum_vision_ui(api_key, key_prefix="broksum"):
     if uploaded_file is not None:
         try:
             image = Image.open(uploaded_file)
-            col_img, col_info = st.columns([1, 2])
-            with col_img:
-                st.image(image, caption="Preview Broksum", use_container_width=True)
+            st.image(image, caption="Preview Broksum", use_container_width=True)
 
-            with col_info:
-                st.info("💡 **Tips:** Pastikan tabel Top Buyer & Top Seller terlihat jelas.")
-                analyze_btn = st.button("🚀 Analisis Broksum Dgn AI Vision", key=f"{key_prefix}_analyze_btn", use_container_width=True)
+            # Deteksi file baru via name+size
+            file_id       = f"{uploaded_file.name}_{uploaded_file.size}"
+            last_id_key   = f"{key_prefix}_last_file_id"
+            result_key    = f"{key_prefix}_result"
+            error_key     = f"{key_prefix}_error"
 
-            if analyze_btn:
+            if st.session_state.get(last_id_key) != file_id:
+                # File baru — langsung analisis otomatis
+                st.session_state[last_id_key] = file_id
+                st.session_state[result_key]  = None
+                st.session_state[error_key]   = None
+
                 if not api_key:
-                    st.error("🔑 Masukkan Gemini API Key terlebih dahulu di sidebar!")
+                    st.session_state[error_key] = "API Key belum diset. Masukkan Gemini API Key di sidebar."
                 else:
                     with st.spinner("🧠 Gemini Vision sedang membaca & menganalisis Broksum..."):
                         res_json, err = analisis_broksum_gemini_vision(image, api_key)
-
                     if err:
-                        st.error(f"❌ {err}")
-                    elif res_json:
-                        st.success("✅ Broksum Berhasil Dianalisis!")
-                        render_tab_bandarmology_content(res_json)
+                        st.session_state[error_key] = err
+                    else:
+                        st.session_state[result_key] = res_json
+
+            res_json = st.session_state.get(result_key)
+            err      = st.session_state.get(error_key)
+
+            if res_json:
+                st.success("✅ Broksum Berhasil Dianalisis!")
+                render_tab_bandarmology_content(res_json)
+
+            elif err:
+                st.error(f"❌ AI Vision gagal: {err}")
+                st.warning("⚠️ Silakan input data Broksum secara manual di bawah.")
+
+                with st.expander("📝 Input Manual Broksum", expanded=True):
+                    st.caption("Isi data Top Buyers & Top Sellers dari screenshot kamu.")
+                    n_broker = st.number_input("Jumlah broker per sisi", min_value=1, max_value=10, value=5, key=f"{key_prefix}_n_broker")
+
+                    st.markdown("**🟢 Top Buyers**")
+                    c0, c1, c2, c3 = st.columns([2, 2, 3, 2])
+                    c0.markdown("**Broker**"); c1.markdown("**Vol (Lot)**"); c2.markdown("**Value (Rp)**"); c3.markdown("**Avg Price**")
+                    buyers_manual = []
+                    for idx in range(int(n_broker)):
+                        ca, cb, cc, cd = st.columns([2, 2, 3, 2])
+                        brk = ca.text_input("", key=f"{key_prefix}_b_brk_{idx}", placeholder=f"B{idx+1}", label_visibility="collapsed")
+                        vol = cb.number_input("", key=f"{key_prefix}_b_vol_{idx}", min_value=0, value=0, label_visibility="collapsed")
+                        val = cc.number_input("", key=f"{key_prefix}_b_val_{idx}", min_value=0, value=0, label_visibility="collapsed")
+                        avg = cd.number_input("", key=f"{key_prefix}_b_avg_{idx}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
+                        if brk.strip():
+                            buyers_manual.append({"broker": brk.strip(), "volume_lot": int(vol), "value_idr": int(val), "avg_price": float(avg)})
+
+                    st.markdown("**🔴 Top Sellers**")
+                    d0, d1, d2, d3 = st.columns([2, 2, 3, 2])
+                    d0.markdown("**Broker**"); d1.markdown("**Vol (Lot)**"); d2.markdown("**Value (Rp)**"); d3.markdown("**Avg Price**")
+                    sellers_manual = []
+                    for idx in range(int(n_broker)):
+                        ca, cb, cc, cd = st.columns([2, 2, 3, 2])
+                        brk = ca.text_input("", key=f"{key_prefix}_s_brk_{idx}", placeholder=f"S{idx+1}", label_visibility="collapsed")
+                        vol = cb.number_input("", key=f"{key_prefix}_s_vol_{idx}", min_value=0, value=0, label_visibility="collapsed")
+                        val = cc.number_input("", key=f"{key_prefix}_s_val_{idx}", min_value=0, value=0, label_visibility="collapsed")
+                        avg = cd.number_input("", key=f"{key_prefix}_s_avg_{idx}", min_value=0.0, value=0.0, format="%.0f", label_visibility="collapsed")
+                        if brk.strip():
+                            sellers_manual.append({"broker": brk.strip(), "volume_lot": int(vol), "value_idr": int(val), "avg_price": float(avg)})
+
+                    bandarmology_status = st.selectbox(
+                        "Status Bandarmologi",
+                        ["Akumulasi", "Distribusi", "Sideways/Tidak Jelas", "Mixed"],
+                        key=f"{key_prefix}_manual_status"
+                    )
+                    foreign_flow = st.selectbox(
+                        "Foreign Flow",
+                        ["Net Buy", "Net Sell", "Neutral"],
+                        key=f"{key_prefix}_manual_foreign"
+                    )
+                    narrative = st.text_area("Narasi / Catatan (opsional)", key=f"{key_prefix}_manual_narrative", height=80)
+
+                    if st.button("✅ Analisis Data Manual", key=f"{key_prefix}_manual_submit", use_container_width=True):
+                        if not buyers_manual and not sellers_manual:
+                            st.error("Minimal isi 1 broker buyer atau seller.")
+                        else:
+                            manual_json = {
+                                "top_buyers": buyers_manual,
+                                "top_sellers": sellers_manual,
+                                "bandarmology_status": bandarmology_status,
+                                "foreign_flow_status": foreign_flow,
+                                "summary_narrative": narrative or f"Input manual: {bandarmology_status}, Foreign {foreign_flow}.",
+                            }
+                            st.session_state[result_key] = manual_json
+                            st.session_state[error_key]  = None
+                            st.rerun()
 
         except Exception as e_img:
             st.error(f"Gagal memuat gambar: {e_img}")
