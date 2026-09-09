@@ -1516,39 +1516,18 @@ Aturan:
 # ==========================================
 def buat_chart_broker_flow(buyers, sellers):
     """
-    Membuat Horizontal Bar Chart (Plotly) Net Broker Flow.
-    Buyer = Bar Hijau ke kanan, Seller = Bar Merah ke kiri.
+    Membuat Cumulative Net Broker Flow Chart (Stockbit-style).
+    Menampilkan net flow setiap broker secara terakumulasi.
     """
     if not PLOTLY_AVAILABLE:
         return None
     
-    brokers = []
-    values = []
-    colors = []
-    hover_texts = []
-
-    # Buyers (Nilai positif)
+    data_net = {}
     for b in buyers:
         brk = b.get('broker', '?')
-        val = safe_float(b.get('value_idr') or b.get('volume_lot'), 0)
-        brokers.append(f"{brk} (Buy)")
-        values.append(val)
-        colors.append('#10b981')
-        hover_texts.append(f"Broker: {brk}<br>Buy Val/Vol: {val:,.0f}")
-
-    # Sellers (Nilai negatif)
+        data_net[brk] = data_net.get(brk, 0) + safe_float(b.get('value_idr') or b.get('volume_lot'), 0)
     for s in sellers:
         brk = s.get('broker', '?')
-        val = safe_float(s.get('value_idr') or s.get('volume_lot'), 0)
-        brokers.append(f"{brk} (Sell)")
-        values.append(-abs(val))
-        colors.append('#ef4444')
-        hover_texts.append(f"Broker: {brk}<br>Sell Val/Vol: {val:,.0f}")
-
-    if not brokers:
-        return None
-
-    fig = go.Figure()
     fig.add_trace(go.Bar(
         y=brokers,
         x=values,
