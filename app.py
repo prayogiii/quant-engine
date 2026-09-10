@@ -1718,11 +1718,12 @@ def analisis_broksum_gemini_vision(image, api_key):
         # ===== PILIH MODEL (Prioritas Flash - Gunakan yang Available) =====
         available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         vision_candidates = [
-            'gemini-3-flash',           # Newest
-            'gemini-3.8-flash',         # Latest 3.8
-            'gemini-3.7-flash',         # 3.7 Flash
-            'gemini-3.5-flash-lite',    # Lite version
-            'gemini-3.1-flash-lite',    # 3.1 Lite
+            'gemini-3.1-flash-lite',    # ⚡ Paling cepat
+            'gemini-3.5-flash-lite',    # ⚡ Cepat
+            'gemini-1.5-flash-lite',    # ⚡ Lite fallback
+            'gemini-3-flash',           # Regular (jika lite tidak ada)
+            'gemini-3.8-flash',         # 3.8
+            'gemini-3.7-flash',         # 3.7
             'gemini-2.0-flash',         # Fallback 2.0
             'gemini-1.5-flash'          # Fallback 1.5
         ]
