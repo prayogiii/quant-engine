@@ -15,6 +15,7 @@ import math
 import google.generativeai as genai
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # Google Sheets integration
 import gspread
@@ -27,6 +28,42 @@ try:
     import io
 except ImportError:
     PIL_AVAILABLE = False
+
+def compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85):
+    """
+    Kompresi gambar untuk menghemat token Gemini Vision.
+    Resize & reduce quality sambil maintain readable content.
+    """
+    if not PIL_AVAILABLE:
+        return image
+    
+    try:
+        # Jika sudah PIL Image, gunakan langsung; jika file path, buka dulu
+        if isinstance(image, str):
+            img = Image.open(image)
+        else:
+            img = image
+        
+        # Resize jika lebih besar dari max dimensions
+        img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+        
+        # Convert ke RGB jika perlu (untuk JPEG compatibility)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            rgb_img = Image.new('RGB', img.size, (255, 255, 255))
+            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = rgb_img
+        
+        # Save compressed ke bytes
+        compressed_io = io.BytesIO()
+        img.save(compressed_io, format='JPEG', quality=quality, optimize=True)
+        compressed_io.seek(0)
+        
+        # Return as PIL Image
+        return Image.open(compressed_io)
+    except Exception as e:
+        # Jika error, return original
+        st.warning(f"⚠️ Kompresi gambar gagal: {e}. Menggunakan gambar original.")
+        return image
 
 PLOTLY_AVAILABLE = True
 try: import plotly.graph_objects as go
@@ -1649,9 +1686,22 @@ Berikan evaluasi dalam format JSON murni dengan struktur persis seperti ini (tan
 # ==========================================
 # FUNGSI BANDARMOLOGY & BROKSUM (GEMINI VISION)
 # ==========================================
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((Exception,)),
+    reraise=True
+)
+def _call_gemini_vision_api(model, prompt, image):
+    """Internal function untuk Gemini Vision call dengan retry logic."""
+    return model.generate_content([prompt, image])
+
 def analisis_broksum_gemini_vision(image, api_key):
     """
     Menganalisis screenshot Broker Summary (Broksum) / Trade Flow / Broker Flow menggunakan Gemini Vision AI.
+    - Kompresi gambar untuk hemat token
+    - Retry dengan exponential backoff untuk handle rate limit
+    - Prioritas model: gemini-1.5-flash (cepat & murah)
     Mengembalikan dict data terstruktur (JSON) & error jika ada.
     """
     if not PIL_AVAILABLE:
@@ -1662,9 +1712,12 @@ def analisis_broksum_gemini_vision(image, api_key):
     try:
         genai.configure(api_key=api_key)
         
-        # Dapatkan model yang tersedia
+        # ===== KOMPRESI GAMBAR (Hemat Token) =====
+        compressed_image = compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85)
+        
+        # ===== PILIH MODEL (Prioritas Flash) =====
         available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        vision_candidates = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite']
+        vision_candidates = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite']
         
         selected_model_name = None
         for cand in vision_candidates:
@@ -1706,7 +1759,12 @@ Aturan:
 3. Kembalikan HANYA JSON yang valid.
 """
 
-        response = model.generate_content([prompt, image])
+        # ===== CALL GEMINI DENGAN RETRY (Exponential Backoff) =====
+        try:
+            response = _call_gemini_vision_api(model, prompt, compressed_image)
+        except Exception as e:
+            return None, f"Error Gemini Vision (after 3 retries): {str(e)}"
+        
         raw_text = response.text.strip()
 
         # Pembersihan JSON
@@ -1884,7 +1942,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 if not api_key:
                     st.error("⚠️ Gemini API Key belum diisi di sidebar.")
                 else:
-                    with st.spinner("🧠 Gemini Vision sedang membaca tabel Broksum..."):
+                    with st.spinner("🧠 Gemini Vision (1.5-Flash) sedang membaca tabel Broksum... [Retry enabled]"):
                         res_json, err = analisis_broksum_gemini_vision(image, api_key)
                     if err:
                         st.session_state[error_key] = err
