@@ -1715,9 +1715,17 @@ def analisis_broksum_gemini_vision(image, api_key):
         # ===== KOMPRESI GAMBAR (Hemat Token) =====
         compressed_image = compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85)
         
-        # ===== PILIH MODEL (Prioritas Flash) =====
+        # ===== PILIH MODEL (Prioritas Flash - Gunakan yang Available) =====
         available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        vision_candidates = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite']
+        vision_candidates = [
+            'gemini-3-flash',           # Newest
+            'gemini-3.8-flash',         # Latest 3.8
+            'gemini-3.7-flash',         # 3.7 Flash
+            'gemini-3.5-flash-lite',    # Lite version
+            'gemini-3.1-flash-lite',    # 3.1 Lite
+            'gemini-2.0-flash',         # Fallback 2.0
+            'gemini-1.5-flash'          # Fallback 1.5
+        ]
         
         selected_model_name = None
         for cand in vision_candidates:
@@ -1942,7 +1950,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 if not api_key:
                     st.error("⚠️ Gemini API Key belum diisi di sidebar.")
                 else:
-                    with st.spinner("🧠 Gemini Vision (1.5-Flash) sedang membaca tabel Broksum... [Retry enabled]"):
+                    with st.spinner("🧠 Gemini Vision sedang membaca tabel Broksum... [Retry enabled]"):
                         res_json, err = analisis_broksum_gemini_vision(image, api_key)
                     if err:
                         st.session_state[error_key] = err
