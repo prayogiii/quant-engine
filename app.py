@@ -55,6 +55,16 @@ def safe_float(value, default=0.0):
         return float(value)
     except (ValueError, TypeError):
         return default
+
+def get_gemini_api_key():
+    """Helper function to get Gemini API Key dari session state atau secrets."""
+    if "gemini_api_key" in st.session_state and st.session_state.gemini_api_key:
+        return st.session_state.gemini_api_key
+    try:
+        return st.secrets.get("GEMINI_API_KEY", "")
+    except:
+        return os.getenv("GEMINI_API_KEY", "")
+
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
@@ -99,7 +109,7 @@ def get_gsheet():
     return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
 
 def init_sheets():
-    """Membuat sheet 'riwayat', 'v12_memory', dan 'v12_predictions' jika belum ada."""
+    """Membuat sheet 'riwayat', 'v12_memory', 'v12_predictions', dan 'broksum_history' jika belum ada."""
     try:
         sheet = get_gsheet()
         existing = {ws.title: ws for ws in sheet.worksheets()}   # ⬅️ ubah di sini
@@ -115,6 +125,9 @@ def init_sheets():
                 ws.add_cols(9 - ws.col_count)
         if "riwayat_actual" not in existing:
             sheet.add_worksheet("riwayat_actual", rows=100, cols=7)
+        if "broksum_history" not in existing:
+            ws = sheet.add_worksheet("broksum_history", rows=2000, cols=8)
+            ws.update("A1:H1", [["ticker", "upload_date", "bandarmology_status", "top_buyers", "top_sellers", "summary_narrative", "full_data", "source"]], value_input_option='RAW')
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -198,6 +211,166 @@ def save_v12_prediction(ticker, close_price, factor_signals, entry_low=None, ent
             ws.append_row(values, value_input_option='RAW')
     except Exception as e:
         st.error(f"Gagal menyimpan prediksi: {e}")
+
+# ====================== BROKSUM HISTORY (GOOGLE SHEETS) ======================
+def save_broksum_data(ticker, res_json, source="gemini"):
+    """Simpan hasil parsing broker flow ke Google Sheets broksum_history."""
+    try:
+        sheet = get_gsheet()
+        ws = sheet.worksheet("broksum_history")
+        
+        upload_date = datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
+        
+        new_row = {
+            'ticker': ticker.upper(),
+            'upload_date': upload_date,
+            'bandarmology_status': res_json.get('bandarmology_status', 'N/A'),
+            'top_buyers': json.dumps(res_json.get('top_buyers', [])),
+            'top_sellers': json.dumps(res_json.get('top_sellers', [])),
+            'summary_narrative': res_json.get('summary_narrative', ''),
+            'full_data': json.dumps(res_json),
+            'source': source
+        }
+        
+        # Pastikan header ada
+        try:
+            headers = ws.row_values(1)
+            if not headers or headers[0] != 'ticker':
+                ws.update("A1:H1", [["ticker", "upload_date", "bandarmology_status", "top_buyers", "top_sellers", "summary_narrative", "full_data", "source"]], value_input_option='RAW')
+        except:
+            ws.update("A1:H1", [["ticker", "upload_date", "bandarmology_status", "top_buyers", "top_sellers", "summary_narrative", "full_data", "source"]], value_input_option='RAW')
+        
+        # Append row baru (keep history)
+        values = [
+            new_row['ticker'],
+            new_row['upload_date'],
+            new_row['bandarmology_status'],
+            new_row['top_buyers'],
+            new_row['top_sellers'],
+            new_row['summary_narrative'],
+            new_row['full_data'],
+            new_row['source']
+        ]
+        ws.append_row(values, value_input_option='RAW')
+        return True
+    except Exception as e:
+        st.error(f"❌ Gagal menyimpan broker flow ke Sheets: {e}")
+        return False
+
+def load_broksum_history(ticker):
+    """Load semua history broker flow untuk ticker tertentu dari Sheets."""
+    try:
+        sheet = get_gsheet()
+        ws = sheet.worksheet("broksum_history")
+        records = ws.get_all_records()
+        
+        ticker_upper = ticker.upper()
+        history = [row for row in records if row.get('ticker', '').upper() == ticker_upper]
+        
+        return history  # Return sorted by date (newest first bisa di handle di UI)
+    except Exception as e:
+        st.error(f"❌ Gagal memuat broker flow history: {e}")
+        return []
+
+def get_latest_broksum_for_ticker(ticker):
+    """Ambil data broker flow TERBARU untuk ticker tertentu."""
+    try:
+        history = load_broksum_history(ticker)
+        if history:
+            # Asumsi records sudah sorted by upload_date DESC
+            latest = history[0]
+            # Parse JSON fields
+            return {
+                'ticker': latest.get('ticker'),
+                'upload_date': latest.get('upload_date'),
+                'bandarmology_status': latest.get('bandarmology_status'),
+                'top_buyers': json.loads(latest.get('top_buyers', '[]')),
+                'top_sellers': json.loads(latest.get('top_sellers', '[]')),
+                'summary_narrative': latest.get('summary_narrative'),
+                'full_data': json.loads(latest.get('full_data', '{}'))
+            }
+        return None
+    except Exception as e:
+        st.error(f"❌ Error get latest broksum: {e}")
+        return None
+
+def analyze_broksum_insight_with_gemini(ticker, broksum_data, price_data, api_key):
+    """
+    Analisis broker flow + harga menggunakan Gemini.
+    Input:
+    - ticker: Kode saham
+    - broksum_data: Hasil parse broker flow (dari database)
+    - price_data: Data harga & teknikal (opsional)
+    - api_key: Gemini API Key
+    
+    Output: (insight_text, error)
+    """
+    if not api_key:
+        return None, "API Key Gemini belum diisi."
+    
+    try:
+        genai.configure(api_key=api_key)
+        model = None
+        available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        if available:
+            for model_id in available:
+                try:
+                    model = genai.GenerativeModel(model_id)
+                    model.generate_content("test", generation_config={"max_output_tokens": 1})
+                    break
+                except:
+                    continue
+        
+        if not model:
+            return None, "Model Gemini tidak tersedia."
+        
+        # Format broker flow data
+        buyers_text = "\n".join([f"- {b.get('broker')}: {b.get('volume_lot', 0):,} lot" for b in broksum_data.get('top_buyers', [])])
+        sellers_text = "\n".join([f"- {s.get('broker')}: {s.get('volume_lot', 0):,} lot" for s in broksum_data.get('top_sellers', [])])
+        
+        price_context = ""
+        if price_data:
+            price_context = f"""
+Konteks Harga & Teknikal:
+- Current Price: {price_data.get('current_price', 'N/A')}
+- Support: {price_data.get('support', 'N/A')}
+- Resistance: {price_data.get('resistance', 'N/A')}
+- Trend: {price_data.get('trend', 'N/A')}
+- Volume: {price_data.get('volume', 'N/A')}
+"""
+        
+        prompt = f"""Anda adalah analis pasar saham profesional. Analisis data broker flow untuk saham {ticker}:
+
+**Status Bandarmologi:** {broksum_data.get('bandarmology_status', 'N/A')}
+
+**Top Buyers (Pembeli Utama):**
+{buyers_text if buyers_text else '- Tidak ada data'}
+
+**Top Sellers (Penjual Utama):**
+{sellers_text if sellers_text else '- Tidak ada data'}
+
+**Summary Narrative:**
+{broksum_data.get('summary_narrative', 'N/A')}
+{price_context}
+
+Berikan analisis yang mencakup:
+1. Konsentrasi buyer/seller - siapa dominant player?
+2. Implikasi untuk pergerakan harga (bullish/bearish/neutral)
+3. Aksi yang bisa dilakukan investor
+4. Risk & opportunity
+
+Jadilah singkat tapi actionable (max 300 kata)."""
+
+        response = model.generate_content(
+            prompt,
+            generation_config={"max_output_tokens": 500, "temperature": 0.7}
+        )
+        
+        insight = response.text.strip() if response else ""
+        return insight, None
+        
+    except Exception as e:
+        return None, f"Error Gemini Analysis: {str(e)}"
 
 def default_weight(factor, regime):
     defaults = {
@@ -1224,9 +1397,15 @@ def dapatkan_model_gemini(api_key):
         return None, "Model gagal digunakan."
     except Exception as e:
         return None, f"Error: {str(e)}"
-def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
+def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
+    """
+    Analisis saham dengan Gemini AI.
+    ticker (optional): untuk fetch broker flow dari database & inject ke analysis
+    """
     model, error = dapatkan_model_gemini(api_key)
     if error: return None, error
+    
+    # ===== FORMAT RIWAYAT (EXISTING) =====
     riwayat_text = ""
     if riwayat:
         riwayat_text = "Riwayat analisis sebelumnya (termasuk hasil aktual jika tersedia):\n"
@@ -1253,6 +1432,42 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key):
     else:
         riwayat_text = "Belum ada riwayat sebelumnya."
 
+    # ===== LOAD BROKER FLOW DARI DATABASE (OPTIONAL) =====
+    broksum_context = ""
+    if ticker:
+        try:
+            latest_broksum = get_latest_broksum_for_ticker(ticker)
+            if latest_broksum:
+                buyers_list = latest_broksum.get('top_buyers', [])
+                sellers_list = latest_broksum.get('top_sellers', [])
+                
+                buyers_text = "\n".join([
+                    f"    - {b.get('broker')}: {b.get('volume_lot', 0):,} lot"
+                    for b in buyers_list
+                ]) if buyers_list else "    (Tidak ada data)"
+                
+                sellers_text = "\n".join([
+                    f"    - {s.get('broker')}: {s.get('volume_lot', 0):,} lot"
+                    for s in sellers_list
+                ]) if sellers_list else "    (Tidak ada data)"
+                
+                broksum_context = f"""
+**📊 Bandarmology (Broker Flow) - Data Terbaru**
+Upload: {latest_broksum.get('upload_date', 'N/A')}
+Status: {latest_broksum.get('bandarmology_status', 'N/A')}
+
+🟢 Top Buyers:
+{buyers_text}
+
+🔴 Top Sellers:
+{sellers_text}
+
+📝 Summary: {latest_broksum.get('summary_narrative', 'N/A')}
+"""
+        except Exception as e:
+            # Jika error load broker flow, lanjut saja (broksum_context tetap kosong)
+            pass
+
     prompt = f"""
 Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
 
@@ -1275,10 +1490,14 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 - Status Posisi: {data_saham.get('Status_Posisi', 'Tidak diketahui')}
 - Harga Beli: {data_saham.get('Harga_Beli', 'Tidak diisi')}
 - Floating P/L: {data_saham.get('Floating_PL', 'N/A')}
+
+{broksum_context}
+
 {riwayat_text}
 
-Berdasarkan data di atas, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
+Berdasarkan data di atas{' (khususnya aksi broker)' if broksum_context else ''}, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
 - Makna sinyal dalam konteks saat ini
+{f'- Aksi broker pembeli/penjual utama & implikasinya untuk harga' if broksum_context else ''}
 - Kekuatan dan kelemahan saham
 - Risiko utama
 - Rekomendasi langkah selanjutnya (buy/hold/sell) dengan alasan singkat
@@ -1630,7 +1849,15 @@ def analisis_broksum_ocr(image):
 
 def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
     st.markdown("### 📸 Scan Broker Summary (Broksum)")
-    st.caption("Upload screenshot Broksum (Stockbit, IPOT, HOTS, dll) untuk dianalisis.")
+    st.caption("Upload screenshot Broksum (Stockbit, IPOT, HOTS, dll) untuk dianalisis & tersimpan ke database.")
+
+    # ========== INPUT TICKER ==========
+    st.markdown("**Ticker Saham** (wajib untuk menyimpan ke database)")
+    ticker_input = st.text_input(
+        "Masukkan kode saham (contoh: BBCA, GOTO, ASII)",
+        key=f"{key_prefix}_ticker_input",
+        placeholder="BBCA"
+    ).strip().upper()
 
     uploaded_file = st.file_uploader(
         "Pilih Foto / Screenshot Broksum",
@@ -1645,6 +1872,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
 
             result_key  = f"{key_prefix}_result"
             error_key   = f"{key_prefix}_error"
+            source_key  = f"{key_prefix}_source"
 
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
@@ -1663,6 +1891,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                     else:
                         st.session_state[result_key] = res_json
                         st.session_state[error_key]  = None
+                        st.session_state[source_key] = "gemini"
 
             elif btn_ocr:
                 with st.spinner("🔍 Membaca screenshot Broksum via OCR..."):
@@ -1672,9 +1901,11 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 else:
                     st.session_state[result_key] = res_json
                     st.session_state[error_key]  = None
+                    st.session_state[source_key] = "ocr"
 
             res_json = st.session_state.get(result_key)
             err      = st.session_state.get(error_key)
+            source   = st.session_state.get(source_key, "")
 
             if res_json:
                 st.success(f"✅ **Status:** {res_json.get('bandarmology_status', 'N/A')}")
@@ -1690,6 +1921,29 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                     st.markdown("**🔴 Top Sellers:**")
                     for s in res_json.get("top_sellers", []):
                         st.caption(f"- **{s.get('broker')}**: {s.get('volume_lot', 0):,} lot")
+
+                # ========== SAVE TO DATABASE ==========
+                st.divider()
+                col_save_1, col_save_2 = st.columns([2, 1])
+                with col_save_1:
+                    if not ticker_input:
+                        st.warning("⚠️ Masukkan ticker terlebih dahulu untuk menyimpan ke database.")
+                    else:
+                        st.info(f"💾 Siap simpan ke database untuk **{ticker_input}**")
+                with col_save_2:
+                    btn_save = st.button("💾 Simpan ke Database", key=f"{key_prefix}_btn_save", use_container_width=True)
+                    
+                if btn_save:
+                    if not ticker_input:
+                        st.error("❌ Ticker tidak boleh kosong!")
+                    else:
+                        with st.spinner(f"💾 Menyimpan data {ticker_input} ke Google Sheets..."):
+                            success = save_broksum_data(ticker_input, res_json, source=source)
+                        if success:
+                            st.success(f"✅ Data broker flow **{ticker_input}** berhasil disimpan! Dapat diakses saat analisis.")
+                            st.session_state[f"{key_prefix}_result"] = None
+                        else:
+                            st.error("❌ Gagal menyimpan ke database. Cek koneksi Sheets & API Key.")
 
             elif err:
                 st.warning(f"⚠️ {err}")
@@ -4338,7 +4592,7 @@ def display_analysis_result(res):
                     if len(riwayat_konteks) >= 20:
                         break
 
-            hasil_ai, error_ai = analisis_saham_dengan_ai(data_ai, riwayat_konteks, st.session_state.gemini_api_key)
+            hasil_ai, error_ai = analisis_saham_dengan_ai(data_ai, riwayat_konteks, st.session_state.gemini_api_key, ticker=ticker_clean)
             if not error_ai and hasil_ai:
                 hasil_ai_bersih = bersihkan_teks_ai(hasil_ai)
                 html_ai = f'<div class="ai-insight-card"><h3>🤖 Insight AI</h3><p>{hasil_ai_bersih}</p></div>'
