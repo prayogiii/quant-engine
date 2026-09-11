@@ -101,6 +101,48 @@ def get_gemini_api_key():
         return st.secrets.get("GEMINI_API_KEY", "")
     except:
         return os.getenv("GEMINI_API_KEY", "")
+BROKER_TYPES = {
+    "AK": "Foreign", "BK": "Foreign", "ZP": "Foreign", "RX": "Foreign",
+    "YU": "Foreign", "KZ": "Foreign", "KK": "Foreign", "YU": "Foreign",
+    "YP": "Foreign", "CP": "Foreign", "DU": "Foreign", "BQ": "Foreign",
+    "HD": "Foreign", "DR": "Foreign", "TP": "Foreign", "AG": "Foreign",
+    "XA": "Foreign", "AI": "Foreign", "FS": "Foreign", "LS": "Foreign",
+    "DP": "Foreign", "RB": "Foreign", "AH": "Foreign", "GI": "Foreign",
+    "CC": "BUMN", "NI": "BUMN", "OD": "BUMN","DX": "BUMN",
+    "XL": "Domestic", "LG": "Domestic", "PD": "Domestic", "SQ": "Domestic",
+    "XC": "Domestic", "MG": "Domestic", "AZ": "Domestic", "GR": "Domestic",
+    "DH": "Domestic", "YB": "Domestic", "EP": "Domestic", "FZ": "Domestic",
+    "KI": "Domestic", "IF": "Domestic", "PP": "Domestic", "HP": "Domestic",
+    "BB": "Domestic", "YJ": "Domestic", "AP": "Domestic", "CD": "Domestic",
+    "PO": "Domestic", "AO": "Domestic", "BR": "Domestic", "SS": "Domestic",
+    "AT": "Domestic", "IN": "Domestic", "RF": "Domestic", "EL": "Domestic",
+    "RO": "Domestic", "SH": "Domestic", "PC": "Domestic", "PG": "Domestic",
+    "II": "Domestic", "IH": "Domestic", "IU": "Domestic", "AR": "Domestic",
+    "ES": "Domestic", "ZR": "Domestic", "MI": "Domestic", "PI": "Domestic",
+    "SA": "Domestic", "MU": "Domestic", "SF": "Domestic", "QA": "Domestic",
+    "ID": "Domestic", "RS": "Domestic", "RG": "Domestic", "GA": "Domestic",
+    "AF": "Domestic", "TS": "Domestic", "PF": "Domestic", "BS": "Domestic",
+    "AD": "Domestic", "TF": "Domestic", "OK": "Domestic", "JB": "Domestic",
+    "IC": "Domestic", "BF": "Domestic", "IT": "Domestic", "DD": "Domestic",
+    "YO": "Domestic", "FO": "Domestic"
+}
+
+def get_broker_label(code):
+    """Format: 'XL (L)', 'CC (G)', 'AK (F)'"""
+    cat = BROKER_TYPES.get(code, "Domestic")
+    badge = "F" if cat == "Foreign" else ("G" if cat == "BUMN" else "L")
+    return f"{code} ({badge})"
+
+def _parse_broker_list(raw):
+    """Parse JSON string/list dari Google Sheets → list of dict."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return []
+    return []
 
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
@@ -1489,7 +1531,7 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
                 ]) if sellers_list else "    (Tidak ada data)"
                 
                 broksum_context = f"""
-**📊 Bandarmology (Broker Flow) - Data Terbaru**
+**🕵🏻‍♂️ Bandarmology (Broker Flow) - Data Terbaru**
 Upload: {latest_broksum.get('upload_date', 'N/A')}
 Status: {latest_broksum.get('bandarmology_status', 'N/A')}
 
@@ -2057,6 +2099,270 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 st.session_state[f"{key_prefix}_error"] = None
                 st.success("✅ Data manual berhasil disimpan.")
                 st.rerun()
+
+# ═══════════════════════════════════════════════════════════════
+# BANDARMOLOGY – DATA LOADER & CHART BUILDERS               
+# ═══════════════════════════════════════════════════════════════
+def load_bandarmology_data(ticker):
+    """Load & normalisasi broksum history untuk 1 ticker."""
+    try:
+        history = load_broksum_history(ticker)
+    except Exception:
+        return None
+    if not history:
+        return None
+
+    history_sorted = sorted(history, key=lambda r: str(r.get('upload_date', '')), reverse=True)
+    latest = history_sorted[0]
+
+    def _norm(lst):
+        out = []
+        for it in _parse_broker_list(lst):
+            if not isinstance(it, dict):
+                continue
+            code = str(it.get('broker', '')).strip().upper()
+            if not code:
+                continue
+            out.append({
+                'broker': code,
+                'volume_lot': safe_float(it.get('volume_lot', 0)),
+                'value_idr': safe_float(it.get('value_idr', 0)),
+                'avg_price': safe_float(it.get('avg_price', 0)),
+                'category': BROKER_TYPES.get(code, 'Domestic')
+            })
+        return out
+
+    return {
+        'ticker': ticker.upper().replace('.JK', ''),
+        'history': history_sorted,
+        'latest': latest,
+        'buyers': _norm(latest.get('top_buyers', '[]')),
+        'sellers': _norm(latest.get('top_sellers', '[]')),
+        'upload_date': latest.get('upload_date', 'N/A'),
+        'bandarmology_status': latest.get('bandarmology_status', 'N/A'),
+        'summary_narrative': latest.get('summary_narrative', ''),
+    }
+
+
+def build_broker_flow_chart(data):
+    """Chart 1: Broker Flow – horizontal bar (buyers +, sellers -)."""
+    if not data:
+        return None
+    buyers = sorted(data['buyers'], key=lambda x: x['volume_lot'], reverse=True)[:10]
+    sellers = sorted(data['sellers'], key=lambda x: x['volume_lot'], reverse=True)[:10]
+    if not buyers and not sellers:
+        return None
+
+    buyer_labels = [get_broker_label(b['broker']) for b in buyers]
+    buyer_vols = [b['volume_lot'] for b in buyers]
+    seller_labels = [get_broker_label(s['broker']) for s in sellers]
+    seller_vols = [-s['volume_lot'] for s in sellers]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=buyer_labels, x=buyer_vols, orientation='h',
+        name='Accum (Buy)', marker_color='#10b981',
+        hovertemplate='<b>%{y}</b><br>Net Buy: %{x:,.0f} lot<extra></extra>'
+    ))
+    fig.add_trace(go.Bar(
+        y=seller_labels, x=seller_vols, orientation='h',
+        name='Dist (Sell)', marker_color='#ef4444',
+        customdata=[abs(v) for v in seller_vols],
+        hovertemplate='<b>%{y}</b><br>Net Sell: %{customdata:,.0f} lot<extra></extra>'
+    ))
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=400, margin=dict(l=10, r=10, t=40, b=10), barmode='relative',
+        title=dict(text=f"Broker Flow – {data['ticker']} • {data['upload_date']}",
+                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="right", x=1, font=dict(size=11, color="#94a3b8")),
+        xaxis=dict(title="Volume (Lot)", showgrid=True, gridcolor="#262626",
+                   zeroline=True, zerolinecolor="#525252"),
+        yaxis=dict(showgrid=False, tickfont=dict(size=11)),
+    )
+    return fig
+
+
+def build_trade_flow_chart(data):
+    """Chart 2: Trade Flow – Total Buy vs Sell vs Net."""
+    if not data:
+        return None
+    total_buy = sum(b['volume_lot'] for b in data['buyers'])
+    total_sell = sum(s['volume_lot'] for s in data['sellers'])
+    net = total_buy - total_sell
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=['Total Buy', 'Total Sell', 'Net Flow'],
+        y=[total_buy, -total_sell, net],
+        marker_color=['#10b981', '#ef4444', '#a855f7' if net >= 0 else '#f97316'],
+        text=[f"{total_buy:,.0f}", f"{total_sell:,.0f}", f"{net:+,.0f}"],
+        textposition='outside',
+        hovertemplate='<b>%{x}</b><br>%{y:,.0f} lot<extra></extra>'
+    ))
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=380, margin=dict(l=10, r=10, t=40, b=10),
+        title=dict(text=f"Trade Flow Summary – {data['ticker']}",
+                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
+        showlegend=False,
+        xaxis=dict(showgrid=False),
+        yaxis=dict(title="Volume (Lot)", showgrid=True, gridcolor="#262626",
+                   zeroline=True, zerolinecolor="#525252"),
+    )
+    return fig
+
+
+def build_foreign_flow_chart(data):
+    """
+    Chart 3: Foreign Flow – agregat dari broker Foreign + BUMN.
+    (Sesuai requirement: foreign flow = broker asing + BUMN)
+    """
+    if not data:
+        return None
+    FOREIGN_CATS = {"Foreign", "BUMN"}
+    foreign_buy = sum(b['volume_lot'] for b in data['buyers'] if b['category'] in FOREIGN_CATS)
+    foreign_sell = sum(s['volume_lot'] for s in data['sellers'] if s['category'] in FOREIGN_CATS)
+    net_foreign = foreign_buy - foreign_sell
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=['Foreign+BUMN Buy', 'Foreign+BUMN Sell', 'Net Foreign'],
+        y=[foreign_buy, -foreign_sell, net_foreign],
+        marker_color=['#10b981', '#ef4444', '#3b82f6' if net_foreign >= 0 else '#f97316'],
+        text=[f"{foreign_buy:,.0f}", f"{foreign_sell:,.0f}", f"{net_foreign:+,.0f}"],
+        textposition='outside',
+        hovertemplate='<b>%{x}</b><br>%{y:,.0f} lot<extra></extra>'
+    ))
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=380, margin=dict(l=10, r=10, t=40, b=10),
+        title=dict(text=f"Foreign Flow (Foreign + BUMN) – {data['ticker']}",
+                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
+        showlegend=False,
+        xaxis=dict(showgrid=False),
+        yaxis=dict(title="Volume (Lot)", showgrid=True, gridcolor="#262626",
+                   zeroline=True, zerolinecolor="#525252"),
+    )
+    return fig
+
+
+def build_broker_sankey(data):
+    """Chart 4: Broker Distribution Sankey – buyer → seller."""
+    if not data:
+        return None
+    buyers = data['buyers'][:8]
+    sellers = data['sellers'][:8]
+    if not buyers and not sellers:
+        return None
+
+    total_buy = sum(b['volume_lot'] for b in buyers)
+    total_sell = sum(s['volume_lot'] for s in sellers)
+
+    buyer_nodes = [f"{b['broker']} (Buy)" for b in buyers]
+    seller_nodes = [f"{s['broker']} (Sell)" for s in sellers]
+    node_idx = {n: i for i, n in enumerate(buyer_nodes + seller_nodes)}
+
+    sources, targets, values, link_colors = [], [], [], []
+    category_rgb = {"Domestic": "168, 85, 247",
+                    "BUMN": "16, 185, 129",
+                    "Foreign": "239, 68, 68"}
+
+    for b in buyers:
+        for s in sellers:
+            if total_buy > 0 and total_sell > 0:
+                flow = min(b['volume_lot'] * s['volume_lot'] / total_buy,
+                           b['volume_lot'] * s['volume_lot'] / total_sell)
+            else:
+                flow = 0
+            if flow <= 0:
+                continue
+            sources.append(node_idx[f"{b['broker']} (Buy)"])
+            targets.append(node_idx[f"{s['broker']} (Sell)"])
+            values.append(flow)
+            rgb = category_rgb.get(b['category'], "148, 163, 184")
+            link_colors.append(f"rgba({rgb}, 0.35)")
+
+    if not values:
+        return None
+
+    def fmt(v):
+        return f"{v/1e6:,.2f}M" if v >= 1e6 else f"{v:,.0f}"
+
+    cat_hex = {"Domestic": "#a855f7", "BUMN": "#10b981", "Foreign": "#ef4444"}
+    node_colors = [cat_hex.get(b['category'], "#94a3b8") for b in buyers] + \
+                  [cat_hex.get(s['category'], "#94a3b8") for s in sellers]
+    labels = [f"{b['broker']} ({fmt(b['volume_lot'])})" for b in buyers] + \
+             [f"{s['broker']} ({fmt(s['volume_lot'])})" for s in sellers]
+
+    fig = go.Figure(data=[go.Sankey(
+        arrangement="snap",
+        node=dict(
+            pad=16, thickness=12, line=dict(color="#121212", width=1),
+            label=labels, color=node_colors,
+        ),
+        link=dict(source=sources, target=targets, value=values, color=link_colors)
+    )])
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=450, margin=dict(l=5, r=5, t=40, b=5),
+        title=dict(text=f"Broker Distribution – {data['ticker']}",
+                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
+        font=dict(size=11, color="#94a3b8"),
+    )
+    return fig
+
+
+def display_bandarmology_tab(ticker):
+    """Render section Bandarmology lengkap (4 chart) di tab."""
+    data = load_bandarmology_data(ticker)
+
+    if not data:
+        st.info(
+            f"📭 Belum ada data Bandarmology untuk **{ticker}**. "
+            "Upload screenshot Broksum via sidebar → 📸 Scan Broksum untuk mulai tracking."
+        )
+        return
+
+    st.markdown(f"### 🏦 Bandarmology – {data['ticker']}")
+    st.caption(f"Upload terakhir: **{data['upload_date']}** | Status: **{data['bandarmology_status']}**")
+    if data.get('summary_narrative'):
+        st.info(f"📝 {data['summary_narrative']}")
+
+    st.markdown("#### 1. Broker Flow")
+    fig1 = build_broker_flow_chart(data)
+    if fig1:
+        st.plotly_chart(fig1, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("#### 2. Trade Flow")
+    fig2 = build_trade_flow_chart(data)
+    if fig2:
+        st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("#### 3. Foreign Flow (Foreign + BUMN)")
+    fig3 = build_foreign_flow_chart(data)
+    if fig3:
+        st.plotly_chart(fig3, use_container_width=True, config={"displayModeBar": False})
+
+    st.markdown("#### 4. Broker Distribution (Sankey)")
+    fig4 = build_broker_sankey(data)
+    if fig4:
+        st.plotly_chart(fig4, use_container_width=True, config={"displayModeBar": False})
+        st.markdown("""
+        <div style="display: flex; justify-content: center; gap: 20px; font-size: 12px; margin-top: 4px; color: #94a3b8;">
+            <div><span style="color: #a855f7; font-size: 14px;">■</span> Domestic</div>
+            <div><span style="color: #10b981; font-size: 14px;">■</span> BUMN</div>
+            <div><span style="color: #ef4444; font-size: 14px;">■</span> Foreign</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.caption("(Tidak ada data buyer/seller yang cukup untuk diagram Sankey)")
+
+    if len(data['history']) > 1:
+        with st.expander(f"📜 Riwayat Upload ({len(data['history'])} entri)"):
+            for h in data['history'][:10]:
+                st.caption(f"• {h.get('upload_date', 'N/A')} — {h.get('bandarmology_status', 'N/A')}")
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
@@ -4779,14 +5085,21 @@ if run_btn:
         f"(Swing: {final_swing_score:.1f} vs Day: {final_day_score:.1f})"
     )
 
-    # ----- TAMPILKAN HASIL KEDUA MODE DALAM TAB -----
-    tab_swing, tab_day = st.tabs(["📆 Swing Trade", "⏱️ Day Trade"])
+    # ----- TAMPILKAN HASIL KETIGA MODE DALAM TAB -----
+    tab_swing, tab_day, tab_bandar = st.tabs([
+        "📆 Swing Trade",
+        "⏱️ Day Trade",
+        "🐳 Bandarmology"
+    ])
 
     with tab_swing:
         display_analysis_result(res_swing)
 
     with tab_day:
         display_analysis_result(res_day)
+
+    with tab_bandar:
+        display_bandarmology_tab(ticker_clean)
 
     # ----- SIMPAN PREDIKSI V12 UNTUK KEDUA MODE -----
     for res in [res_swing, res_day]:
