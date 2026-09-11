@@ -2101,8 +2101,60 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════════
-# BANDARMOLOGY – DATA LOADER & CHART BUILDERS               
+# BANDARMOLOGY – DATA LOADER & CHART BUILDERS (HYBRID TIME-SERIES)
 # ═══════════════════════════════════════════════════════════════
+
+# ---------- PRICE DATA HELPERS (yfinance) ----------
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_intraday_price_data(ticker):
+    """Ambil data intraday 5m dari yfinance untuk sesi terakhir."""
+    t = ticker.upper().strip()
+    if not t.endswith(".JK"):
+        t = f"{t}.JK"
+
+    for interval in ["5m", "15m", "30m", "60m"]:
+        try:
+            df = yf.download(t, period="5d", interval=interval, progress=False, prepost=False)
+            if df is None or df.empty:
+                continue
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            # Konversi timezone ke Jakarta jika perlu
+            try:
+                if df.index.tz is not None:
+                    df = df.tz_convert("Asia/Jakarta")
+            except Exception:
+                pass
+            # Ambil hanya hari terakhir yang punya data
+            last_date = df.index[-1].date()
+            df_last = df[df.index.date == last_date]
+            if len(df_last) >= 10:
+                return df_last, interval
+            if len(df) >= 20:
+                return df, interval
+        except Exception:
+            continue
+    return None, None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_daily_price_data(ticker, period="1mo"):
+    """Ambil data harian dari yfinance."""
+    t = ticker.upper().strip()
+    if not t.endswith(".JK"):
+        t = f"{t}.JK"
+    try:
+        df = yf.download(t, period=period, interval="1d", progress=False)
+        if df is None or df.empty:
+            return None
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        return df
+    except Exception:
+        return None
+
+
+# ---------- DATA LOADER (broksum snapshot) ----------
 def load_bandarmology_data(ticker):
     """Load & normalisasi broksum history untuk 1 ticker."""
     try:
@@ -2144,112 +2196,253 @@ def load_bandarmology_data(ticker):
     }
 
 
+# ---------- CHART 1: BROKER FLOW (TIME-SERIES) ----------
 def build_broker_flow_chart(data):
-    """Chart 1: Broker Flow – horizontal bar (buyers +, sellers -)."""
+    """
+    Broker Flow time-series: harga intraday + garis net flow kumulatif per broker.
+    Flow didistribusi dari snapshot broksum mengikuti pola volume × arah bar.
+    """
     if not data:
         return None
-    buyers = sorted(data['buyers'], key=lambda x: x['volume_lot'], reverse=True)[:10]
-    sellers = sorted(data['sellers'], key=lambda x: x['volume_lot'], reverse=True)[:10]
-    if not buyers and not sellers:
+
+    df, interval = _load_intraday_price_data(data['ticker'])
+    if df is None or df.empty:
         return None
 
-    buyer_labels = [get_broker_label(b['broker']) for b in buyers]
-    buyer_vols = [b['volume_lot'] for b in buyers]
-    seller_labels = [get_broker_label(s['broker']) for s in sellers]
-    seller_vols = [-s['volume_lot'] for s in sellers]
+    df = df.copy()
+    df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
+    df['delta_vol'] = df['Volume'].astype(float) * df['direction']
+
+    raw_cum = df['delta_vol'].cumsum().values
+    if len(raw_cum) == 0:
+        return None
+    final_raw = raw_cum[-1] if abs(raw_cum[-1]) > 0 else 1.0
+
+    buyers = sorted(data['buyers'], key=lambda x: x['volume_lot'], reverse=True)[:4]
+    sellers = sorted(data['sellers'], key=lambda x: x['volume_lot'], reverse=True)[:4]
+
+    df['time'] = df.index.strftime("%H:%M")
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        y=buyer_labels, x=buyer_vols, orientation='h',
-        name='Accum (Buy)', marker_color='#10b981',
-        hovertemplate='<b>%{y}</b><br>Net Buy: %{x:,.0f} lot<extra></extra>'
+
+    # Harga (secondary axis)
+    fig.add_trace(go.Scatter(
+        x=df['time'], y=df['Close'], mode="lines", name="Price",
+        line=dict(color="#64748b", width=1.5, dash="dot"),
+        yaxis="y2",
+        hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
     ))
-    fig.add_trace(go.Bar(
-        y=seller_labels, x=seller_vols, orientation='h',
-        name='Dist (Sell)', marker_color='#ef4444',
-        customdata=[abs(v) for v in seller_vols],
-        hovertemplate='<b>%{y}</b><br>Net Sell: %{customdata:,.0f} lot<extra></extra>'
-    ))
+
+    buyer_colors = ["#10b981", "#06b6d4", "#3b82f6", "#a855f7"]
+    seller_colors = ["#ef4444", "#f97316", "#eab308", "#ec4899"]
+
+    # Buyer flows (kumulatif ke atas)
+    for idx, b in enumerate(buyers):
+        target = b['volume_lot']
+        flow_cum = raw_cum / abs(final_raw) * target
+        label = get_broker_label(b['broker'])
+        fig.add_trace(go.Scatter(
+            x=df['time'], y=flow_cum, mode="lines", name=f"Accum {label}",
+            line=dict(color=buyer_colors[idx % len(buyer_colors)], width=2),
+            hovertemplate=f"<b>{label}</b>: %{{y:,.0f}} Lot<extra></extra>"
+        ))
+
+    # Seller flows (kumulatif ke bawah)
+    for idx, s in enumerate(sellers):
+        target = s['volume_lot']
+        flow_cum = -raw_cum / abs(final_raw) * target
+        label = get_broker_label(s['broker'])
+        fig.add_trace(go.Scatter(
+            x=df['time'], y=flow_cum, mode="lines", name=f"Dist {label}",
+            line=dict(color=seller_colors[idx % len(seller_colors)], width=2),
+            hovertemplate=f"<b>{label}</b>: %{{y:,.0f}} Lot<extra></extra>"
+        ))
+
+    tick_vals = df['time'].tolist()[::max(1, len(df) // 12)]
+
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=400, margin=dict(l=10, r=10, t=40, b=10), barmode='relative',
-        title=dict(text=f"Broker Flow – {data['ticker']} • {data['upload_date']}",
-                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="right", x=1, font=dict(size=11, color="#94a3b8")),
-        xaxis=dict(title="Volume (Lot)", showgrid=True, gridcolor="#262626",
-                   zeroline=True, zerolinecolor="#525252"),
-        yaxis=dict(showgrid=False, tickfont=dict(size=11)),
+        template="plotly_dark",
+        paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=420, margin=dict(l=10, r=10, t=45, b=10),
+        dragmode=False, hovermode="x unified",
+        hoverdistance=100, spikedistance=100,
+        title=dict(
+            text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
+            font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
+        ),
+        legend=dict(orientation="h", yanchor="top", y=-0.15,
+                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        xaxis=dict(
+            showgrid=True, gridcolor="#262626", type="category",
+            tickmode="array", tickvals=tick_vals,
+            showspikes=True, spikemode="across", spikesnap="cursor",
+            spikethickness=1, spikecolor="#64748b", spikedash="dot"
+        ),
+        yaxis=dict(
+            title="Net Flow (Lot)", showgrid=True, gridcolor="#262626",
+            zeroline=True, zerolinecolor="#525252"
+        ),
+        yaxis2=dict(
+            title="Harga", showgrid=False, overlaying="y", side="right"
+        )
     )
     return fig
 
 
+# ---------- CHART 2: TRADE FLOW (TIME-SERIES) ----------
 def build_trade_flow_chart(data):
-    """Chart 2: Trade Flow – Total Buy vs Sell vs Net."""
+    """
+    Trade Flow time-series: bar net buy/sell per bar intraday + harga overlay.
+    Net value = Volume × Close × Arah bar.
+    """
     if not data:
         return None
-    total_buy = sum(b['volume_lot'] for b in data['buyers'])
-    total_sell = sum(s['volume_lot'] for s in data['sellers'])
-    net = total_buy - total_sell
+
+    df, interval = _load_intraday_price_data(data['ticker'])
+    if df is None or df.empty:
+        return None
+
+    df = df.copy()
+    df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
+    df['net_value'] = df['Volume'].astype(float) * df['Close'].astype(float) * df['direction']
+    df['net_buy'] = df['net_value'].where(df['net_value'] > 0, 0)
+    df['net_sell'] = df['net_value'].where(df['net_value'] < 0, 0)
+    df['time'] = df.index.strftime("%H:%M")
 
     fig = go.Figure()
+
     fig.add_trace(go.Bar(
-        x=['Total Buy', 'Total Sell', 'Net Flow'],
-        y=[total_buy, -total_sell, net],
-        marker_color=['#10b981', '#ef4444', '#a855f7' if net >= 0 else '#f97316'],
-        text=[f"{total_buy:,.0f}", f"{total_sell:,.0f}", f"{net:+,.0f}"],
-        textposition='outside',
-        hovertemplate='<b>%{x}</b><br>%{y:,.0f} lot<extra></extra>'
+        x=df['time'], y=df['net_buy'], name="Net Buy",
+        marker_color="#10b981",
+        hovertemplate="<b>Net Buy</b>: %{y:,.0f}<extra></extra>"
     ))
+    fig.add_trace(go.Bar(
+        x=df['time'], y=df['net_sell'], name="Net Sell",
+        marker_color="#ef4444",
+        hovertemplate="<b>Net Sell</b>: %{y:,.0f}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['time'], y=df['Close'], mode="lines", name="Price",
+        line=dict(color="#0284c7", width=2), yaxis="y2",
+        hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
+    ))
+
+    tick_vals = df['time'].tolist()[::max(1, len(df) // 12)]
+
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=380, margin=dict(l=10, r=10, t=40, b=10),
-        title=dict(text=f"Trade Flow Summary – {data['ticker']}",
-                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
-        showlegend=False,
-        xaxis=dict(showgrid=False),
-        yaxis=dict(title="Volume (Lot)", showgrid=True, gridcolor="#262626",
-                   zeroline=True, zerolinecolor="#525252"),
+        template="plotly_dark",
+        paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
+        dragmode=False, hovermode="x unified",
+        hoverdistance=100, spikedistance=100,
+        title=dict(
+            text=f"Trade Flow (Intraday {interval}) – {data['ticker']}",
+            font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
+        ),
+        legend=dict(orientation="h", yanchor="top", y=-0.15,
+                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        xaxis=dict(
+            showgrid=True, gridcolor="#262626", type="category",
+            tickmode="array", tickvals=tick_vals,
+            showspikes=True, spikemode="across", spikesnap="cursor",
+            spikethickness=1, spikecolor="#64748b", spikedash="dot"
+        ),
+        yaxis=dict(
+            title="Value (Rp)", showgrid=True, gridcolor="#262626",
+            zeroline=True, zerolinecolor="#525252"
+        ),
+        yaxis2=dict(
+            title="Harga", showgrid=False, overlaying="y", side="right"
+        )
     )
     return fig
 
 
+# ---------- CHART 3: FOREIGN FLOW (DAILY TIME-SERIES) ----------
 def build_foreign_flow_chart(data):
     """
-    Chart 3: Foreign Flow – agregat dari broker Foreign + BUMN.
-    (Sesuai requirement: foreign flow = broker asing + BUMN)
+    Foreign Flow harian (30D):
+    Net foreign didistribusi dari total net foreign broksum (Foreign+BUMN)
+    mengikuti pola volume × arah × harga harian.
     """
     if not data:
         return None
+
+    df = _load_daily_price_data(data['ticker'], period="1mo")
+    if df is None or df.empty:
+        return None
+
+    df = df.copy()
+    df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
+    df['proxy'] = df['Volume'].astype(float) * df['Close'].astype(float) * df['direction']
+
     FOREIGN_CATS = {"Foreign", "BUMN"}
-    foreign_buy = sum(b['volume_lot'] for b in data['buyers'] if b['category'] in FOREIGN_CATS)
-    foreign_sell = sum(s['volume_lot'] for s in data['sellers'] if s['category'] in FOREIGN_CATS)
-    net_foreign = foreign_buy - foreign_sell
+    fb = sum(b['volume_lot'] for b in data['buyers'] if b['category'] in FOREIGN_CATS)
+    fs = sum(s['volume_lot'] for s in data['sellers'] if s['category'] in FOREIGN_CATS)
+    net_foreign_lot = fb - fs
+
+    total_proxy = df['proxy'].sum()
+    avg_price = df['Close'].mean()
+
+    if abs(total_proxy) > 0 and net_foreign_lot != 0 and not pd.isna(avg_price):
+        target_value = net_foreign_lot * avg_price
+        df['net_foreign'] = df['proxy'] * (target_value / total_proxy)
+    else:
+        df['net_foreign'] = df['proxy']
+
+    df['net_buy'] = df['net_foreign'].where(df['net_foreign'] > 0, 0)
+    df['net_sell'] = df['net_foreign'].where(df['net_foreign'] < 0, 0)
+    df['date'] = df.index.strftime("%d %b")
 
     fig = go.Figure()
+
     fig.add_trace(go.Bar(
-        x=['Foreign+BUMN Buy', 'Foreign+BUMN Sell', 'Net Foreign'],
-        y=[foreign_buy, -foreign_sell, net_foreign],
-        marker_color=['#10b981', '#ef4444', '#3b82f6' if net_foreign >= 0 else '#f97316'],
-        text=[f"{foreign_buy:,.0f}", f"{foreign_sell:,.0f}", f"{net_foreign:+,.0f}"],
-        textposition='outside',
-        hovertemplate='<b>%{x}</b><br>%{y:,.0f} lot<extra></extra>'
+        x=df['date'], y=df['net_buy'], name="Foreign Buy",
+        marker_color="#10b981",
+        hovertemplate="<b>Foreign Buy</b>: %{y:,.0f}<extra></extra>"
     ))
+    fig.add_trace(go.Bar(
+        x=df['date'], y=df['net_sell'], name="Foreign Sell",
+        marker_color="#ef4444",
+        hovertemplate="<b>Foreign Sell</b>: %{y:,.0f}<extra></extra>"
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['date'], y=df['Close'], mode="lines", name="Price",
+        line=dict(color="#0284c7", width=2), yaxis="y2",
+        hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
+    ))
+
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=380, margin=dict(l=10, r=10, t=40, b=10),
-        title=dict(text=f"Foreign Flow (Foreign + BUMN) – {data['ticker']}",
-                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
-        showlegend=False,
-        xaxis=dict(showgrid=False),
-        yaxis=dict(title="Volume (Lot)", showgrid=True, gridcolor="#262626",
-                   zeroline=True, zerolinecolor="#525252"),
+        template="plotly_dark",
+        paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
+        dragmode=False, hovermode="x unified",
+        hoverdistance=100, spikedistance=100,
+        title=dict(
+            text=f"Foreign Flow (Foreign + BUMN, 30D) – {data['ticker']}",
+            font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
+        ),
+        legend=dict(orientation="h", yanchor="top", y=-0.15,
+                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        xaxis=dict(
+            showgrid=True, gridcolor="#262626", type="category",
+            showspikes=True, spikemode="across", spikesnap="cursor",
+            spikethickness=1, spikecolor="#64748b", spikedash="dot"
+        ),
+        yaxis=dict(
+            title="Net Foreign Value (Rp)", showgrid=True, gridcolor="#262626",
+            zeroline=True, zerolinecolor="#525252"
+        ),
+        yaxis2=dict(
+            title="Harga", showgrid=False, overlaying="y", side="right"
+        )
     )
     return fig
 
 
+# ---------- CHART 4: BROKER DISTRIBUTION (SANKEY) ----------
 def build_broker_sankey(data):
-    """Chart 4: Broker Distribution Sankey – buyer → seller."""
+    """Broker Distribution Sankey – buyer → seller."""
     if not data:
         return None
     buyers = data['buyers'][:8]
@@ -2314,6 +2507,7 @@ def build_broker_sankey(data):
     return fig
 
 
+# ---------- TAB RENDERER ----------
 def display_bandarmology_tab(ticker):
     """Render section Bandarmology lengkap (4 chart) di tab."""
     data = load_bandarmology_data(ticker)
@@ -2326,7 +2520,10 @@ def display_bandarmology_tab(ticker):
         return
 
     st.markdown(f"### 🏦 Bandarmology – {data['ticker']}")
-    st.caption(f"Upload terakhir: **{data['upload_date']}** | Status: **{data['bandarmology_status']}**")
+    st.caption(
+        f"Snapshot: **{data['upload_date']}** | Status: **{data['bandarmology_status']}** "
+        f"| ℹ️ Flow intraday = interpolasi dari snapshot broksum (Opsi Hybrid)"
+    )
     if data.get('summary_narrative'):
         st.info(f"📝 {data['summary_narrative']}")
 
@@ -2334,16 +2531,22 @@ def display_bandarmology_tab(ticker):
     fig1 = build_broker_flow_chart(data)
     if fig1:
         st.plotly_chart(fig1, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.caption("(Data harga intraday tidak tersedia dari yfinance)")
 
     st.markdown("#### 2. Trade Flow")
     fig2 = build_trade_flow_chart(data)
     if fig2:
         st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.caption("(Data harga intraday tidak tersedia dari yfinance)")
 
     st.markdown("#### 3. Foreign Flow (Foreign + BUMN)")
     fig3 = build_foreign_flow_chart(data)
     if fig3:
         st.plotly_chart(fig3, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.caption("(Data harga harian tidak tersedia dari yfinance)")
 
     st.markdown("#### 4. Broker Distribution (Sankey)")
     fig4 = build_broker_sankey(data)
