@@ -2107,33 +2107,69 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
 # ---------- PRICE DATA HELPERS (yfinance) ----------
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_intraday_price_data(ticker):
-    """Ambil data intraday 5m dari yfinance untuk sesi terakhir."""
+    """
+    Ambil data intraday dari yfinance, prioritaskan 1m.
+    Fallback: 5m → 15m → 30m → 60m kalau 1m tidak tersedia / terlalu sparse.
+    Return: (df, interval_label)
+    """
     t = ticker.upper().strip()
     if not t.endswith(".JK"):
         t = f"{t}.JK"
 
-    for interval in ["5m", "15m", "30m", "60m"]:
+    # Urutan prioritas: 1m dulu (paling detail), lalu turun
+    intervals = ["1m", "2m", "5m", "15m", "30m", "60m"]
+    # yfinance: 1m hanya boleh period <= 7d
+    period_map = {
+        "1m": "5d", "2m": "5d", "5m": "5d",
+        "15m": "5d", "30m": "5d", "60m": "5d"
+    }
+
+    for interval in intervals:
         try:
-            df = yf.download(t, period="5d", interval=interval, progress=False, prepost=False)
+            df = yf.download(
+                t,
+                period=period_map[interval],
+                interval=interval,
+                progress=False,
+                prepost=False
+            )
             if df is None or df.empty:
                 continue
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
-            # Konversi timezone ke Jakarta jika perlu
+
+            # Konversi timezone ke Jakarta
             try:
                 if df.index.tz is not None:
                     df = df.tz_convert("Asia/Jakarta")
             except Exception:
                 pass
-            # Ambil hanya hari terakhir yang punya data
+
+            # Ambil hari terakhir yang punya data
             last_date = df.index[-1].date()
-            df_last = df[df.index.date == last_date]
-            if len(df_last) >= 10:
-                return df_last, interval
-            if len(df) >= 20:
-                return df, interval
+            df_last = df[df.index.date == last_date].copy()
+
+            if df_last.empty:
+                continue
+
+            # Minimal 30 bar untuk 1m (sesi IDX 1 hari ~ 330 menit),
+            # minimal 20 bar untuk interval lain
+            min_bars = 30 if interval == "1m" else 20
+            if len(df_last) < min_bars:
+                # Coba hari sebelumnya untuk 1m (jaga-jaga kalau sesi baru mulai)
+                if interval == "1m":
+                    unique_dates = sorted(set(df.index.date), reverse=True)
+                    for d in unique_dates:
+                        df_candidate = df[df.index.date == d].copy()
+                        if len(df_candidate) >= 50:
+                            return df_candidate, interval
+                continue
+
+            return df_last, interval
+
         except Exception:
             continue
+
     return None, None
 
 
