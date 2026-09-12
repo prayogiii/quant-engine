@@ -3291,7 +3291,7 @@ def build_broker_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
+            text=f"Broker Flow ({interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         showlegend=False,
@@ -3359,7 +3359,7 @@ def build_trade_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Trade Flow (Intraday {interval}) – {data['ticker']}",
+            text=f"Trade Flow ({interval}) – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         showlegend=False,
@@ -4010,7 +4010,7 @@ def display_bandarmology_tab(ticker):
     # ═══════════════════════════════════════════════
     # CHART 4: SANKEY (TIDAK PAKAI EMBED)
     # ═══════════════════════════════════════════════
-    st.markdown("#### 4. Broker Distribution (Sankey)")
+    st.markdown("#### 4. Broker Distribution ")
     fig4 = build_broker_sankey(data)
     if fig4:
         render_sankey_interactive(fig4, height=520)
@@ -4022,7 +4022,7 @@ def display_bandarmology_tab(ticker):
         </div>
         """, unsafe_allow_html=True)
     else:
-        st.caption("(Tidak ada data buyer/seller yang cukup untuk diagram Sankey)")
+        st.caption("(Tidak ada data buyer/seller yang cukup untuk diagram )")
 
     # ═══════════════════════════════════════════════
     # RIWAYAT UPLOAD
