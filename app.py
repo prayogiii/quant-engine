@@ -355,6 +355,170 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     iframe_h = height + legend_h + 10           # +10 buffer iOS safe area
 
     components.html(html, height=iframe_h, scrolling=False)
+def render_sankey_interactive(fig, height=520):
+    """
+    Embed Sankey dengan interaksi ala Stockbit:
+    - Tap node broker → node itu + semua koneksinya tetap warna
+    - Node & link lain jadi abu-abu
+    - Tombol Reset untuk kembalikan normal
+    """
+    if fig is None:
+        return
+
+    fig_json = fig.to_json()
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+        <style>
+            html, body {{
+                margin: 0; padding: 0;
+                background: #0f1116;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                overflow: hidden;
+            }}
+            #chart {{ width: 100%; height: {height}px; }}
+            #hint {{
+                text-align: center;
+                color: #64748b;
+                font-size: 11px;
+                padding: 4px 10px 8px 10px;
+                background: #0f1116;
+            }}
+            #reset-btn {{
+                display: inline-block;
+                margin-left: 8px;
+                padding: 3px 10px;
+                border-radius: 10px;
+                background: rgba(168, 85, 247, 0.15);
+                color: #a855f7;
+                cursor: pointer;
+                font-weight: bold;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+            }}
+            #reset-btn:active {{
+                background: rgba(168, 85, 247, 0.30);
+            }}
+        </style>
+    </head>
+    <body>
+        <div id="chart"></div>
+        <div id="hint">👆 Tap node broker untuk highlight <span id="reset-btn">↻ Reset</span></div>
+        <script>
+            (function() {{
+                var figData = {fig_json};
+                var config = {{
+                    displayModeBar: false,
+                    responsive: true,
+                    scrollZoom: false,
+                    displaylogo: false
+                }};
+
+                var gd = document.getElementById('chart');
+                var trace = figData.data[0];
+
+                // Simpan warna asli
+                var origNodeColors = (trace.node.color || []).slice();
+                var origLinkColors = (trace.link.color || []).slice();
+                var sources = (trace.link.source || []).slice();
+                var targets = (trace.link.target || []).slice();
+
+                // Warna abu-abu untuk element non-aktif
+                var GRAY_NODE = 'rgba(100, 116, 139, 0.30)';
+                var GRAY_LINK = 'rgba(100, 116, 139, 0.08)';
+
+                Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
+
+                    function applyHighlight(activeLinks, connectedNodes) {{
+                        var newLinkColors = origLinkColors.map(function(c, i) {{
+                            return activeLinks[i] ? c : GRAY_LINK;
+                        }});
+                        var newNodeColors = origNodeColors.map(function(c, i) {{
+                            return connectedNodes[i] ? c : GRAY_NODE;
+                        }});
+                        Plotly.restyle(gd, {{
+                            'link.color': [newLinkColors],
+                            'node.color': [newNodeColors]
+                        }});
+                    }}
+
+                    function highlightNode(nodeIdx) {{
+                        var activeLinks = {{}};
+                        var connectedNodes = {{}};
+                        connectedNodes[nodeIdx] = true;
+
+                        for (var i = 0; i < sources.length; i++) {{
+                            if (sources[i] === nodeIdx) {{
+                                activeLinks[i] = true;
+                                connectedNodes[targets[i]] = true;
+                            }}
+                            if (targets[i] === nodeIdx) {{
+                                activeLinks[i] = true;
+                                connectedNodes[sources[i]] = true;
+                            }}
+                        }}
+                        applyHighlight(activeLinks, connectedNodes);
+                    }}
+
+                    function highlightLinkPair(s, t) {{
+                        var activeLinks = {{}};
+                        var connectedNodes = {{}};
+                        connectedNodes[s] = true;
+                        connectedNodes[t] = true;
+
+                        for (var i = 0; i < sources.length; i++) {{
+                            if (sources[i] === s || targets[i] === s ||
+                                sources[i] === t || targets[i] === t) {{
+                                activeLinks[i] = true;
+                                connectedNodes[sources[i]] = true;
+                                connectedNodes[targets[i]] = true;
+                            }}
+                        }}
+                        applyHighlight(activeLinks, connectedNodes);
+                    }}
+
+                    function resetAll() {{
+                        Plotly.restyle(gd, {{
+                            'link.color': [origLinkColors],
+                            'node.color': [origNodeColors]
+                        }});
+                    }}
+
+                    gd.on('plotly_click', function(data) {{
+                        if (!data.points || data.points.length === 0) return;
+                        var pt = data.points[0];
+
+                        if (pt.pointType === 'node' && pt.pointNumber !== undefined) {{
+                            highlightNode(pt.pointNumber);
+                        }} else if (pt.pointType === 'link' && pt.pointNumber !== undefined) {{
+                            var s = sources[pt.pointNumber];
+                            var t = targets[pt.pointNumber];
+                            highlightLinkPair(s, t);
+                        }}
+                    }});
+
+                    document.getElementById('reset-btn').addEventListener('click', function(e) {{
+                        e.stopPropagation();
+                        resetAll();
+                        if (navigator.vibrate) {{
+                            try {{ navigator.vibrate(8); }} catch(err) {{}}
+                        }}
+                    }});
+
+                    window.addEventListener('resize', function() {{
+                        Plotly.Plots.resize(gd);
+                    }});
+                }});
+            }})();
+        </script>
+    </body>
+    </html>
+    """
+    components.html(html, height=height + 40, scrolling=False)
 # ====================== FALLBACK HANDLERS ======================
 PIL_AVAILABLE = True
 try:
@@ -2933,11 +3097,10 @@ def display_bandarmology_tab(ticker):
     # ═══════════════════════════════════════════════
     # CHART 4: SANKEY (TIDAK PAKAI EMBED)
     # ═══════════════════════════════════════════════
-    st.markdown("#### 4. Broker Distribution (Sankey)")
+        st.markdown("#### 4. Broker Distribution (Sankey)")
     fig4 = build_broker_sankey(data)
     if fig4:
-        st.plotly_chart(fig4, use_container_width=True,
-                        config={"displayModeBar": False})
+        render_sankey_interactive(fig4, height=520)
         st.markdown("""
         <div style="display: flex; justify-content: center; gap: 20px; font-size: 12px; margin-top: 4px; color: #94a3b8;">
             <div><span style="color: #a855f7; font-size: 14px;">■</span> Domestic</div>
