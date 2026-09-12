@@ -453,7 +453,7 @@ def render_sankey_interactive(fig, height=520):
                         }});
                     }}
 
-                    function applyHighlight(activeLinks, connectedNodes) {{
+                                        function applyHighlight(activeLinks, connectedNodes) {{
                         var newLinkColors = origLinkColors.map(function(c, i) {{
                             return activeLinks[i] ? c : GRAY_LINK;
                         }});
@@ -464,11 +464,16 @@ def render_sankey_interactive(fig, height=520):
                             return connectedNodes[i] ? c : GRAY_TEXT;
                         }});
 
-                        // ── Update semuanya sekaligus (link, node bar, label text) ──
-                        Plotly.restyle(gd, {{
-                            'link.color': [newLinkColors],
-                            'node.color': [newNodeColors],
-                            'node.textfont.color': [newTextColors]
+                        // Rebuild trace full (lebih reliable untuk versi Plotly lama)
+                        var newTrace = JSON.parse(JSON.stringify(trace));
+                        newTrace.link.color = newLinkColors;
+                        newTrace.node.color = newNodeColors;
+                        if (!newTrace.node.textfont) newTrace.node.textfont = {{}};
+                        newTrace.node.textfont.color = newTextColors;
+
+                        Plotly.react(gd, [newTrace], gd.layout, config).then(function() {{
+                            // Event listener otomatis hilang, jadi tetap pakai event delegation
+                            // (tidak perlu reattach, karena pakai gd.on)
                         }});
                     }}
 
