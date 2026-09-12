@@ -27,9 +27,10 @@ import streamlit.components.v1 as components
 # ═══════════════════════════════════════════════════════════════
 def render_plotly_realtime(fig, height=420, haptic=True):
     """
-    Embed Plotly.js ala Stockbit (FIXED):
+    Embed Plotly.js ala Stockbit (v3):
     - Tap + geser = vline + tooltip follow jari realtime
     - Haptic vibration tiap index berubah (Android)
+    - Legend HTML manual di bawah chart (anti-crop di semua browser)
     - Auto-hide setelah 2.5 detik idle
     """
     if fig is None:
@@ -78,6 +79,29 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                 margin-right: 6px;
                 flex-shrink: 0;
             }}
+            #legend {{
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 6px 14px;
+                padding: 8px 10px 10px 10px;
+                margin: 0;
+                background: #0f1116;
+                font-size: 11px;
+                color: #94a3b8;
+            }}
+            #legend .item {{
+                display: inline-flex;
+                align-items: center;
+                white-space: nowrap;
+            }}
+            #legend .swatch {{
+                display: inline-block;
+                width: 10px; height: 10px;
+                border-radius: 2px;
+                margin-right: 5px;
+                flex-shrink: 0;
+            }}
         </style>
     </head>
     <body>
@@ -85,14 +109,15 @@ def render_plotly_realtime(fig, height=420, haptic=True):
             <div id="chart"></div>
             <div id="tooltip"></div>
         </div>
+        <div id="legend"></div>
         <script>
             (function() {{
                 var figData = {fig_json};
                 var HAPTIC = {haptic_js};
 
-                // Matikan hover native
                 if (figData.layout) {{
                     figData.layout.hovermode = false;
+                    figData.layout.showlegend = false;
                 }}
 
                 var config = {{
@@ -104,9 +129,24 @@ def render_plotly_realtime(fig, height=420, haptic=True):
 
                 var gd = document.getElementById('chart');
                 var tooltip = document.getElementById('tooltip');
+                var legendDiv = document.getElementById('legend');
 
                 Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
-                    // ── Ambil xValues dari fullData (setelah render) ──
+                    // ── Bangun legend HTML dari trace ──
+                    var legendHtml = '';
+                    for (var i = 0; i < gd._fullData.length; i++) {{
+                        var t = gd._fullData[i];
+                        var name = t.name || ('Series ' + i);
+                        var color = (t.line && t.line.color) ||
+                                    (t.marker && t.marker.color) ||
+                                    '#a855f7';
+                        legendHtml += '<span class="item">' +
+                                      '<span class="swatch" style="background:' + color + '"></span>' +
+                                      name + '</span>';
+                    }}
+                    legendDiv.innerHTML = legendHtml;
+
+                    // ── Ambil xValues ──
                     var xValues = null;
                     for (var i = 0; i < gd._fullData.length; i++) {{
                         var xd = gd._fullData[i].x;
@@ -115,13 +155,12 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                             break;
                         }}
                     }}
-
                     if (!xValues || xValues.length === 0) {{
-                        console.error('[Bandarmology] No x values found');
+                        console.error('[Bandarmology] No x values');
                         return;
                     }}
 
-                    // ── Ambil y per trace (paralel dengan xValues) ──
+                    // ── y per trace ──
                     var yPerTrace = [];
                     var namePerTrace = [];
                     var colorPerTrace = [];
@@ -134,7 +173,7 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         colorPerTrace.push(c);
                     }}
 
-                    // ── Shape vline: pakai STRING nilai x (bukan angka 0) ──
+                    // ── Shape vline ──
                     var initX = xValues[0];
                     var baseShapes = (gd.layout.shapes || []).slice();
                     baseShapes.push({{
@@ -147,7 +186,6 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                     Plotly.relayout(gd, {{ shapes: baseShapes }});
                     var V_IDX = baseShapes.length - 1;
 
-                    // ── Hitung index dari posisi pixel (manual, akurat) ──
                     function pixelToIndex(clientX) {{
                         var rect = gd.getBoundingClientRect();
                         var fl = gd._fullLayout;
@@ -178,14 +216,12 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         if (idx >= xValues.length) idx = xValues.length - 1;
                         var xVal = xValues[idx];
 
-                        // Update vline
                         var upd = {{}};
                         upd['shapes[' + V_IDX + '].x0'] = xVal;
                         upd['shapes[' + V_IDX + '].x1'] = xVal;
                         upd['shapes[' + V_IDX + '].opacity'] = 1;
                         Plotly.relayout(gd, upd);
 
-                        // Update tooltip
                         var lines = ['<b>' + xVal + '</b>'];
                         for (var i = 0; i < yPerTrace.length; i++) {{
                             var yv = yPerTrace[i][idx];
@@ -201,7 +237,6 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         tooltip.innerHTML = lines.join('');
                         tooltip.style.display = 'block';
 
-                        // Posisi tooltip: kanan jari, flip kalau kepotong
                         var rect = gd.getBoundingClientRect();
                         var tw = tooltip.offsetWidth || 140;
                         var left = clientX - rect.left + 14;
@@ -211,13 +246,11 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         if (left < 4) left = 4;
                         tooltip.style.left = left + 'px';
 
-                        // Haptic: hanya saat index berubah
                         if (idx !== lastIdx) {{
                             vibrate();
                             lastIdx = idx;
                         }}
 
-                        // Auto-hide timer
                         if (hideTimer) clearTimeout(hideTimer);
                         hideTimer = setTimeout(function() {{
                             tooltip.style.display = 'none';
@@ -272,7 +305,8 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     </body>
     </html>
     """
-    components.html(html, height=height + 10, scrolling=False)
+    # Iframe lebih tinggi karena ada legend di bawah (~45px)
+    components.html(html, height=height + 55, scrolling=False)
 # ====================== FALLBACK HANDLERS ======================
 PIL_AVAILABLE = True
 try:
@@ -2551,20 +2585,14 @@ def build_broker_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=480, margin=dict(l=10, r=10, t=50, b=75),
+        height=420, margin=dict(l=10, r=10, t=45, b=10),
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
             text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(
-            orientation="h",
-            yanchor="top", y=-0.18,
-            xanchor="center", x=0.5,
-            font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(0,0,0,0)"
-        ),
+        showlegend=False,
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             tickmode="array", tickvals=tick_vals,
@@ -2625,20 +2653,14 @@ def build_trade_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=480, margin=dict(l=10, r=10, t=50, b=75), barmode="relative",
+        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
             text=f"Trade Flow (Intraday {interval}) – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(
-            orientation="h",
-            yanchor="top", y=-0.18,
-            xanchor="center", x=0.5,
-            font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(0,0,0,0)"
-        ),
+        showlegend=False,
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             tickmode="array", tickvals=tick_vals,
@@ -2713,20 +2735,14 @@ def build_foreign_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=480, margin=dict(l=10, r=10, t=50, b=75), barmode="relative",
+        height=420, margin=dict(l=10, r=10, t=55, b=10), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
             text=f"Foreign Flow (Foreign + BUMN, 30D) – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(
-            orientation="h",
-            yanchor="top", y=-0.18,
-            xanchor="center", x=0.5,
-            font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(0,0,0,0)"
-        ),
+        showlegend=False,
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             showspikes=True, spikemode="across", spikesnap="cursor",
