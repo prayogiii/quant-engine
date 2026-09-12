@@ -3970,7 +3970,7 @@ def display_bandarmology_tab(ticker):
     fig3, df3, stats3 = build_foreign_flow_chart(data)
 
     # ── CARD ala Stockbit ──
-        if stats3:
+    if stats3:
         fb_str = fmt_money(stats3['fb'])
         fs_str = fmt_money(stats3['fs'])
         net_str = fmt_money(stats3['net'])
