@@ -2563,10 +2563,7 @@ def build_broker_flow_chart(data):
             yanchor="top", y=0.99,
             xanchor="right", x=0.99,
             font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(15,17,22,0.80)",
-            bordercolor="#374151",
-            borderwidth=1,
-            borderpad=4
+            bgcolor="rgba(15,17,22,0.80)"
         ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
@@ -2640,10 +2637,7 @@ def build_trade_flow_chart(data):
             yanchor="top", y=0.99,
             xanchor="right", x=0.99,
             font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(15,17,22,0.80)",
-            bordercolor="#374151",
-            borderwidth=1,
-            borderpad=4
+            bgcolor="rgba(15,17,22,0.80)"
         ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
@@ -2731,10 +2725,7 @@ def build_foreign_flow_chart(data):
             yanchor="top", y=0.99,
             xanchor="right", x=0.99,
             font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(15,17,22,0.80)",
-            bordercolor="#374151",
-            borderwidth=1,
-            borderpad=4
+            bgcolor="rgba(15,17,22,0.80)"
         ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
