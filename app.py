@@ -357,15 +357,44 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     components.html(html, height=iframe_h, scrolling=False)
 def render_sankey_interactive(fig, height=520):
     """
-    Sankey interaktif ala Stockbit (FIXED v2):
-    - Tap node → node + link + label tetap warna, sisanya abu-abu
-    - Full rebuild pakai Plotly.react (paling reliable)
-    - Tombol Reset untuk kembalikan
+    Sankey dengan highlight:
+    - Tap node/link di chart (kalau browser support)
+    - Tap chip broker di bawah (SELALU work di mobile)
+    - Tap ↻ untuk reset
     """
     if fig is None:
         return
 
+    # Extract daftar broker dari trace untuk bikin chips
+    try:
+        trace_data = fig.data[0]
+        labels = list(trace_data.node.label or [])
+    except Exception:
+        labels = []
+
+    # Buat daftar chip dari label (buang angka nilai kalau ada)
+    import re as _re
+    chip_labels = []
+    seen = set()
+    for lb in labels:
+        clean = _re.sub(r'\s*\([^)]*\)', '', str(lb)).strip()
+        clean = _re.sub(r'^[\d\.,]+\s*[MBK]?\s*', '', clean).strip()
+        clean = _re.sub(r'\s*[\d\.,]+\s*[MBK]?$', '', clean).strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            chip_labels.append(clean)
+
     fig_json = fig.to_json()
+
+    # Pre-generate chips HTML
+    chips_html = ""
+    for i, name in enumerate(chip_labels):
+        chips_html += (
+            f'<button class="chip" data-broker="{name}" '
+            f'style="background:#1e293b;color:#cbd5e1;border:1px solid #334155;'
+            f'border-radius:14px;padding:5px 12px;font-size:11px;cursor:pointer;'
+            f'margin:2px;">{name}</button>'
+        )
 
     html = f"""
     <!DOCTYPE html>
@@ -374,203 +403,158 @@ def render_sankey_interactive(fig, height=520):
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
         <style>
-            html, body {{
-                margin: 0; padding: 0;
-                background: #0f1116;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                overflow: hidden;
-            }}
-            #chart {{ width: 100%; height: {height}px; }}
-            #hint {{
-                text-align: center;
-                color: #64748b;
-                font-size: 11px;
-                padding: 4px 10px 10px 10px;
-                background: #0f1116;
-            }}
-            #reset-btn {{
-                display: inline-block;
-                margin-left: 8px;
-                padding: 3px 10px;
-                border-radius: 10px;
-                background: rgba(168, 85, 247, 0.15);
-                color: #a855f7;
-                cursor: pointer;
-                font-weight: bold;
-                user-select: none;
-                -webkit-tap-highlight-color: transparent;
-            }}
-            #reset-btn:active {{
-                background: rgba(168, 85, 247, 0.30);
-            }}
+            html, body {{ margin:0; padding:0; background:#0f1116;
+                font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                overflow:hidden; }}
+            #chart {{ width:100%; height:{height}px; }}
+            #panel {{ padding:6px 8px 10px 8px; background:#0f1116;
+                display:flex; flex-wrap:wrap; justify-content:center;
+                gap:4px; }}
+            .chip {{ user-select:none; -webkit-tap-highlight-color:transparent;
+                transition:all 0.15s; }}
+            .chip:active {{ background:#334155 !important; }}
+            .chip.active {{ background:#a855f7 !important; color:#fff !important;
+                border-color:#a855f7 !important; }}
+            #reset {{ background:rgba(168,85,247,0.15); color:#a855f7;
+                border:1px solid #a855f7; border-radius:14px;
+                padding:5px 14px; font-size:11px; cursor:pointer;
+                margin-left:6px; font-weight:bold; }}
+            #hint {{ text-align:center; color:#64748b; font-size:10px;
+                padding:2px 0 4px 0; }}
         </style>
     </head>
     <body>
         <div id="chart"></div>
-        <div id="hint">👆 Tap node broker untuk highlight <span id="reset-btn">↻ Reset</span></div>
+        <div id="hint">👆 Tap broker di bawah untuk highlight</div>
+        <div id="panel">
+            {chips_html}
+            <button id="reset">↻ Reset</button>
+        </div>
         <script>
             (function() {{
                 var figData = {fig_json};
-                var config = {{
-                    displayModeBar: false,
-                    responsive: true,
-                    scrollZoom: false,
-                    displaylogo: false
-                }};
-
+                var config = {{ displayModeBar:false, responsive:true,
+                    scrollZoom:false, displaylogo:false }};
                 var gd = document.getElementById('chart');
 
-                // Deep clone original trace (biar aman dari mutasi)
-                var ORIGINAL_TRACE = JSON.parse(JSON.stringify(figData.data[0]));
-                var ORIGINAL_LAYOUT = JSON.parse(JSON.stringify(figData.layout));
+                // Deep clone original
+                var ORIG = JSON.parse(JSON.stringify(figData.data[0]));
+                var LAYOUT = JSON.parse(JSON.stringify(figData.layout));
 
-                // Pastikan semua array punya length yang benar
-                var nNodes = (ORIGINAL_TRACE.node.label || []).length;
-                var nLinks = (ORIGINAL_TRACE.link.source || []).length;
-                var sources = (ORIGINAL_TRACE.link.source || []).slice();
-                var targets = (ORIGINAL_TRACE.link.target || []).slice();
+                var labels = ORIG.node.label || [];
+                var sources = ORIG.link.source || [];
+                var targets = ORIG.link.target || [];
+                var origNodeColors = [].concat(ORIG.node.color || []);
+                var origLinkColors = [].concat(ORIG.link.color || []);
 
-                // Pastikan node.color array lengkap
-                var origNodeColors = (ORIGINAL_TRACE.node.color || []).slice();
-                if (origNodeColors.length !== nNodes) {{
-                    var baseColor = origNodeColors[0] || '#a855f7';
-                    origNodeColors = [];
-                    for (var i = 0; i < nNodes; i++) origNodeColors.push(baseColor);
+                // Normalisasi jadi array penuh
+                if (origNodeColors.length < labels.length) {{
+                    var base = origNodeColors[0] || '#a855f7';
+                    origNodeColors = labels.map(function(){{ return base; }});
+                }}
+                if (origLinkColors.length < sources.length) {{
+                    var baseL = origLinkColors[0] || 'rgba(168,85,247,0.35)';
+                    origLinkColors = sources.map(function(){{ return baseL; }});
                 }}
 
-                // Pastikan link.color array lengkap
-                var origLinkColors = (ORIGINAL_TRACE.link.color || []).slice();
-                if (origLinkColors.length !== nLinks) {{
-                    var baseLink = origLinkColors[0] || 'rgba(168, 85, 247, 0.35)';
-                    origLinkColors = [];
-                    for (var i = 0; i < nLinks; i++) origLinkColors.push(baseLink);
-                }}
+                var GRAY_N = 'rgba(100,116,139,0.20)';
+                var GRAY_L = 'rgba(100,116,139,0.05)';
 
-                // Pastikan textfont.color array lengkap
-                var origTextColors = null;
-                if (ORIGINAL_TRACE.node.textfont && ORIGINAL_TRACE.node.textfont.color) {{
-                    origTextColors = ORIGINAL_TRACE.node.textfont.color;
-                    if (!Array.isArray(origTextColors)) {{
-                        var singleColor = origTextColors;
-                        origTextColors = [];
-                        for (var i = 0; i < nNodes; i++) origTextColors.push(singleColor);
-                    }}
-                }} else {{
-                    origTextColors = [];
-                    for (var i = 0; i < nNodes; i++) origTextColors.push('#f3f4f6');
-                }}
+                var currentHighlight = null;  // broker name aktif
 
-                var GRAY_NODE = 'rgba(100, 116, 139, 0.20)';
-                var GRAY_LINK = 'rgba(100, 116, 139, 0.05)';
-                var GRAY_TEXT = 'rgba(100, 116, 139, 0.40)';
-
-                // ── Build trace baru dengan warna yang dimodifikasi ──
-                function buildTrace(activeLinks, connectedNodes) {{
-                    var t = JSON.parse(JSON.stringify(ORIGINAL_TRACE));
-
-                    // Node bar colors
+                function buildTrace(activeSet) {{
+                    var t = JSON.parse(JSON.stringify(ORIG));
                     t.node.color = origNodeColors.map(function(c, i) {{
-                        return connectedNodes[i] ? c : GRAY_NODE;
+                        return activeSet.nodes[i] ? c : GRAY_N;
                     }});
-
-                    // Link colors
                     t.link.color = origLinkColors.map(function(c, i) {{
-                        return activeLinks[i] ? c : GRAY_LINK;
+                        return activeSet.links[i] ? c : GRAY_L;
                     }});
-
-                    // Label text colors
-                    if (!t.node.textfont) t.node.textfont = {{}};
-                    t.node.textfont.color = origTextColors.map(function(c, i) {{
-                        return connectedNodes[i] ? c : GRAY_TEXT;
-                    }});
-
                     return t;
                 }}
 
-                function rebuild(activeLinks, connectedNodes) {{
-                    var newTrace = buildTrace(activeLinks, connectedNodes);
-                    Plotly.react(gd, [newTrace], ORIGINAL_LAYOUT, config);
-                }}
-
-                function highlightNode(nodeIdx) {{
+                function highlightBroker(brokerName) {{
+                    var activeNodes = {{}};
                     var activeLinks = {{}};
-                    var connectedNodes = {{}};
-                    connectedNodes[nodeIdx] = true;
-
-                    for (var i = 0; i < nLinks; i++) {{
-                        if (sources[i] === nodeIdx) {{
-                            activeLinks[i] = true;
-                            connectedNodes[targets[i]] = true;
-                        }}
-                        if (targets[i] === nodeIdx) {{
-                            activeLinks[i] = true;
-                            connectedNodes[sources[i]] = true;
+                    var found = false;
+                    // Cari semua node yang label-nya mengandung brokerName
+                    for (var i = 0; i < labels.length; i++) {{
+                        var clean = String(labels[i]).replace(/\\s*\\([^)]*\\)/g, '')
+                            .replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '')
+                            .replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
+                        if (clean === brokerName || String(labels[i]).indexOf(brokerName) !== -1) {{
+                            activeNodes[i] = true;
+                            found = true;
                         }}
                     }}
-                    rebuild(activeLinks, connectedNodes);
-                }}
+                    if (!found) return;
 
-                function highlightLink(linkIdx) {{
-                    var s = sources[linkIdx];
-                    var t = targets[linkIdx];
-                    var activeLinks = {{}};
-                    var connectedNodes = {{}};
-                    connectedNodes[s] = true;
-                    connectedNodes[t] = true;
-
-                    for (var i = 0; i < nLinks; i++) {{
-                        if (sources[i] === s || targets[i] === s ||
-                            sources[i] === t || targets[i] === t) {{
-                            activeLinks[i] = true;
-                            connectedNodes[sources[i]] = true;
-                            connectedNodes[targets[i]] = true;
+                    // Aktifkan link yang nyentuh node aktif
+                    for (var j = 0; j < sources.length; j++) {{
+                        if (activeNodes[sources[j]] || activeNodes[targets[j]]) {{
+                            activeLinks[j] = true;
+                            activeNodes[sources[j]] = true;
+                            activeNodes[targets[j]] = true;
                         }}
                     }}
-                    rebuild(activeLinks, connectedNodes);
+                    Plotly.react(gd, [buildTrace({{nodes: activeNodes, links: activeLinks}})],
+                        LAYOUT, config);
+                    currentHighlight = brokerName;
+
+                    // Update chip style
+                    document.querySelectorAll('.chip').forEach(function(c) {{
+                        if (c.getAttribute('data-broker') === brokerName) {{
+                            c.classList.add('active');
+                        }} else {{
+                            c.classList.remove('active');
+                        }}
+                    }});
+
+                    if (navigator.vibrate) {{
+                        try {{ navigator.vibrate(8); }} catch(e) {{}}
+                    }}
                 }}
 
                 function resetAll() {{
-                    Plotly.react(
-                        gd,
-                        [JSON.parse(JSON.stringify(ORIGINAL_TRACE))],
-                        ORIGINAL_LAYOUT,
-                        config
-                    );
+                    Plotly.react(gd, [JSON.parse(JSON.stringify(ORIG))],
+                        LAYOUT, config);
+                    currentHighlight = null;
+                    document.querySelectorAll('.chip').forEach(function(c) {{
+                        c.classList.remove('active');
+                    }});
+                    if (navigator.vibrate) {{
+                        try {{ navigator.vibrate(8); }} catch(e) {{}}
+                    }}
                 }}
 
-                // ── Initial render ──
-                Plotly.newPlot(gd, [ORIGINAL_TRACE], ORIGINAL_LAYOUT, config).then(function() {{
+                // Initial render
+                Plotly.newPlot(gd, [ORIG], LAYOUT, config).then(function() {{
+                    // Attach chip listeners
+                    document.querySelectorAll('.chip').forEach(function(c) {{
+                        c.addEventListener('click', function() {{
+                            var br = c.getAttribute('data-broker');
+                            if (currentHighlight === br) {{
+                                resetAll();
+                            }} else {{
+                                highlightBroker(br);
+                            }}
+                        }});
+                    }});
 
-                    // Pakai event delegation — tahan terhadap Plotly.react
+                    // Reset button
+                    document.getElementById('reset').addEventListener('click', resetAll);
+
+                    // Native Sankey click (best-effort)
                     gd.on('plotly_click', function(data) {{
-                        if (!data || !data.points || data.points.length === 0) return;
+                        if (!data || !data.points || !data.points.length) return;
                         var pt = data.points[0];
-
-                        console.log('[Sankey click]', pt.pointType, pt.pointNumber);
-
                         if (pt.pointType === 'node' && typeof pt.pointNumber === 'number') {{
-                            highlightNode(pt.pointNumber);
-                            if (navigator.vibrate) {{
-                                try {{ navigator.vibrate(8); }} catch(e) {{}}
-                            }}
-                        }} else if (pt.pointType === 'link' && typeof pt.pointNumber === 'number') {{
-                            highlightLink(pt.pointNumber);
-                            if (navigator.vibrate) {{
-                                try {{ navigator.vibrate(8); }} catch(e) {{}}
-                            }}
+                            var nodeLabel = String(labels[pt.pointNumber] || '');
+                            var clean = nodeLabel.replace(/\\s*\\([^)]*\\)/g, '')
+                                .replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '')
+                                .replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
+                            if (clean) highlightBroker(clean);
                         }}
-                    }});
-
-                    document.getElementById('reset-btn').addEventListener('click', function(e) {{
-                        e.stopPropagation();
-                        resetAll();
-                        if (navigator.vibrate) {{
-                            try {{ navigator.vibrate(8); }} catch(err) {{}}
-                        }}
-                    }});
-
-                    window.addEventListener('resize', function() {{
-                        Plotly.Plots.resize(gd);
                     }});
                 }});
             }})();
@@ -578,7 +562,7 @@ def render_sankey_interactive(fig, height=520):
     </body>
     </html>
     """
-    components.html(html, height=height + 40, scrolling=False)
+    components.html(html, height=height + 100, scrolling=False)
 # ====================== FALLBACK HANDLERS ======================
 PIL_AVAILABLE = True
 try:
