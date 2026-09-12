@@ -540,7 +540,18 @@ def render_sankey_interactive(fig, height=520):
                     t.node.color = origNodeColors.map(function(c, i) {{
                         return activeNodes[i] ? c : GRAY_N;
                     }});
-                    // link.color dibiarkan dari Python — kalau gradient gagal, tetap berwarna
+                    // ▼ FIX: Set warna link LANGSUNG di trace — fallback solid
+                    if (activeLinksMap) {{
+                        t.link.color = [];
+                        for (var i = 0; i < sources.length; i++) {{
+                            if (activeLinksMap[i]) {{
+                                t.link.color.push(origLinkColors[i] || 'rgba(148,163,184,0.55)');
+                            }} else {{
+                                t.link.color.push('rgba(100, 116, 139, 0.06)');
+                            }}
+                        }}
+                    }}
+                    // kalau activeLinksMap null → pakai warna asli dari Python (semua warna)
                     t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
                     return t;
                 }}
