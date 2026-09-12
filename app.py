@@ -25,90 +25,242 @@ import streamlit.components.v1 as components
 # ═══════════════════════════════════════════════════════════════
 # REALTIME PLOTLY HELPER
 # ═══════════════════════════════════════════════════════════════
-def render_plotly_realtime(fig, height=420):
+def render_plotly_realtime(fig, height=420, haptic=True):
     """
-    Embed Plotly.js chart client-side untuk realtime tap-drag di mobile.
-    - Realtime hover cursor mengikuti jari
-    - Info panel di bawah chart update live
-    - Touch vertical = scroll halaman, horizontal = gerak spike
+    Embed Plotly.js ala Stockbit:
+    - Tap + geser = vline + tooltip follow jari realtime (smooth)
+    - Haptic vibration tiap index berubah (Android only)
+    - Auto-hide setelah 2.5 detik idle
     """
     if fig is None:
         return
 
     fig_json = fig.to_json()
+    haptic_js = "true" if haptic else "false"
 
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
         <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
         <style>
             html, body {{
                 margin: 0; padding: 0;
                 background: #0f1116;
-                font-family: 'Courier New', monospace;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                overflow: hidden;
             }}
-            #chart {{ width: 100%; height: {height}px; }}
-            #info {{
-                padding: 8px 14px;
-                background: #1e293b;
-                color: #cbd5e1;
-                font-size: 12px;
-                border-radius: 6px;
-                margin: 4px 4px 6px 4px;
-                min-height: 20px;
+            #wrapper {{
+                position: relative;
+                width: 100%;
+                height: {height}px;
+            }}
+            #chart {{
+                width: 100%;
+                height: {height}px;
+                touch-action: pan-y;
+            }}
+            #tooltip {{
+                position: absolute;
+                top: 8px;
+                left: 8px;
+                background: rgba(30, 41, 59, 0.96);
+                color: #e2e8f0;
+                padding: 8px 12px;
+                border-radius: 8px;
+                font-size: 11px;
                 line-height: 1.5;
+                pointer-events: none;
+                display: none;
+                z-index: 999;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                 border-left: 3px solid #a855f7;
+                max-width: 68%;
             }}
-            #info b {{ color: #a855f7; }}
+            #tooltip b {{ color: #a855f7; font-size: 12px; }}
+            #tooltip .row {{ margin-top: 3px; display: flex; align-items: center; }}
+            #tooltip .dot {{
+                display: inline-block;
+                width: 7px; height: 7px;
+                border-radius: 50%;
+                margin-right: 6px;
+                flex-shrink: 0;
+            }}
         </style>
     </head>
     <body>
-        <div id="chart"></div>
-        <div id="info">📱 <b>Tap &amp; geser</b> di chart untuk lihat nilai realtime</div>
+        <div id="wrapper">
+            <div id="chart"></div>
+            <div id="tooltip"></div>
+        </div>
         <script>
-            var figData = {fig_json};
-            var config = {{
-                displayModeBar: false,
-                responsive: true,
-                scrollZoom: false,
-                displaylogo: false
-            }};
+            (function() {{
+                var figData = {fig_json};
+                var HAPTIC = {haptic_js};
 
-            Plotly.newPlot('chart', figData.data, figData.layout, config).then(function(gd) {{
-                // Kunci: touch-action pan-y = vertical scroll lewat, horizontal drag ditangkap chart
-                var plotlyDiv = gd.querySelector('.plotly');
-                if (plotlyDiv) {{
-                    plotlyDiv.style.touchAction = 'pan-y';
+                // Matikan hover native Plotly supaya tidak dobel dgn tooltip kita
+                if (figData.layout) {{
+                    figData.layout.hovermode = false;
                 }}
 
-                // Realtime hover update info panel
-                gd.on('plotly_hover', function(evt) {{
-                    if (!evt.points || evt.points.length === 0) return;
-                    var xVal = evt.points[0].x;
-                    var lines = ['📍 <b>' + xVal + '</b>'];
-                    evt.points.forEach(function(pt) {{
-                        var name = pt.data.name || '';
-                        var val = pt.y;
-                        if (typeof val === 'number' && !isNaN(val)) {{
-                            var formatted = val.toLocaleString('id-ID', {{ maximumFractionDigits: 0 }});
-                            lines.push(name + ': ' + formatted);
-                        }}
-                    }});
-                    document.getElementById('info').innerHTML = lines.join(' &nbsp;|&nbsp; ');
+                var config = {{
+                    displayModeBar: false,
+                    responsive: true,
+                    scrollZoom: false,
+                    displaylogo: false
+                }};
+
+                var gd = document.getElementById('chart');
+                var tooltip = document.getElementById('tooltip');
+                var wrapper = document.getElementById('wrapper');
+
+                var TRACE_COLORS = figData.data.map(function(t) {{
+                    return (t.line && t.line.color) ||
+                           (t.marker && t.marker.color) || '#a855f7';
                 }});
 
-                // Resize handler
-                window.addEventListener('resize', function() {{
-                    Plotly.Plots.resize('chart');
+                Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
+                    // Tambah vline sebagai shape terakhir
+                    var baseShapes = (gd.layout.shapes || []).slice();
+                    baseShapes.push({{
+                        type: 'line',
+                        xref: 'x', x0: 0, x1: 0,
+                        yref: 'paper', y0: 0, y1: 1,
+                        line: {{ color: '#a855f7', width: 2, dash: 'dash' }},
+                        opacity: 0
+                    }});
+                    Plotly.relayout(gd, {{ shapes: baseShapes }});
+                    var V_IDX = baseShapes.length - 1;
+
+                    var xValues = figData.data[0].x || [];
+                    var yPerTrace = figData.data.map(function(t) {{ return t.y || []; }});
+                    var lastIdx = -1;
+                    var rafPending = false;
+                    var pendingX = null;
+                    var active = false;
+                    var hideTimer = null;
+
+                    function vibrate() {{
+                        if (!HAPTIC) return;
+                        if (navigator.vibrate) {{
+                            try {{ navigator.vibrate(6); }} catch(e) {{}}
+                        }}
+                    }}
+
+                    function toIndex(clientX) {{
+                        var rect = gd.getBoundingClientRect();
+                        var px = clientX - rect.left;
+                        var xa = gd._fullLayout.xaxis;
+                        var dataX = xa.p2d(px);
+                        var idx = Math.round(dataX);
+                        if (idx < 0) idx = 0;
+                        if (idx >= xValues.length) idx = xValues.length - 1;
+                        return {{ idx: idx, px: px, rect: rect }};
+                    }}
+
+                    function draw(clientX) {{
+                        var r = toIndex(clientX);
+                        var idx = r.idx;
+                        var xVal = xValues[idx];
+
+                        var upd = {{}};
+                        upd['shapes[' + V_IDX + '].x0'] = xVal;
+                        upd['shapes[' + V_IDX + '].x1'] = xVal;
+                        upd['shapes[' + V_IDX + '].opacity'] = 1;
+                        Plotly.relayout(gd, upd);
+
+                        var lines = ['<b>' + xVal + '</b>'];
+                        for (var i = 0; i < yPerTrace.length; i++) {{
+                            var yv = yPerTrace[i][idx];
+                            if (typeof yv === 'number' && !isNaN(yv)) {{
+                                var nm = figData.data[i].name || '';
+                                var cl = TRACE_COLORS[i];
+                                var fv = yv.toLocaleString('id-ID', {{ maximumFractionDigits: 0 }});
+                                lines.push(
+                                    '<div class="row"><span class="dot" style="background:' +
+                                    cl + '"></span>' + nm + ': ' + fv + '</div>'
+                                );
+                            }}
+                        }}
+                        tooltip.innerHTML = lines.join('');
+                        tooltip.style.display = 'block';
+
+                        var tw = tooltip.offsetWidth || 140;
+                        var left = r.px + 14;
+                        if (left + tw > r.rect.width - 4) {{
+                            left = r.px - tw - 14;
+                        }}
+                        if (left < 4) left = 4;
+                        tooltip.style.left = left + 'px';
+
+                        if (idx !== lastIdx) {{
+                            vibrate();
+                            lastIdx = idx;
+                        }}
+
+                        // Auto-hide timer
+                        if (hideTimer) clearTimeout(hideTimer);
+                        hideTimer = setTimeout(function() {{
+                            tooltip.style.display = 'none';
+                            var u = {{}};
+                            u['shapes[' + V_IDX + '].opacity'] = 0;
+                            Plotly.relayout(gd, u);
+                        }}, 2500);
+                    }}
+
+                    function throttled(clientX) {{
+                        pendingX = clientX;
+                        if (!rafPending) {{
+                            rafPending = true;
+                            requestAnimationFrame(function() {{
+                                rafPending = false;
+                                if (pendingX !== null) {{
+                                    draw(pendingX);
+                                    pendingX = null;
+                                }}
+                            }});
+                        }}
+                    }}
+
+                    gd.addEventListener('touchstart', function(e) {{
+                        active = true;
+                        lastIdx = -1;
+                        if (hideTimer) clearTimeout(hideTimer);
+                        draw(e.touches[0].clientX);
+                    }}, {{ passive: true }});
+
+                    gd.addEventListener('touchmove', function(e) {{
+                        if (!active) return;
+                        throttled(e.touches[0].clientX);
+                    }}, {{ passive: true }});
+
+                    gd.addEventListener('touchend', function() {{
+                        active = false;
+                    }}, {{ passive: true }});
+
+                    gd.addEventListener('touchcancel', function() {{
+                        active = false;
+                    }}, {{ passive: true }});
+
+                    // Mouse (desktop) — biar bisa hover juga
+                    gd.addEventListener('mousemove', function(e) {{
+                        if (e.buttons === 0) {{
+                            if (hideTimer) clearTimeout(hideTimer);
+                            throttled(e.clientX);
+                        }}
+                    }});
+
+                    window.addEventListener('resize', function() {{
+                        Plotly.Plots.resize(gd);
+                    }});
                 }});
-            }});
+            }})();
         </script>
     </body>
     </html>
     """
-    components.html(html, height=height + 60, scrolling=False)
+    components.html(html, height=height + 10, scrolling=False)
 # ====================== FALLBACK HANDLERS ======================
 PIL_AVAILABLE = True
 try:
