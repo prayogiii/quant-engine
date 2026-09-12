@@ -358,9 +358,9 @@ def render_plotly_realtime(fig, height=420, haptic=True):
 def render_sankey_interactive(fig, height=520):
     """
     Embed Sankey dengan interaksi ala Stockbit:
-    - Tap node broker → node itu + semua koneksinya tetap warna
-    - Node & link lain jadi abu-abu
-    - Tombol Reset untuk kembalikan normal
+    - Tap node → node + link + LABEL-nya tetap warna, sisanya abu-abu
+    - Label text juga ikut gray out (bukan cuma bar-nya)
+    - Tap ↻ Reset untuk kembalikan normal
     """
     if fig is None:
         return
@@ -385,7 +385,7 @@ def render_sankey_interactive(fig, height=520):
                 text-align: center;
                 color: #64748b;
                 font-size: 11px;
-                padding: 4px 10px 8px 10px;
+                padding: 4px 10px 10px 10px;
                 background: #0f1116;
             }}
             #reset-btn {{
@@ -424,14 +424,34 @@ def render_sankey_interactive(fig, height=520):
                 // Simpan warna asli
                 var origNodeColors = (trace.node.color || []).slice();
                 var origLinkColors = (trace.link.color || []).slice();
+                var origLabelColors = ((trace.node.textfont && trace.node.textfont.color) || []).slice();
+                var origLabels = (trace.node.label || []).slice();
                 var sources = (trace.link.source || []).slice();
                 var targets = (trace.link.target || []).slice();
 
+                // Kalau textfont.color bukan array (cuma 1 warna), expand jadi array
+                if (origLabelColors.length !== origNodeColors.length) {{
+                    var single = origLabelColors[0] || '#f3f4f6';
+                    origLabelColors = origNodeColors.map(function() {{ return single; }});
+                }}
+
                 // Warna abu-abu untuk element non-aktif
-                var GRAY_NODE = 'rgba(100, 116, 139, 0.30)';
-                var GRAY_LINK = 'rgba(100, 116, 139, 0.08)';
+                var GRAY_NODE = 'rgba(100, 116, 139, 0.25)';
+                var GRAY_LINK = 'rgba(100, 116, 139, 0.06)';
+                var GRAY_TEXT = 'rgba(100, 116, 139, 0.50)';
 
                 Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
+
+                    function buildGrayLabels(connectedNodes) {{
+                        // Gray out label text: prefix HTML tidak bisa, tapi Plotly
+                        // Sankey label mendukung tag <span> internal via array warna text.
+                        // Trik: label non-aktif dibungkus format yang lebih pudar
+                        return origLabels.map(function(lbl, i) {{
+                            if (connectedNodes[i]) return lbl;
+                            // Ganti isi label jadi versi yang sama (warna text diatur textfont.color)
+                            return lbl;
+                        }});
+                    }}
 
                     function applyHighlight(activeLinks, connectedNodes) {{
                         var newLinkColors = origLinkColors.map(function(c, i) {{
@@ -440,9 +460,15 @@ def render_sankey_interactive(fig, height=520):
                         var newNodeColors = origNodeColors.map(function(c, i) {{
                             return connectedNodes[i] ? c : GRAY_NODE;
                         }});
+                        var newTextColors = origLabelColors.map(function(c, i) {{
+                            return connectedNodes[i] ? c : GRAY_TEXT;
+                        }});
+
+                        // ── Update semuanya sekaligus (link, node bar, label text) ──
                         Plotly.restyle(gd, {{
                             'link.color': [newLinkColors],
-                            'node.color': [newNodeColors]
+                            'node.color': [newNodeColors],
+                            'node.textfont.color': [newTextColors]
                         }});
                     }}
 
@@ -484,7 +510,8 @@ def render_sankey_interactive(fig, height=520):
                     function resetAll() {{
                         Plotly.restyle(gd, {{
                             'link.color': [origLinkColors],
-                            'node.color': [origNodeColors]
+                            'node.color': [origNodeColors],
+                            'node.textfont.color': [origLabelColors]
                         }});
                     }}
 
@@ -494,10 +521,16 @@ def render_sankey_interactive(fig, height=520):
 
                         if (pt.pointType === 'node' && pt.pointNumber !== undefined) {{
                             highlightNode(pt.pointNumber);
+                            if (navigator.vibrate) {{
+                                try {{ navigator.vibrate(8); }} catch(e) {{}}
+                            }}
                         }} else if (pt.pointType === 'link' && pt.pointNumber !== undefined) {{
                             var s = sources[pt.pointNumber];
                             var t = targets[pt.pointNumber];
                             highlightLinkPair(s, t);
+                            if (navigator.vibrate) {{
+                                try {{ navigator.vibrate(8); }} catch(e) {{}}
+                            }}
                         }}
                     }});
 
