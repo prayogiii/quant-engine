@@ -447,10 +447,48 @@ def render_sankey_interactive(fig, height=520):
                 var targets = ORIG.link.target || [];
                 var origNodeColors = [].concat(ORIG.node.color || []);
 
-                // Normalisasi node colors jadi array penuh
-                if (origNodeColors.length < labels.length) {{
-                    var base = origNodeColors[0] || '#a855f7';
-                    origNodeColors = labels.map(function(){{ return base; }});
+                // Simpan original labels & values untuk rebuild dinamis
+                var origNodeLabels = [].concat(ORIG.node.label || []);
+                var origLinkValues = [].concat(ORIG.link.value || []);
+
+                // Format value untuk label (auto-scale)
+                function fmtFlow(v) {{
+                    if (v >= 1e12) return (v/1e12).toFixed(2) + ' T';
+                    if (v >= 1e9) return (v/1e9).toFixed(2) + ' B';
+                    if (v >= 1e6) return (v/1e6).toFixed(2) + ' M';
+                    if (v >= 1e3) return Math.round(v).toLocaleString('id-ID');
+                    return Math.round(v).toString();
+                }}
+
+                // Bangun label dinamis: node aktif = total flow aktif, non-aktif = code saja
+                function buildDynamicLabels(activeNodes, activeLinksMap) {{
+                    if (!activeLinksMap) return origNodeLabels.slice();
+
+                    // Hitung flow per node dari link aktif
+                    var flowPerNode = {{}};
+                    for (var i = 0; i < labels.length; i++) flowPerNode[i] = 0;
+
+                    for (var j = 0; j < sources.length; j++) {{
+                        if (!activeLinksMap[j]) continue;
+                        var v = origLinkValues[j] || 0;
+                        flowPerNode[sources[j]] += v;
+                        flowPerNode[targets[j]] += v;
+                    }}
+
+                    // Rebuild label
+                    var out = [];
+                    for (var k = 0; k < labels.length; k++) {{
+                        // Ambil broker code dari label asli (karakter A-Z di depan)
+                        var codeMatch = String(origNodeLabels[k]).match(/^([A-Z]{{2,4}})/);
+                        var code = codeMatch ? codeMatch[1] : String(origNodeLabels[k]).split(' ')[0];
+
+                        if (activeNodes[k]) {{
+                            out.push(code + ' (' + fmtFlow(flowPerNode[k]) + ')');
+                        }} else {{
+                            out.push(code);
+                        }}
+                    }}
+                    return out;
                 }}
 
                 var GRAY_N = 'rgba(100,116,139,0.20)';
@@ -546,20 +584,21 @@ def render_sankey_interactive(fig, height=520):
                     }}
                 }}
 
-                function buildTrace(activeNodes) {{
+                    function buildTrace(activeNodes, activeLinksMap) {{
                     var t = JSON.parse(JSON.stringify(ORIG));
                     t.node.color = origNodeColors.map(function(c, i) {{
                         return activeNodes[i] ? c : GRAY_N;
                     }});
-                    // Placeholder abu tipis — biar kalau gradient gagal, tidak kelihatan putih
                     t.link.color = sources.map(function() {{
                         return 'rgba(148,163,184,0.20)';
                     }});
+                    // ▼ Label dinamis: node aktif = flow ke broker terpilih
+                    t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
                     return t;
                 }}
 
-                function renderWithGradients(activeNodes, activeLinksMap) {{
-                    var t = buildTrace(activeNodes);
+                    function renderWithGradients(activeNodes, activeLinksMap) {{
+                    var t = buildTrace(activeNodes, activeLinksMap);  // ← tambah arg
                     return Plotly.react(gd, [t], LAYOUT, config).then(function() {{
                         return new Promise(function(resolve) {{
                             requestAnimationFrame(function() {{
@@ -3166,13 +3205,17 @@ def build_broker_sankey(data):
     labels = [f"{b['broker']} ({fmt(b['volume_lot'])})" for b in buyers] + \
              [f"{s['broker']} ({fmt(s['volume_lot'])})" for s in sellers]
 
-    fig = go.Figure(data=[go.Sankey(
+        fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
+        hoverinfo="none",        # ← matikan hover gray-out
         node=dict(
             pad=16, thickness=12, line=dict(color="#121212", width=1),
-            label=labels, color=node_colors,
+            label=labels_vol, color=node_colors,
+            hoverinfo="none",    # ← matikan hover per node
         ),
-        link=dict(source=sources, target=targets, value=values, color=link_colors)
+        link=dict(source=sources, target=targets,
+                  value=vol_values, color=link_colors,
+                  hoverinfo="none")  # ← matikan hover per link
     )])
     fig.update_layout(
         template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
