@@ -3341,8 +3341,8 @@ def build_broker_flow_chart(data):
         return cum / final * target
 
     # Buyer flows
-    for idx, s in enumerate(sellers):
-        flow_cum = -_calc_flow_cum(s['category'], s['volume_lot'])
+    for idx, b in enumerate(buyers):
+        flow_cum = _calc_flow_cum(b['category'], b['volume_lot'], b['broker'])
         label = get_broker_label(b['broker'])
         fig.add_trace(go.Scatter(
             x=df['time'], y=flow_cum, mode="lines", name=f"Accum {label}",
@@ -3352,7 +3352,7 @@ def build_broker_flow_chart(data):
 
     # Seller flows
     for idx, s in enumerate(sellers):
-        flow_cum = -_calc_flow_cum(s['category'], s['volume_lot'])
+        flow_cum = -_calc_flow_cum(s['category'], s['volume_lot'], s['broker'])
         label = get_broker_label(s['broker'])
         fig.add_trace(go.Scatter(
             x=df['time'], y=flow_cum, mode="lines", name=f"Dist {label}",
