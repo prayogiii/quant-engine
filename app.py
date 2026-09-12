@@ -305,8 +305,15 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     </body>
     </html>
     """
-    # Iframe lebih tinggi karena ada legend di bawah (~45px)
-    components.html(html, height=height + 55, scrolling=False)
+        # ── Hitung tinggi iframe dinamis ──
+    # Legend HTML bisa wrap ke beberapa baris tergantung jumlah trace & lebar layar
+    # Di iOS (layar sempit) worst case ~2-3 item per baris
+    n_traces = len(fig.data)
+    legend_rows = max(2, (n_traces + 2) // 3)   # ceil(n/3), min 2 baris
+    legend_h = legend_rows * 28 + 20            # ~28px per baris + padding
+    iframe_h = height + legend_h + 10           # +10 buffer iOS safe area
+
+    components.html(html, height=iframe_h, scrolling=False)
 # ====================== FALLBACK HANDLERS ======================
 PIL_AVAILABLE = True
 try:
