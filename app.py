@@ -3161,46 +3161,132 @@ def build_foreign_flow_chart(data):
 
 # ---------- CHART 4: BROKER DISTRIBUTION (SANKEY) ----------
 def build_broker_sankey(data):
-    """Broker Distribution Sankey – buyer → seller."""
+    """Broker Distribution Sankey – buyer → seller, dengan payload Value + Volume."""
     if not data:
         return None
-    buyers = data['buyers'][:8]
-    sellers = data['sellers'][:8]
+
+    buyers = data.get('buyers', [])[:8]
+    sellers = data.get('sellers', [])[:8]
     if not buyers and not sellers:
         return None
 
-    total_buy = sum(b['volume_lot'] for b in buyers)
-    total_sell = sum(s['volume_lot'] for s in sellers)
+    # ═══════════════════════════════════════════════════════
+    # HELPER: Harga per lembar & nilai Rupiah
+    # ═══════════════════════════════════════════════════════
+    def _ppl(item):
+        """Harga per lembar (price per lot / 100)."""
+        try:
+            v = float(item.get('value_idr', 0) or 0)
+            vol = float(item.get('volume_lot', 0) or 0)
+            if v > 0 and vol > 0:
+                return v / (vol * 100)
+            ap = float(item.get('avg_price', 0) or 0)
+            if ap > 0:
+                return ap
+        except Exception:
+            pass
+        return 0.0
 
-    buyer_nodes = [f"{b['broker']} (Buy)" for b in buyers]
-    seller_nodes = [f"{s['broker']} (Sell)" for s in sellers]
+    def _val(item, fallback_price=1000.0):
+        """Nilai Rupiah total."""
+        try:
+            v = float(item.get('value_idr', 0) or 0)
+            if v > 0:
+                return v
+            vol = float(item.get('volume_lot', 0) or 0)
+            p = _ppl(item)
+            if p <= 0:
+                p = fallback_price
+            return vol * 100 * p
+        except Exception:
+            return 0.0
+
+    # ═══════════════════════════════════════════════════════
+    # HITUNG HARGA GLOBAL (fallback)
+    # ═══════════════════════════════════════════════════════
+    all_prices = []
+    for it in (buyers + sellers):
+        p = _ppl(it)
+        if p > 0:
+            all_prices.append(p)
+    global_price = (sum(all_prices) / len(all_prices)) if all_prices else 1000.0
+
+    # ═══════════════════════════════════════════════════════
+    # TOTAL BUY / SELL
+    # ═══════════════════════════════════════════════════════
+    total_buy = sum(float(b.get('volume_lot', 0) or 0) for b in buyers)
+    total_sell = sum(float(s.get('volume_lot', 0) or 0) for s in sellers)
+
+    # ═══════════════════════════════════════════════════════
+    # BUILD NODES
+    # ═══════════════════════════════════════════════════════
+    buyer_nodes = [f"{b.get('broker', '??')} (Buy)" for b in buyers]
+    seller_nodes = [f"{s.get('broker', '??')} (Sell)" for s in sellers]
     node_idx = {n: i for i, n in enumerate(buyer_nodes + seller_nodes)}
 
-    sources, targets, values, link_colors = [], [], [], []
-    category_rgb = {"Domestic": "168, 85, 247",
-                    "BUMN": "16, 185, 129",
-                    "Foreign": "239, 68, 68"}
+    # ═══════════════════════════════════════════════════════
+    # BUILD LINKS
+    # ═══════════════════════════════════════════════════════
+    sources = []
+    targets = []
+    vol_values = []
+    val_values = []
+    link_colors = []
+
+    category_rgb = {
+        "Domestic": "168, 85, 247",
+        "BUMN": "16, 185, 129",
+        "Foreign": "239, 68, 68"
+    }
 
     for b in buyers:
+        bv = float(b.get('volume_lot', 0) or 0)
+        if bv <= 0:
+            continue
+        b_ppl = _val(b, global_price) / bv if bv > 0 else 0.0
+
         for s in sellers:
-            if total_buy > 0 and total_sell > 0:
-                flow = min(b['volume_lot'] * s['volume_lot'] / total_buy,
-                           b['volume_lot'] * s['volume_lot'] / total_sell)
-            else:
-                flow = 0
-            if flow <= 0:
+            sv = float(s.get('volume_lot', 0) or 0)
+            if sv <= 0:
                 continue
-            sources.append(node_idx[f"{b['broker']} (Buy)"])
-            targets.append(node_idx[f"{s['broker']} (Sell)"])
-            values.append(flow)
-            rgb = category_rgb.get(b['category'], "148, 163, 184")
+
+            # Distribusi flow proporsional (min dari 2 rasio)
+            if total_buy > 0 and total_sell > 0:
+                flow_vol = min(bv * sv / total_buy, bv * sv / total_sell)
+            else:
+                flow_vol = 0.0
+
+            if flow_vol <= 0:
+                continue
+
+            s_ppl = _val(s, global_price) / sv if sv > 0 else 0.0
+
+            if b_ppl > 0 and s_ppl > 0:
+                avg_ppl = (b_ppl + s_ppl) / 2
+            elif b_ppl > 0:
+                avg_ppl = b_ppl
+            elif s_ppl > 0:
+                avg_ppl = s_ppl
+            else:
+                avg_ppl = global_price * 100
+
+            flow_val = flow_vol * avg_ppl
+
+            sources.append(node_idx[f"{b.get('broker', '??')} (Buy)"])
+            targets.append(node_idx[f"{s.get('broker', '??')} (Sell)"])
+            vol_values.append(flow_vol)
+            val_values.append(flow_val)
+
+            rgb = category_rgb.get(b.get('category', 'Domestic'), "148, 163, 184")
             link_colors.append(f"rgba({rgb}, 0.35)")
 
-    if not values:
+    if not vol_values:
         return None
 
-    # ── Formatter inline (tanpa def function — hindari scope issue) ──
-    def _fv(v):
+    # ═══════════════════════════════════════════════════════
+    # FORMATTER
+    # ═══════════════════════════════════════════════════════
+    def _fmt_vol(v):
         try:
             v = float(v)
         except Exception:
@@ -3209,54 +3295,95 @@ def build_broker_sankey(data):
             return f"{v/1e6:,.2f}M"
         return f"{v:,.0f}"
 
-    def _fval(v):
+    def _fmt_val(v):
         try:
             v = float(v)
         except Exception:
             return "0"
-        if v >= 1e12: return f"{v/1e12:.2f} T"
-        if v >= 1e9:  return f"{v/1e9:.2f} B"
-        if v >= 1e6:  return f"{v/1e6:,.0f} M"
-        if v >= 1e3:  return f"{v/1e3:,.0f} K"
+        if v >= 1e12:
+            return f"{v/1e12:.2f}T"
+        if v >= 1e9:
+            return f"{v/1e9:.2f}B"
+        if v >= 1e6:
+            return f"{v/1e6:,.0f}M"
+        if v >= 1e3:
+            return f"{v/1e3:,.0f}K"
         return f"{v:,.0f}"
 
+    # ═══════════════════════════════════════════════════════
+    # BUILD LABELS & COLORS
+    # ═══════════════════════════════════════════════════════
     labels_vol = []
     for b in buyers:
-        labels_vol.append(f"{b['broker']} ({_fv(b['volume_lot'])})")
+        labels_vol.append(f"{b.get('broker', '??')} ({_fmt_vol(b.get('volume_lot', 0))})")
     for s in sellers:
-        labels_vol.append(f"{s['broker']} ({_fv(s['volume_lot'])})")
+        labels_vol.append(f"{s.get('broker', '??')} ({_fmt_vol(s.get('volume_lot', 0))})")
 
     labels_val = []
     for b in buyers:
-        labels_val.append(f"{b['broker']} ({_fval(_value_of(b))})")
+        labels_val.append(f"{b.get('broker', '??')} ({_fmt_val(_val(b, global_price))})")
     for s in sellers:
-        labels_val.append(f"{s['broker']} ({_fval(_value_of(s))})")
+        labels_val.append(f"{s.get('broker', '??')} ({_fmt_val(_val(s, global_price))})")
 
-    cat_hex = {"Domestic": "#a855f7", "BUMN": "#10b981", "Foreign": "#ef4444"}
+    cat_hex = {
+        "Domestic": "#a855f7",
+        "BUMN": "#10b981",
+        "Foreign": "#ef4444"
+    }
     node_colors = []
     for b in buyers:
-        node_colors.append(cat_hex.get(b['category'], "#94a3b8"))
+        node_colors.append(cat_hex.get(b.get('category', 'Domestic'), "#94a3b8"))
     for s in sellers:
-        node_colors.append(cat_hex.get(s['category'], "#94a3b8"))
+        node_colors.append(cat_hex.get(s.get('category', 'Domestic'), "#94a3b8"))
 
+    # ═══════════════════════════════════════════════════════
+    # BUILD FIGURE
+    # ═══════════════════════════════════════════════════════
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
         node=dict(
-            pad=16, thickness=12, line=dict(color="#121212", width=1),
-            label=labels_vol, color=node_colors,
+            pad=16,
+            thickness=12,
+            line=dict(color="#121212", width=1),
+            label=labels_vol,
+            color=node_colors,
         ),
-        link=dict(source=sources, target=targets,
-                  value=vol_values, color=link_colors)
+        link=dict(
+            source=sources,
+            target=targets,
+            value=vol_values,
+            color=link_colors
+        )
     )])
+
     fig.update_layout(
-        template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=450, margin=dict(l=5, r=5, t=40, b=5),
-        hovermode=False,                    # ← tambah ini
-        title=dict(text=f"Broker Distribution – {data['ticker']}",
-                   font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
+        template="plotly_dark",
+        paper_bgcolor="#0f1116",
+        plot_bgcolor="#0f1116",
+        height=450,
+        margin=dict(l=5, r=5, t=40, b=5),
+        hovermode=False,
+        title=dict(
+            text=f"Broker Distribution – {data.get('ticker', '?')}",
+            font=dict(size=13, color='#e0e0e0'),
+            x=0.01,
+            xanchor='left'
+        ),
         font=dict(size=11, color="#94a3b8"),
-        meta={...}                          # tetap
+        meta={
+            'mode_toggle': {
+                'volume': {
+                    'link_values': vol_values,
+                    'node_labels': labels_vol,
+                },
+                'value': {
+                    'link_values': val_values,
+                    'node_labels': labels_val,
+                }
+            }
+        }
     )
+
     return fig
 
 
