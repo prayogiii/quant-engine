@@ -3097,7 +3097,7 @@ def display_bandarmology_tab(ticker):
     # ═══════════════════════════════════════════════
     # CHART 4: SANKEY (TIDAK PAKAI EMBED)
     # ═══════════════════════════════════════════════
-        st.markdown("#### 4. Broker Distribution (Sankey)")
+    st.markdown("#### 4. Broker Distribution (Sankey)")
     fig4 = build_broker_sankey(data)
     if fig4:
         render_sankey_interactive(fig4, height=520)
