@@ -357,22 +357,24 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     components.html(html, height=iframe_h, scrolling=False)
 def render_sankey_interactive(fig, height=520):
     """
-    Sankey interaktif lengkap:
-    - Chip broker untuk highlight (strict match, no cascade)
+    Sankey interaktif:
+    - Chip per-node (YP-B / YP-S kalau broker muncul di kedua sisi)
+    - Tap chip buyer → aktifkan link dari buyer ke semua seller
+    - Tap chip seller → aktifkan link dari semua buyer ke seller
+    - Seller/buyer yang jadi counterpart: tetap warna sesuai kategori
+    - Label counterpart: tampilkan flow dari/ke node yang di-highlight
     - Toggle Volume / Value
-    - Gradient link (source color → target color)
-    - Dynamic label (flow per broker saat highlight)
-    - Hover disabled
-    - Haptic feedback (Android)
+    - Gradient link
     """
     if fig is None:
         return
 
-    # ── Extract chip labels dari node labels ──
     try:
         labels = list(fig.data[0].node.label or [])
+        n_buyers = int(fig.layout.meta.get('n_buyers', 0)) if fig.layout.meta else 0
     except Exception:
         labels = []
+        n_buyers = 0
 
     import re as _re
 
@@ -382,21 +384,28 @@ def render_sankey_interactive(fig, height=520):
         s = _re.sub(r'\s*[\d\.,]+\s*[MBK]?$', '', s).strip()
         return s
 
-    chip_labels = []
-    seen = set()
+    # ── Hitung berapa kali tiap broker muncul (untuk tentukan suffix B/S) ──
+    broker_counts = {}
     for lb in labels:
         c = _clean_label(lb)
-        if c and c not in seen:
-            seen.add(c)
-            chip_labels.append(c)
+        if c:
+            broker_counts[c] = broker_counts.get(c, 0) + 1
+
+    # ── Chip per-node ──
+    chips_html = ""
+    for i, lb in enumerate(labels):
+        c = _clean_label(lb)
+        if not c:
+            continue
+        side = "B" if i < n_buyers else "S"
+        # Kalau broker cuma muncul 1x, tanpa suffix. Kalau 2x, pakai -B / -S
+        suffix = f"-{side}" if broker_counts.get(c, 0) > 1 else ""
+        chips_html += (
+            f'<button class="chip" data-node-idx="{i}" data-broker="{c}" '
+            f'data-side="{side}">{c}{suffix}</button>'
+        )
 
     fig_json = fig.to_json()
-
-    chips_html = ""
-    for name in chip_labels:
-        chips_html += (
-            f'<button class="chip" data-broker="{name}">{name}</button>'
-        )
 
     html = f"""
     <!DOCTYPE html>
@@ -405,67 +414,38 @@ def render_sankey_interactive(fig, height=520):
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
         <style>
-            html, body {{
-                margin: 0; padding: 0;
-                background: #0f1116;
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                overflow: hidden;
-            }}
-            #chart {{ width: 100%; height: {height}px; }}
-            #mode-toggle {{
-                display: flex; gap: 6px; justify-content: center;
-                padding: 6px 0 2px 0; background: #0f1116;
-            }}
-            .mode-btn {{
-                background: #1e293b; color: #94a3b8;
-                border: 1px solid #334155; border-radius: 16px;
-                padding: 6px 16px; font-size: 12px; font-weight: 600;
-                cursor: pointer; user-select: none;
-                -webkit-tap-highlight-color: transparent;
-                transition: all 0.15s;
-            }}
-            .mode-btn:active {{ background: #334155; }}
-            .mode-btn.active {{
-                background: rgba(168, 85, 247, 0.20) !important;
-                color: #a855f7 !important;
-                border-color: #a855f7 !important;
-            }}
-            #hint {{
-                text-align: center; color: #64748b;
-                font-size: 10px; padding: 2px 0 4px 0;
-                background: #0f1116;
-            }}
-            #panel {{
-                padding: 4px 8px 10px 8px; background: #0f1116;
-                display: flex; flex-wrap: wrap; justify-content: center;
-                gap: 4px;
-            }}
-            .chip {{
-                background: #1e293b; color: #cbd5e1;
-                border: 1px solid #334155; border-radius: 14px;
-                padding: 5px 12px; font-size: 11px; cursor: pointer;
-                margin: 2px;
-                user-select: none;
-                -webkit-tap-highlight-color: transparent;
-                transition: all 0.15s;
-            }}
-            .chip:active {{ background: #334155; }}
-            .chip.active {{
-                background: #a855f7 !important;
-                color: #fff !important;
-                border-color: #a855f7 !important;
-            }}
-            #reset {{
-                background: rgba(168, 85, 247, 0.15);
-                color: #a855f7;
-                border: 1px solid #a855f7;
-                border-radius: 14px;
-                padding: 5px 14px; font-size: 11px;
-                cursor: pointer; font-weight: bold;
-                margin: 2px 2px 2px 6px;
-                -webkit-tap-highlight-color: transparent;
-            }}
-            #reset:active {{ background: rgba(168, 85, 247, 0.30); }}
+            html, body {{ margin:0; padding:0; background:#0f1116;
+                font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                overflow:hidden; }}
+            #chart {{ width:100%; height:{height}px; }}
+            #mode-toggle {{ display:flex; gap:6px; justify-content:center;
+                padding:6px 0 2px 0; background:#0f1116; }}
+            .mode-btn {{ background:#1e293b; color:#94a3b8;
+                border:1px solid #334155; border-radius:16px;
+                padding:6px 16px; font-size:12px; font-weight:600;
+                cursor:pointer; user-select:none;
+                -webkit-tap-highlight-color:transparent; transition:all 0.15s; }}
+            .mode-btn:active {{ background:#334155; }}
+            .mode-btn.active {{ background:rgba(168,85,247,0.20) !important;
+                color:#a855f7 !important; border-color:#a855f7 !important; }}
+            #hint {{ text-align:center; color:#64748b; font-size:10px;
+                padding:2px 0 4px 0; background:#0f1116; }}
+            #panel {{ padding:4px 8px 10px 8px; background:#0f1116;
+                display:flex; flex-wrap:wrap; justify-content:center; gap:4px; }}
+            .chip {{ background:#1e293b; color:#cbd5e1;
+                border:1px solid #334155; border-radius:14px;
+                padding:5px 12px; font-size:11px; cursor:pointer;
+                margin:2px; user-select:none;
+                -webkit-tap-highlight-color:transparent; transition:all 0.15s; }}
+            .chip:active {{ background:#334155; }}
+            .chip.active {{ background:#a855f7 !important; color:#fff !important;
+                border-color:#a855f7 !important; }}
+            #reset {{ background:rgba(168,85,247,0.15); color:#a855f7;
+                border:1px solid #a855f7; border-radius:14px;
+                padding:5px 14px; font-size:11px; cursor:pointer;
+                font-weight:bold; margin:2px 2px 2px 6px;
+                -webkit-tap-highlight-color:transparent; }}
+            #reset:active {{ background:rgba(168,85,247,0.30); }}
         </style>
     </head>
     <body>
@@ -482,16 +462,11 @@ def render_sankey_interactive(fig, height=520):
         <script>
             (function() {{
                 var figData = {fig_json};
-                var config = {{
-                    displayModeBar: false,
-                    responsive: true,
-                    scrollZoom: false,
-                    displaylogo: false
-                }};
+                var config = {{ displayModeBar:false, responsive:true,
+                    scrollZoom:false, displaylogo:false }};
                 var gd = document.getElementById('chart');
                 var SVG_NS = 'http://www.w3.org/2000/svg';
 
-                // ── Original state ──
                 var ORIG = JSON.parse(JSON.stringify(figData.data[0]));
                 var LAYOUT = JSON.parse(JSON.stringify(figData.layout));
 
@@ -501,20 +476,18 @@ def render_sankey_interactive(fig, height=520):
                 var origNodeColors = [].concat(ORIG.node.color || []);
                 var origNodeLabels = [].concat(ORIG.node.label || []);
                 var origLinkValues = [].concat(ORIG.link.value || []);
+                var N_BUYERS = (figData.layout.meta && figData.layout.meta.n_buyers) || 0;
 
                 if (origNodeColors.length < labels.length) {{
                     var base = origNodeColors[0] || '#a855f7';
                     origNodeColors = labels.map(function(){{ return base; }});
                 }}
 
-                var GRAY_N = 'rgba(100, 116, 139, 0.20)';
-                var currentHighlight = null;
+                var GRAY_N = 'rgba(100, 116, 139, 0.15)';
+                var currentHighlightIdx = null;
                 var CURRENT_MODE = 'volume';
                 var MODE_PAYLOAD = (figData.layout && figData.layout.meta && figData.layout.meta.mode_toggle) || null;
 
-                // ═══════════════════════════════════════════════════
-                // HELPER: Clean label (buang nilai dalam kurung)
-                // ═══════════════════════════════════════════════════
                 function cleanLabel(s) {{
                     s = String(s).replace(/\\s*\\([^)]*\\)/g, '').trim();
                     s = s.replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '').trim();
@@ -522,19 +495,18 @@ def render_sankey_interactive(fig, height=520):
                     return s;
                 }}
 
-                // ═══════════════════════════════════════════════════
-                // HELPER: Format value auto-scale
-                // ═══════════════════════════════════════════════════
                 function fmtFlow(v) {{
-                    if (v >= 1e12) return (v/1e12).toFixed(2) + ' T';
-                    if (v >= 1e9) return (v/1e9).toFixed(2) + ' B';
-                    if (v >= 1e6) return (v/1e6).toFixed(2) + ' M';
+                    if (v >= 1e12) return (v/1e12).toFixed(2) + 'T';
+                    if (v >= 1e9) return (v/1e9).toFixed(2) + 'B';
+                    if (v >= 1e6) return (v/1e6).toFixed(2) + 'M';
                     if (v >= 1e3) return Math.round(v).toLocaleString('id-ID');
                     return Math.round(v).toString();
                 }}
 
                 // ═══════════════════════════════════════════════════
-                // HELPER: Build label dinamis (node aktif = flow, lain = kode saja)
+                // LABEL DINAMIS
+                // - Node aktif (source/counterpart): tampilkan flow relevan
+                // - Node lain: cuma kode broker
                 // ═══════════════════════════════════════════════════
                 function buildDynamicLabels(activeNodes, activeLinksMap) {{
                     if (!activeLinksMap) return origNodeLabels.slice();
@@ -563,39 +535,30 @@ def render_sankey_interactive(fig, height=520):
                     return out;
                 }}
 
-                // ═══════════════════════════════════════════════════
-                // HELPER: Build trace dengan warna & label sesuai state
-                // ═══════════════════════════════════════════════════
                 function buildTrace(activeNodes, activeLinksMap) {{
                     var t = JSON.parse(JSON.stringify(ORIG));
                     t.node.color = origNodeColors.map(function(c, i) {{
                         return activeNodes[i] ? c : GRAY_N;
                     }});
-                    // ⚠️ JANGAN override link.color — biarkan warna source dari Python.
-                    // Kalau gradient JS berhasil, akan di-override oleh applyGradients.
-                    // Kalau gagal, minimal link tetap berwarna (bukan abu).
+                    // link.color dibiarkan dari Python — kalau gradient gagal, tetap berwarna
                     t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
                     return t;
                 }}
 
                 // ═══════════════════════════════════════════════════
-                // HELPER: Cari link path elements (multi-selector + heuristic)
+                // GRADIENT
                 // ═══════════════════════════════════════════════════
                 function findLinkElements() {{
                     var selectors = [
                         'path.sankey-link',
                         'g.sankey-links path',
                         'g.sankey-links > path',
-                        'g.sankey > g > path.link',
                         'g.sankey path'
                     ];
                     for (var i = 0; i < selectors.length; i++) {{
                         try {{
                             var els = gd.querySelectorAll(selectors[i]);
-                            if (els && els.length > 0) {{
-                                console.log('[Sankey] selector:', selectors[i], '→', els.length);
-                                return els;
-                            }}
+                            if (els && els.length > 0) return els;
                         }} catch (e) {{}}
                     }}
                     var svg = gd.querySelector('svg');
@@ -604,40 +567,27 @@ def render_sankey_interactive(fig, height=520):
                     var links = [];
                     allPaths.forEach(function(p) {{
                         var d = p.getAttribute('d') || '';
-                        if (d.indexOf('C') !== -1 && d.length > 40) {{
-                            links.push(p);
-                        }}
+                        if (d.indexOf('C') !== -1 && d.length > 40) links.push(p);
                     }});
-                    console.log('[Sankey] heuristic:', links.length, 'of', allPaths.length);
                     return links.length > 0 ? links : null;
                 }}
 
-                // ═══════════════════════════════════════════════════
-                // HELPER: Inject SVG gradients ke link paths
-                // ═══════════════════════════════════════════════════
                 function applyGradients(activeLinksMap) {{
                     var svg = gd.querySelector('svg');
                     if (!svg) return;
-
                     var oldDefs = svg.querySelector('#sg-defs');
                     if (oldDefs) oldDefs.remove();
-
                     var defs = document.createElementNS(SVG_NS, 'defs');
                     defs.setAttribute('id', 'sg-defs');
                     svg.insertBefore(defs, svg.firstChild);
 
                     var linkEls = findLinkElements();
-                    if (!linkEls || linkEls.length === 0) {{
-                        console.warn('[Sankey] no link elements');
-                        return;
-                    }}
-
+                    if (!linkEls || linkEls.length === 0) return;
                     var count = Math.min(linkEls.length, sources.length);
 
                     for (var i = 0; i < count; i++) {{
                         var linkEl = linkEls[i];
                         var isActive = !activeLinksMap || activeLinksMap[i];
-
                         var srcColor = origNodeColors[sources[i]] || '#64748b';
                         var tgtColor = origNodeColors[targets[i]] || '#64748b';
 
@@ -656,17 +606,17 @@ def render_sankey_interactive(fig, height=520):
                         if (isActive) {{
                             s1.setAttribute('offset', '0%');
                             s1.setAttribute('stop-color', srcColor);
-                            s1.setAttribute('stop-opacity', '0.90');
+                            s1.setAttribute('stop-opacity', '0.85');
                             s2.setAttribute('offset', '100%');
                             s2.setAttribute('stop-color', tgtColor);
-                            s2.setAttribute('stop-opacity', '0.90');
+                            s2.setAttribute('stop-opacity', '0.85');
                         }} else {{
                             s1.setAttribute('offset', '0%');
                             s1.setAttribute('stop-color', '#64748b');
-                            s1.setAttribute('stop-opacity', '0.05');
+                            s1.setAttribute('stop-opacity', '0.04');
                             s2.setAttribute('offset', '100%');
                             s2.setAttribute('stop-color', '#64748b');
-                            s2.setAttribute('stop-opacity', '0.05');
+                            s2.setAttribute('stop-opacity', '0.04');
                         }}
 
                         grad.appendChild(s1);
@@ -678,9 +628,6 @@ def render_sankey_interactive(fig, height=520):
                     }}
                 }}
 
-                // ═══════════════════════════════════════════════════
-                // RENDER: React + apply gradient setelah render selesai
-                // ═══════════════════════════════════════════════════
                 function renderWithGradients(activeNodes, activeLinksMap) {{
                     var t = buildTrace(activeNodes, activeLinksMap);
                     return Plotly.react(gd, [t], LAYOUT, config).then(function() {{
@@ -696,36 +643,39 @@ def render_sankey_interactive(fig, height=520):
                 }}
 
                 // ═══════════════════════════════════════════════════
-                // ACTION: Highlight broker
+                // HIGHLIGHT BY NODE (arah-aware)
                 // ═══════════════════════════════════════════════════
-                function highlightBroker(brokerName) {{
+                function highlightNode(nodeIdx) {{
+                    var isBuyer = nodeIdx < N_BUYERS;
                     var activeNodes = {{}};
                     var activeLinks = {{}};
-                    var found = false;
+                    activeNodes[nodeIdx] = true;
 
-                    for (var i = 0; i < labels.length; i++) {{
-                        if (cleanLabel(labels[i]) === brokerName) {{
-                            activeNodes[i] = true;
-                            found = true;
+                    if (isBuyer) {{
+                        // Buyer aktif → semua link DARI buyer ini ke seller
+                        for (var j = 0; j < sources.length; j++) {{
+                            if (sources[j] === nodeIdx) {{
+                                activeLinks[j] = true;
+                                activeNodes[targets[j]] = true;  // seller counterpart
+                            }}
+                        }}
+                    }} else {{
+                        // Seller aktif → semua link DARI buyer ke seller ini
+                        for (var j = 0; j < sources.length; j++) {{
+                            if (targets[j] === nodeIdx) {{
+                                activeLinks[j] = true;
+                                activeNodes[sources[j]] = true;  // buyer counterpart
+                            }}
                         }}
                     }}
-                    if (!found) return;
 
-                    for (var j = 0; j < sources.length; j++) {{
-                        if (activeNodes[sources[j]] || activeNodes[targets[j]]) {{
-                            activeLinks[j] = true;
-                        }}
-                    }}
-
-                    currentHighlight = brokerName;
+                    currentHighlightIdx = nodeIdx;
                     renderWithGradients(activeNodes, activeLinks);
 
                     document.querySelectorAll('.chip').forEach(function(c) {{
-                        if (c.getAttribute('data-broker') === brokerName) {{
-                            c.classList.add('active');
-                        }} else {{
-                            c.classList.remove('active');
-                        }}
+                        var idx = parseInt(c.getAttribute('data-node-idx'));
+                        if (idx === nodeIdx) c.classList.add('active');
+                        else c.classList.remove('active');
                     }});
 
                     if (navigator.vibrate) {{
@@ -733,54 +683,38 @@ def render_sankey_interactive(fig, height=520):
                     }}
                 }}
 
-                // ═══════════════════════════════════════════════════
-                // ACTION: Reset
-                // ═══════════════════════════════════════════════════
                 function resetAll() {{
-                    currentHighlight = null;
+                    currentHighlightIdx = null;
                     var allNodes = {{}};
                     for (var i = 0; i < labels.length; i++) allNodes[i] = true;
-
                     renderWithGradients(allNodes, null);
-
                     document.querySelectorAll('.chip').forEach(function(c) {{
                         c.classList.remove('active');
                     }});
-
                     if (navigator.vibrate) {{
                         try {{ navigator.vibrate(8); }} catch(e) {{}}
                     }}
                 }}
 
-                // ═══════════════════════════════════════════════════
-                // ACTION: Toggle mode Volume / Value
-                // ═══════════════════════════════════════════════════
                 function applyMode(mode) {{
                     if (!MODE_PAYLOAD || !MODE_PAYLOAD[mode]) return;
                     var md = MODE_PAYLOAD[mode];
-
                     ORIG.link.value = md.link_values.slice();
                     ORIG.node.label = md.node_labels.slice();
                     origNodeLabels = md.node_labels.slice();
                     origLinkValues = md.link_values.slice();
                     labels = ORIG.node.label;
-
                     CURRENT_MODE = mode;
 
                     document.querySelectorAll('.mode-btn').forEach(function(b) {{
-                        if (b.getAttribute('data-mode') === mode) {{
-                            b.classList.add('active');
-                        }} else {{
-                            b.classList.remove('active');
-                        }}
+                        if (b.getAttribute('data-mode') === mode) b.classList.add('active');
+                        else b.classList.remove('active');
                     }});
 
-                    if (currentHighlight) {{
-                        highlightBroker(currentHighlight);
+                    if (currentHighlightIdx !== null) {{
+                        highlightNode(currentHighlightIdx);
                     }} else {{
-                        var allNodes = {{}};
-                        for (var i = 0; i < labels.length; i++) allNodes[i] = true;
-                        renderWithGradients(allNodes, null);
+                        resetAll();
                     }}
 
                     if (navigator.vibrate) {{
@@ -789,7 +723,7 @@ def render_sankey_interactive(fig, height=520):
                 }}
 
                 // ═══════════════════════════════════════════════════
-                // INITIAL RENDER + EVENT LISTENERS
+                // INIT
                 // ═══════════════════════════════════════════════════
                 var initNodes = {{}};
                 for (var i = 0; i < labels.length; i++) initNodes[i] = true;
@@ -802,7 +736,6 @@ def render_sankey_interactive(fig, height=520):
                         }});
                     }});
 
-                    // Mode toggle listeners
                     document.querySelectorAll('.mode-btn').forEach(function(b) {{
                         b.addEventListener('click', function() {{
                             var m = b.getAttribute('data-mode');
@@ -810,28 +743,21 @@ def render_sankey_interactive(fig, height=520):
                         }});
                     }});
 
-                    // Chip listeners
                     document.querySelectorAll('.chip').forEach(function(c) {{
                         c.addEventListener('click', function() {{
-                            var br = c.getAttribute('data-broker');
-                            if (currentHighlight === br) {{
-                                resetAll();
-                            }} else {{
-                                highlightBroker(br);
-                            }}
+                            var idx = parseInt(c.getAttribute('data-node-idx'));
+                            if (currentHighlightIdx === idx) resetAll();
+                            else highlightNode(idx);
                         }});
                     }});
 
-                    // Reset button
                     document.getElementById('reset').addEventListener('click', resetAll);
 
-                    // Native Sankey click (best-effort)
                     gd.on('plotly_click', function(data) {{
                         if (!data || !data.points || !data.points.length) return;
                         var pt = data.points[0];
                         if (pt.pointType === 'node' && typeof pt.pointNumber === 'number') {{
-                            var cl = cleanLabel(labels[pt.pointNumber] || '');
-                            if (cl) highlightBroker(cl);
+                            highlightNode(pt.pointNumber);
                         }}
                     }});
                 }});
@@ -3518,7 +3444,9 @@ def build_broker_sankey(data):
                     'link_values': val_values,
                     'node_labels': labels_val,
                 }
-            }
+            },
+            'n_buyers': len(buyers),
+            'n_sellers': len(sellers),
         }
     )
 
