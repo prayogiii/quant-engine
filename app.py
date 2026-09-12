@@ -27,9 +27,9 @@ import streamlit.components.v1 as components
 # ═══════════════════════════════════════════════════════════════
 def render_plotly_realtime(fig, height=420, haptic=True):
     """
-    Embed Plotly.js ala Stockbit:
-    - Tap + geser = vline + tooltip follow jari realtime (smooth)
-    - Haptic vibration tiap index berubah (Android only)
+    Embed Plotly.js ala Stockbit (FIXED):
+    - Tap + geser = vline + tooltip follow jari realtime
+    - Haptic vibration tiap index berubah (Android)
     - Auto-hide setelah 2.5 detik idle
     """
     if fig is None:
@@ -51,20 +51,11 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 overflow: hidden;
             }}
-            #wrapper {{
-                position: relative;
-                width: 100%;
-                height: {height}px;
-            }}
-            #chart {{
-                width: 100%;
-                height: {height}px;
-                touch-action: pan-y;
-            }}
+            #wrapper {{ position: relative; width: 100%; height: {height}px; }}
+            #chart {{ width: 100%; height: {height}px; touch-action: pan-y; }}
             #tooltip {{
                 position: absolute;
-                top: 8px;
-                left: 8px;
+                top: 8px; left: 8px;
                 background: rgba(30, 41, 59, 0.96);
                 color: #e2e8f0;
                 padding: 8px 12px;
@@ -99,7 +90,7 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                 var figData = {fig_json};
                 var HAPTIC = {haptic_js};
 
-                // Matikan hover native Plotly supaya tidak dobel dgn tooltip kita
+                // Matikan hover native
                 if (figData.layout) {{
                     figData.layout.hovermode = false;
                 }}
@@ -113,19 +104,42 @@ def render_plotly_realtime(fig, height=420, haptic=True):
 
                 var gd = document.getElementById('chart');
                 var tooltip = document.getElementById('tooltip');
-                var wrapper = document.getElementById('wrapper');
-
-                var TRACE_COLORS = figData.data.map(function(t) {{
-                    return (t.line && t.line.color) ||
-                           (t.marker && t.marker.color) || '#a855f7';
-                }});
 
                 Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
-                    // Tambah vline sebagai shape terakhir
+                    // ── Ambil xValues dari fullData (setelah render) ──
+                    var xValues = null;
+                    for (var i = 0; i < gd._fullData.length; i++) {{
+                        var xd = gd._fullData[i].x;
+                        if (xd && xd.length > 0) {{
+                            xValues = xd;
+                            break;
+                        }}
+                    }}
+
+                    if (!xValues || xValues.length === 0) {{
+                        console.error('[Bandarmology] No x values found');
+                        return;
+                    }}
+
+                    // ── Ambil y per trace (paralel dengan xValues) ──
+                    var yPerTrace = [];
+                    var namePerTrace = [];
+                    var colorPerTrace = [];
+                    for (var i = 0; i < gd._fullData.length; i++) {{
+                        var t = gd._fullData[i];
+                        yPerTrace.push(t.y || []);
+                        namePerTrace.push(t.name || ('Series ' + i));
+                        var c = (t.line && t.line.color) ||
+                                (t.marker && t.marker.color) || '#a855f7';
+                        colorPerTrace.push(c);
+                    }}
+
+                    // ── Shape vline: pakai STRING nilai x (bukan angka 0) ──
+                    var initX = xValues[0];
                     var baseShapes = (gd.layout.shapes || []).slice();
                     baseShapes.push({{
                         type: 'line',
-                        xref: 'x', x0: 0, x1: 0,
+                        xref: 'x', x0: initX, x1: initX,
                         yref: 'paper', y0: 0, y1: 1,
                         line: {{ color: '#a855f7', width: 2, dash: 'dash' }},
                         opacity: 0
@@ -133,67 +147,71 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                     Plotly.relayout(gd, {{ shapes: baseShapes }});
                     var V_IDX = baseShapes.length - 1;
 
-                    var xValues = figData.data[0].x || [];
-                    var yPerTrace = figData.data.map(function(t) {{ return t.y || []; }});
+                    // ── Hitung index dari posisi pixel (manual, akurat) ──
+                    function pixelToIndex(clientX) {{
+                        var rect = gd.getBoundingClientRect();
+                        var fl = gd._fullLayout;
+                        var plotLeft = fl.margin.l;
+                        var plotRight = rect.width - fl.margin.r;
+                        var plotWidth = plotRight - plotLeft;
+                        if (plotWidth <= 0) return 0;
+                        var relX = clientX - rect.left - plotLeft;
+                        var ratio = relX / plotWidth;
+                        ratio = Math.max(0, Math.min(1, ratio));
+                        return Math.round(ratio * (xValues.length - 1));
+                    }}
+
+                    function vibrate() {{
+                        if (!HAPTIC || !navigator.vibrate) return;
+                        try {{ navigator.vibrate(6); }} catch(e) {{}}
+                    }}
+
                     var lastIdx = -1;
                     var rafPending = false;
                     var pendingX = null;
                     var active = false;
                     var hideTimer = null;
 
-                    function vibrate() {{
-                        if (!HAPTIC) return;
-                        if (navigator.vibrate) {{
-                            try {{ navigator.vibrate(6); }} catch(e) {{}}
-                        }}
-                    }}
-
-                    function toIndex(clientX) {{
-                        var rect = gd.getBoundingClientRect();
-                        var px = clientX - rect.left;
-                        var xa = gd._fullLayout.xaxis;
-                        var dataX = xa.p2d(px);
-                        var idx = Math.round(dataX);
+                    function draw(clientX) {{
+                        var idx = pixelToIndex(clientX);
                         if (idx < 0) idx = 0;
                         if (idx >= xValues.length) idx = xValues.length - 1;
-                        return {{ idx: idx, px: px, rect: rect }};
-                    }}
-
-                    function draw(clientX) {{
-                        var r = toIndex(clientX);
-                        var idx = r.idx;
                         var xVal = xValues[idx];
 
+                        // Update vline
                         var upd = {{}};
                         upd['shapes[' + V_IDX + '].x0'] = xVal;
                         upd['shapes[' + V_IDX + '].x1'] = xVal;
                         upd['shapes[' + V_IDX + '].opacity'] = 1;
                         Plotly.relayout(gd, upd);
 
+                        // Update tooltip
                         var lines = ['<b>' + xVal + '</b>'];
                         for (var i = 0; i < yPerTrace.length; i++) {{
                             var yv = yPerTrace[i][idx];
                             if (typeof yv === 'number' && !isNaN(yv)) {{
-                                var nm = figData.data[i].name || '';
-                                var cl = TRACE_COLORS[i];
                                 var fv = yv.toLocaleString('id-ID', {{ maximumFractionDigits: 0 }});
                                 lines.push(
                                     '<div class="row"><span class="dot" style="background:' +
-                                    cl + '"></span>' + nm + ': ' + fv + '</div>'
+                                    colorPerTrace[i] + '"></span>' +
+                                    namePerTrace[i] + ': ' + fv + '</div>'
                                 );
                             }}
                         }}
                         tooltip.innerHTML = lines.join('');
                         tooltip.style.display = 'block';
 
+                        // Posisi tooltip: kanan jari, flip kalau kepotong
+                        var rect = gd.getBoundingClientRect();
                         var tw = tooltip.offsetWidth || 140;
-                        var left = r.px + 14;
-                        if (left + tw > r.rect.width - 4) {{
-                            left = r.px - tw - 14;
+                        var left = clientX - rect.left + 14;
+                        if (left + tw > rect.width - 4) {{
+                            left = clientX - rect.left - tw - 14;
                         }}
                         if (left < 4) left = 4;
                         tooltip.style.left = left + 'px';
 
+                        // Haptic: hanya saat index berubah
                         if (idx !== lastIdx) {{
                             vibrate();
                             lastIdx = idx;
@@ -235,15 +253,9 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         throttled(e.touches[0].clientX);
                     }}, {{ passive: true }});
 
-                    gd.addEventListener('touchend', function() {{
-                        active = false;
-                    }}, {{ passive: true }});
+                    gd.addEventListener('touchend', function() {{ active = false; }}, {{ passive: true }});
+                    gd.addEventListener('touchcancel', function() {{ active = false; }}, {{ passive: true }});
 
-                    gd.addEventListener('touchcancel', function() {{
-                        active = false;
-                    }}, {{ passive: true }});
-
-                    // Mouse (desktop) — biar bisa hover juga
                     gd.addEventListener('mousemove', function(e) {{
                         if (e.buttons === 0) {{
                             if (hideTimer) clearTimeout(hideTimer);
