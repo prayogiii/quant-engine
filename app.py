@@ -3208,11 +3208,17 @@ def build_broker_sankey(data):
     labels = [f"{b['broker']} ({fmt(b['volume_lot'])})" for b in buyers] + \
              [f"{s['broker']} ({fmt(s['volume_lot'])})" for s in sellers]
 
+    # Defensive: redefine di sini biar gak bergantung scope di atas
+    _labels_vol = [f"{b['broker']} ({fmt_vol(b['volume_lot'])})" for b in buyers] + \
+                  [f"{s['broker']} ({fmt_vol(s['volume_lot'])})" for s in sellers]
+    _node_colors = [cat_hex.get(b['category'], "#94a3b8") for b in buyers] + \
+                   [cat_hex.get(s['category'], "#94a3b8") for s in sellers]
+
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
         node=dict(
             pad=16, thickness=12, line=dict(color="#121212", width=1),
-            label=labels_vol, color=node_colors,
+            label=_labels_vol, color=_node_colors,
         ),
         link=dict(source=sources, target=targets,
                   value=vol_values, color=link_colors)
