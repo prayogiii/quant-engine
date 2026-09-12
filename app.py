@@ -357,10 +357,10 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     components.html(html, height=iframe_h, scrolling=False)
 def render_sankey_interactive(fig, height=520):
     """
-    Embed Sankey dengan interaksi ala Stockbit:
-    - Tap node → node + link + LABEL-nya tetap warna, sisanya abu-abu
-    - Label text juga ikut gray out (bukan cuma bar-nya)
-    - Tap ↻ Reset untuk kembalikan normal
+    Sankey interaktif ala Stockbit (FIXED v2):
+    - Tap node → node + link + label tetap warna, sisanya abu-abu
+    - Full rebuild pakai Plotly.react (paling reliable)
+    - Tombol Reset untuk kembalikan
     """
     if fig is None:
         return
@@ -419,120 +419,142 @@ def render_sankey_interactive(fig, height=520):
                 }};
 
                 var gd = document.getElementById('chart');
-                var trace = figData.data[0];
 
-                // Simpan warna asli
-                var origNodeColors = (trace.node.color || []).slice();
-                var origLinkColors = (trace.link.color || []).slice();
-                var origLabelColors = ((trace.node.textfont && trace.node.textfont.color) || []).slice();
-                var origLabels = (trace.node.label || []).slice();
-                var sources = (trace.link.source || []).slice();
-                var targets = (trace.link.target || []).slice();
+                // Deep clone original trace (biar aman dari mutasi)
+                var ORIGINAL_TRACE = JSON.parse(JSON.stringify(figData.data[0]));
+                var ORIGINAL_LAYOUT = JSON.parse(JSON.stringify(figData.layout));
 
-                // Kalau textfont.color bukan array (cuma 1 warna), expand jadi array
-                if (origLabelColors.length !== origNodeColors.length) {{
-                    var single = origLabelColors[0] || '#f3f4f6';
-                    origLabelColors = origNodeColors.map(function() {{ return single; }});
+                // Pastikan semua array punya length yang benar
+                var nNodes = (ORIGINAL_TRACE.node.label || []).length;
+                var nLinks = (ORIGINAL_TRACE.link.source || []).length;
+                var sources = (ORIGINAL_TRACE.link.source || []).slice();
+                var targets = (ORIGINAL_TRACE.link.target || []).slice();
+
+                // Pastikan node.color array lengkap
+                var origNodeColors = (ORIGINAL_TRACE.node.color || []).slice();
+                if (origNodeColors.length !== nNodes) {{
+                    var baseColor = origNodeColors[0] || '#a855f7';
+                    origNodeColors = [];
+                    for (var i = 0; i < nNodes; i++) origNodeColors.push(baseColor);
                 }}
 
-                // Warna abu-abu untuk element non-aktif
-                var GRAY_NODE = 'rgba(100, 116, 139, 0.25)';
-                var GRAY_LINK = 'rgba(100, 116, 139, 0.06)';
-                var GRAY_TEXT = 'rgba(100, 116, 139, 0.50)';
+                // Pastikan link.color array lengkap
+                var origLinkColors = (ORIGINAL_TRACE.link.color || []).slice();
+                if (origLinkColors.length !== nLinks) {{
+                    var baseLink = origLinkColors[0] || 'rgba(168, 85, 247, 0.35)';
+                    origLinkColors = [];
+                    for (var i = 0; i < nLinks; i++) origLinkColors.push(baseLink);
+                }}
 
-                Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
-
-                    function buildGrayLabels(connectedNodes) {{
-                        // Gray out label text: prefix HTML tidak bisa, tapi Plotly
-                        // Sankey label mendukung tag <span> internal via array warna text.
-                        // Trik: label non-aktif dibungkus format yang lebih pudar
-                        return origLabels.map(function(lbl, i) {{
-                            if (connectedNodes[i]) return lbl;
-                            // Ganti isi label jadi versi yang sama (warna text diatur textfont.color)
-                            return lbl;
-                        }});
+                // Pastikan textfont.color array lengkap
+                var origTextColors = null;
+                if (ORIGINAL_TRACE.node.textfont && ORIGINAL_TRACE.node.textfont.color) {{
+                    origTextColors = ORIGINAL_TRACE.node.textfont.color;
+                    if (!Array.isArray(origTextColors)) {{
+                        var singleColor = origTextColors;
+                        origTextColors = [];
+                        for (var i = 0; i < nNodes; i++) origTextColors.push(singleColor);
                     }}
+                }} else {{
+                    origTextColors = [];
+                    for (var i = 0; i < nNodes; i++) origTextColors.push('#f3f4f6');
+                }}
 
-                                        function applyHighlight(activeLinks, connectedNodes) {{
-                        var newLinkColors = origLinkColors.map(function(c, i) {{
-                            return activeLinks[i] ? c : GRAY_LINK;
-                        }});
-                        var newNodeColors = origNodeColors.map(function(c, i) {{
-                            return connectedNodes[i] ? c : GRAY_NODE;
-                        }});
-                        var newTextColors = origLabelColors.map(function(c, i) {{
-                            return connectedNodes[i] ? c : GRAY_TEXT;
-                        }});
+                var GRAY_NODE = 'rgba(100, 116, 139, 0.20)';
+                var GRAY_LINK = 'rgba(100, 116, 139, 0.05)';
+                var GRAY_TEXT = 'rgba(100, 116, 139, 0.40)';
 
-                        // Rebuild trace full (lebih reliable untuk versi Plotly lama)
-                        var newTrace = JSON.parse(JSON.stringify(trace));
-                        newTrace.link.color = newLinkColors;
-                        newTrace.node.color = newNodeColors;
-                        if (!newTrace.node.textfont) newTrace.node.textfont = {{}};
-                        newTrace.node.textfont.color = newTextColors;
+                // ── Build trace baru dengan warna yang dimodifikasi ──
+                function buildTrace(activeLinks, connectedNodes) {{
+                    var t = JSON.parse(JSON.stringify(ORIGINAL_TRACE));
 
-                        Plotly.react(gd, [newTrace], gd.layout, config).then(function() {{
-                            // Event listener otomatis hilang, jadi tetap pakai event delegation
-                            // (tidak perlu reattach, karena pakai gd.on)
-                        }});
-                    }}
+                    // Node bar colors
+                    t.node.color = origNodeColors.map(function(c, i) {{
+                        return connectedNodes[i] ? c : GRAY_NODE;
+                    }});
 
-                    function highlightNode(nodeIdx) {{
-                        var activeLinks = {{}};
-                        var connectedNodes = {{}};
-                        connectedNodes[nodeIdx] = true;
+                    // Link colors
+                    t.link.color = origLinkColors.map(function(c, i) {{
+                        return activeLinks[i] ? c : GRAY_LINK;
+                    }});
 
-                        for (var i = 0; i < sources.length; i++) {{
-                            if (sources[i] === nodeIdx) {{
-                                activeLinks[i] = true;
-                                connectedNodes[targets[i]] = true;
-                            }}
-                            if (targets[i] === nodeIdx) {{
-                                activeLinks[i] = true;
-                                connectedNodes[sources[i]] = true;
-                            }}
+                    // Label text colors
+                    if (!t.node.textfont) t.node.textfont = {{}};
+                    t.node.textfont.color = origTextColors.map(function(c, i) {{
+                        return connectedNodes[i] ? c : GRAY_TEXT;
+                    }});
+
+                    return t;
+                }}
+
+                function rebuild(activeLinks, connectedNodes) {{
+                    var newTrace = buildTrace(activeLinks, connectedNodes);
+                    Plotly.react(gd, [newTrace], ORIGINAL_LAYOUT, config);
+                }}
+
+                function highlightNode(nodeIdx) {{
+                    var activeLinks = {{}};
+                    var connectedNodes = {{}};
+                    connectedNodes[nodeIdx] = true;
+
+                    for (var i = 0; i < nLinks; i++) {{
+                        if (sources[i] === nodeIdx) {{
+                            activeLinks[i] = true;
+                            connectedNodes[targets[i]] = true;
                         }}
-                        applyHighlight(activeLinks, connectedNodes);
-                    }}
-
-                    function highlightLinkPair(s, t) {{
-                        var activeLinks = {{}};
-                        var connectedNodes = {{}};
-                        connectedNodes[s] = true;
-                        connectedNodes[t] = true;
-
-                        for (var i = 0; i < sources.length; i++) {{
-                            if (sources[i] === s || targets[i] === s ||
-                                sources[i] === t || targets[i] === t) {{
-                                activeLinks[i] = true;
-                                connectedNodes[sources[i]] = true;
-                                connectedNodes[targets[i]] = true;
-                            }}
+                        if (targets[i] === nodeIdx) {{
+                            activeLinks[i] = true;
+                            connectedNodes[sources[i]] = true;
                         }}
-                        applyHighlight(activeLinks, connectedNodes);
                     }}
+                    rebuild(activeLinks, connectedNodes);
+                }}
 
-                    function resetAll() {{
-                        Plotly.restyle(gd, {{
-                            'link.color': [origLinkColors],
-                            'node.color': [origNodeColors],
-                            'node.textfont.color': [origLabelColors]
-                        }});
+                function highlightLink(linkIdx) {{
+                    var s = sources[linkIdx];
+                    var t = targets[linkIdx];
+                    var activeLinks = {{}};
+                    var connectedNodes = {{}};
+                    connectedNodes[s] = true;
+                    connectedNodes[t] = true;
+
+                    for (var i = 0; i < nLinks; i++) {{
+                        if (sources[i] === s || targets[i] === s ||
+                            sources[i] === t || targets[i] === t) {{
+                            activeLinks[i] = true;
+                            connectedNodes[sources[i]] = true;
+                            connectedNodes[targets[i]] = true;
+                        }}
                     }}
+                    rebuild(activeLinks, connectedNodes);
+                }}
 
+                function resetAll() {{
+                    Plotly.react(
+                        gd,
+                        [JSON.parse(JSON.stringify(ORIGINAL_TRACE))],
+                        ORIGINAL_LAYOUT,
+                        config
+                    );
+                }}
+
+                // ── Initial render ──
+                Plotly.newPlot(gd, [ORIGINAL_TRACE], ORIGINAL_LAYOUT, config).then(function() {{
+
+                    // Pakai event delegation — tahan terhadap Plotly.react
                     gd.on('plotly_click', function(data) {{
-                        if (!data.points || data.points.length === 0) return;
+                        if (!data || !data.points || data.points.length === 0) return;
                         var pt = data.points[0];
 
-                        if (pt.pointType === 'node' && pt.pointNumber !== undefined) {{
+                        console.log('[Sankey click]', pt.pointType, pt.pointNumber);
+
+                        if (pt.pointType === 'node' && typeof pt.pointNumber === 'number') {{
                             highlightNode(pt.pointNumber);
                             if (navigator.vibrate) {{
                                 try {{ navigator.vibrate(8); }} catch(e) {{}}
                             }}
-                        }} else if (pt.pointType === 'link' && pt.pointNumber !== undefined) {{
-                            var s = sources[pt.pointNumber];
-                            var t = targets[pt.pointNumber];
-                            highlightLinkPair(s, t);
+                        }} else if (pt.pointType === 'link' && typeof pt.pointNumber === 'number') {{
+                            highlightLink(pt.pointNumber);
                             if (navigator.vibrate) {{
                                 try {{ navigator.vibrate(8); }} catch(e) {{}}
                             }}
