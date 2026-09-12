@@ -3309,86 +3309,106 @@ def _fetch_idx_foreign_flow(ticker, days=30):
 # ---------- CHART 3: FOREIGN FLOW (DAILY TIME-SERIES) ----------
 def build_foreign_flow_chart(data):
     """
-    Foreign Flow harian (30D):
-    - Prioritas 1: data ASLI dari IDX Trading Summary
-    - Fallback: proxy dari snapshot broksum (Foreign + BUMN)
-    - Visual tetap sama, hanya label sumber yang beda
+    Chart Foreign Flow 30D:
+    - 29 hari pertama: proxy dari broksum snapshot + volume × harga
+    - Hari terakhir: data ASLI dari IDX (kalau tersedia)
+    - Visual sama, hanya hari terakhir yang akurat
     """
     if not data:
-        return None
+        return None, None
 
-    source_label = ""
-    df = None
+    ticker = str(data.get('ticker', '')).upper().replace('.JK', '').strip()
 
-    # ── Coba IDX dulu ──
-    try:
-        df_idx = _fetch_idx_foreign_flow(data['ticker'], days=30)
-    except Exception:
-        df_idx = None
+    # ═══════════════════════════════════════════════════════
+    # STEP 1 — Build proxy 30D (seperti sebelumnya)
+    # ═══════════════════════════════════════════════════════
+    df_price = _load_daily_price_data(ticker, period="1mo")
+    if df_price is None or df_price.empty:
+        return None, None
 
-    if df_idx is not None and not df_idx.empty:
-        df = df_idx.copy()
-        source_label = " (IDX Asli)"
+    df = df_price.copy().tail(30)   # 30 hari terakhir
+    df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
+    df['typical'] = (df['High'] + df['Low'] + df['Close']) / 3.0
+    df['proxy'] = (df['Volume'].astype(float)
+                   * df['typical'].astype(float)
+                   * df['direction'])
 
-        # Merge harga harian dari yfinance untuk overlay
-        df_price = _load_daily_price_data(data['ticker'], period="1mo")
-        if df_price is not None and not df_price.empty:
-            try:
-                dfp = df_price.reset_index()
-                # Handle kolom Date (case bisa beda)
-                date_col = "Date" if "Date" in dfp.columns else dfp.columns[0]
-                dfp['date'] = pd.to_datetime(dfp[date_col]).dt.date
-                dfp_price = dfp[['date', 'Close']].rename(
-                    columns={'Close': 'price'}
-                )
-                df = df.merge(dfp_price, on='date', how='left')
-                df['price'] = df['price'].ffill().bfill()
-            except Exception:
-                df['price'] = None
-        else:
-            df['price'] = None
-
-        df['date_str'] = pd.to_datetime(df['date']).dt.strftime("%d %b")
-
-    else:
-        # ── Fallback: proxy dari broksum snapshot ──
-        df_price = _load_daily_price_data(data['ticker'], period="1mo")
-        if df_price is None or df_price.empty:
-            return None
-
-        df = df_price.copy()
-        df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
-        df['typical'] = (df['High'] + df['Low'] + df['Close']) / 3.0
-        df['proxy'] = (df['Volume'].astype(float)
-                       * df['typical'].astype(float)
-                       * df['direction'])
-
-        FOREIGN_CATS = {"Foreign", "BUMN"}
-        fb = sum(b['volume_lot'] for b in data['buyers']
+    FOREIGN_CATS = {"Foreign", "BUMN"}
+    fb_lot = sum(b['volume_lot'] for b in data['buyers']
                  if b['category'] in FOREIGN_CATS)
-        fs = sum(s['volume_lot'] for s in data['sellers']
+    fs_lot = sum(s['volume_lot'] for s in data['sellers']
                  if s['category'] in FOREIGN_CATS)
-        net_foreign_lot = fb - fs
+    net_foreign_lot = fb_lot - fs_lot
 
-        total_proxy = df['proxy'].sum()
-        avg_price = df['typical'].mean()
+    total_proxy = df['proxy'].sum()
+    avg_price = df['typical'].mean()
 
-        if abs(total_proxy) > 0 and net_foreign_lot != 0 and not pd.isna(avg_price):
-            target_value = net_foreign_lot * avg_price
-            df['net_foreign'] = df['proxy'] * (target_value / total_proxy)
-        else:
-            df['net_foreign'] = df['proxy']
+    if abs(total_proxy) > 0 and net_foreign_lot != 0 and not pd.isna(avg_price):
+        target_value = net_foreign_lot * avg_price
+        df['net_foreign'] = df['proxy'] * (target_value / total_proxy)
+    else:
+        df['net_foreign'] = df['proxy']
 
-        df['foreign_buy'] = df['net_foreign'].where(df['net_foreign'] > 0, 0)
-        df['foreign_sell'] = df['net_foreign'].where(df['net_foreign'] < 0, 0)
-        df['price'] = df['Close']
-        df['date_str'] = df.index.strftime("%d %b")
-        source_label = " (Proxy)"
+    df['foreign_buy'] = df['net_foreign'].where(df['net_foreign'] > 0, 0)
+    df['foreign_sell'] = df['net_foreign'].where(df['net_foreign'] < 0, 0)
+    df['price'] = df['Close']
+    df['source'] = 'proxy'
 
-    # ── Build bars ──
+    # ═══════════════════════════════════════════════════════
+    # STEP 2 — Replace hari terakhir dengan IDX ASLI
+    # ═══════════════════════════════════════════════════════
+    source_label = " (Proxy)"
+    idx_data = None
+    try:
+        items = _fetch_idx_all_stock_summary()
+        if items:
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                code = str(it.get('StockCode', '')).upper().strip()
+                if code != ticker:
+                    continue
+
+                def _f(k):
+                    v = it.get(k)
+                    if v in (None, "", "N/A", "-"):
+                        return 0.0
+                    try:
+                        return float(str(v).replace(",", ""))
+                    except Exception:
+                        return 0.0
+
+                fb = _f("ForeignBuy")
+                fs = _f("ForeignSell")
+                close = _f("Close")
+                fb_rp = fb * close if close > 0 else 0.0
+                fs_rp = fs * close if close > 0 else 0.0
+
+                idx_data = {
+                    'fb': fb_rp,
+                    'fs': fs_rp,
+                    'net': fb_rp - fs_rp,
+                }
+                break
+    except Exception:
+        idx_data = None
+
+    if idx_data and len(df) > 0:
+        # Replace baris terakhir
+        df.iloc[-1, df.columns.get_loc('foreign_buy')] = idx_data['fb']
+        df.iloc[-1, df.columns.get_loc('foreign_sell')] = -idx_data['fs']
+        df.iloc[-1, df.columns.get_loc('net_foreign')] = idx_data['net']
+        df.iloc[-1, df.columns.get_loc('source')] = 'idx'
+        source_label = " (IDX Asli di hari terakhir)"
+
+    # ── Build bar values ──
     df['buy_bar'] = df['foreign_buy'].where(df['foreign_buy'] > 0, 0)
     df['sell_bar'] = df['foreign_sell'].where(df['foreign_sell'] < 0, 0)
+    df['date_str'] = pd.to_datetime(df.index).strftime("%d %b")
 
+    # ═══════════════════════════════════════════════════════
+    # STEP 3 — Build chart (sama seperti sebelumnya)
+    # ═══════════════════════════════════════════════════════
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=df['date_str'], y=df['buy_bar'], name="Foreign Buy",
@@ -3407,6 +3427,19 @@ def build_foreign_flow_chart(data):
             hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
         ))
 
+    # ── Highlight hari terakhir kalau IDX berhasil ──
+    if idx_data:
+        last_date = df['date_str'].iloc[-1]
+        fig.add_annotation(
+            x=last_date, y=1.0, yref='paper',
+            text="IDX Asli",
+            showarrow=False,
+            yanchor='bottom',
+            font=dict(size=9, color='#a855f7'),
+            bgcolor='rgba(168, 85, 247, 0.15)',
+            bordercolor='#a855f7', borderwidth=1, borderpad=2,
+        )
+
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
@@ -3414,11 +3447,13 @@ def build_foreign_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Foreign Flow (Foreign + BUMN, 30D){source_label} – {data['ticker']}",
+            text=f"Foreign Flow (Foreign + BUMN, 30D){source_label} – {ticker}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(orientation="h", yanchor="top", y=-0.15,
-                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        legend=dict(
+            orientation="h", yanchor="top", y=-0.15,
+            xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")
+        ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             showspikes=True, spikemode="across", spikesnap="cursor",
@@ -3432,6 +3467,7 @@ def build_foreign_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
+
     return fig, df
 
 def _ipf_allocate(row_sums, col_sums, iterations=20):
@@ -3714,25 +3750,6 @@ def build_broker_sankey(data):
 
 
 # ---------- TAB RENDERER ----------
-    # ── DEBUG SEMENTARA ──
-    with st.expander("🔧 DEBUG: Test IDX Access", expanded=False):
-        if st.button("Test IDX dari Server", key="test_idx_debug"):
-            try:
-                url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=5&start=0"
-                headers = {
-                    "accept": "application/json, text/plain, */*",
-                    "egrum": "isAjax:true",
-                    "referer": "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
-                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "x-requested-with": "XMLHttpRequest",
-                }
-                r = requests.get(url, headers=headers, timeout=15)
-                st.write(f"**Status:** `{r.status_code}`")
-                st.write(f"**Content-Type:** `{r.headers.get('Content-Type')}`")
-                st.code(r.text[:600], language="json")
-            except Exception as e:
-                st.error(f"Error: {e}")
-    # ── END DEBUG ──
 def display_bandarmology_tab(ticker):
     """Render section Bandarmology lengkap (4 chart realtime) di tab."""
     data = load_bandarmology_data(ticker)
