@@ -597,20 +597,11 @@ def render_sankey_interactive(fig, height=520):
                 }}
 
                 function applyGradients(activeLinksMap) {{
-                    console.log('[Sankey] === applyGradients START ===');
-
                     var svg = gd.querySelector('svg');
-                    if (!svg) {{
-                        console.warn('[Sankey] no svg yet');
-                        return false;
-                    }}
+                    if (!svg) return false;
 
                     var linkEls = findLinkElements();
-                    if (!linkEls || linkEls.length === 0) {{
-                        console.warn('[Sankey] ❌ no link elements found');
-                        return false;
-                    }}
-                    console.log('[Sankey] ✅ using', linkEls.length, 'link elements');
+                    if (!linkEls || linkEls.length === 0) return false;
 
                     // Buang defs lama
                     var oldDefs = svg.querySelector('#sg-defs');
@@ -619,50 +610,66 @@ def render_sankey_interactive(fig, height=520):
                     defs.setAttribute('id', 'sg-defs');
                     svg.insertBefore(defs, svg.firstChild);
 
-                    var count = Math.min(linkEls.length, sources.length);
+                    // ▼ Hitung lebar SVG dalam user units (viewBox)
+                    var svgW = 1000;
+                    try {{
+                        var vb = svg.viewBox && svg.viewBox.baseVal;
+                        if (vb && vb.width > 0) {{
+                            svgW = vb.width;
+                        }} else {{
+                            svgW = svg.clientWidth ||
+                                   svg.getBoundingClientRect().width || 1000;
+                        }}
+                    }} catch(e) {{}}
+                    console.log('[Sankey] svgW:', svgW);
+
+                    var nLinks = sources.length;
                     var applied = 0;
 
-                    for (var i = 0; i < count; i++) {{
+                    // ▼ Loop SEMUA element (128), map index → link asli dengan modulo
+                    for (var i = 0; i < linkEls.length; i++) {{
                         var linkEl = linkEls[i];
-                        var isActive = !activeLinksMap || activeLinksMap[i];
+                        var linkIdx = i % nLinks;
 
+                        var isActive = !activeLinksMap || activeLinksMap[linkIdx];
                         if (!isActive) continue;
 
-                        var srcColor = origNodeColors[sources[i]] || '#64748b';
-                        var tgtColor = origNodeColors[targets[i]] || '#64748b';
-                        if (i < 3) {{
-                            console.log('[Sankey] link', i, 'src:', sources[i],
-                                        srcColor, '→ tgt:', targets[i], tgtColor);
-                        }}
+                        var srcColor = origNodeColors[sources[linkIdx]] || '#64748b';
+                        var tgtColor = origNodeColors[targets[linkIdx]] || '#64748b';
 
                         var gid = 'sg-grad-' + i;
                         var gr = document.createElementNS(SVG_NS, 'linearGradient');
                         gr.setAttribute('id', gid);
-                        gr.setAttribute('gradientUnits', 'objectBoundingBox');
-                        gr.setAttribute('x1', '0%'); gr.setAttribute('y1', '0%');
-                        gr.setAttribute('x2', '100%'); gr.setAttribute('y2', '0%');
+
+                        // ▼ KUNCI FIX: userSpaceOnUse + koordinat absolute SVG
+                        gr.setAttribute('gradientUnits', 'userSpaceOnUse');
+                        gr.setAttribute('x1', 0);
+                        gr.setAttribute('y1', 0);
+                        gr.setAttribute('x2', svgW);
+                        gr.setAttribute('y2', 0);
 
                         var s1 = document.createElementNS(SVG_NS, 'stop');
                         s1.setAttribute('offset', '0%');
                         s1.setAttribute('stop-color', srcColor);
                         s1.setAttribute('stop-opacity', '0.85');
+
                         var s2 = document.createElementNS(SVG_NS, 'stop');
                         s2.setAttribute('offset', '100%');
                         s2.setAttribute('stop-color', tgtColor);
                         s2.setAttribute('stop-opacity', '0.85');
+
                         gr.appendChild(s1);
                         gr.appendChild(s2);
                         defs.appendChild(gr);
 
                         linkEl.setAttribute('fill', 'url(#' + gid + ')');
                         linkEl.style.setProperty('fill', 'url(#' + gid + ')', 'important');
-                        linkEl.setAttribute('opacity', '0.9');
                         applied++;
                     }}
 
-                    console.log('[Sankey] ✅ gradient applied to', applied, 'of', count, 'links');
-                    console.log('[Sankey] === applyGradients END ===');
-                    return applied > 0 || count === 0;
+                    console.log('[Sankey] ✅ gradient applied:', applied,
+                                'of', linkEls.length, 'elements (svgW:' + svgW + ')');
+                    return applied > 0;
                 }}
 
                 function renderWithGradients(activeNodes, activeLinksMap) {{
