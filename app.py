@@ -3432,7 +3432,7 @@ def build_foreign_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
-    return fig
+    return fig, df
 
 def _ipf_allocate(row_sums, col_sums, iterations=20):
     """
