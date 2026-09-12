@@ -3498,64 +3498,29 @@ def _fetch_idx_foreign_flow(ticker, days=30):
 # ---------- CHART 3: FOREIGN FLOW (DAILY TIME-SERIES) ----------
 def build_foreign_flow_chart(data):
     """
-    Chart Foreign Flow 30D:
-    - 29 hari pertama: proxy dari broksum snapshot + volume × harga
-    - Hari terakhir: data ASLI dari IDX (kalau tersedia)
-    - Visual sama, hanya hari terakhir yang akurat
+    Foreign Flow — redesign:
+    - Baca dari sheet foreign_flow_history (dari cron IDX)
+    - Kalau kosong, coba fetch IDX 1 hari langsung (fallback)
+    - Return (fig, df, stats) atau (None, None, None)
     """
     if not data:
-        return None, None
+        return None, None, None
 
     ticker = str(data.get('ticker', '')).upper().replace('.JK', '').strip()
+    if not ticker:
+        return None, None, None
 
-    # ═══════════════════════════════════════════════════════
-    # STEP 1 — Build proxy 30D (seperti sebelumnya)
-    # ═══════════════════════════════════════════════════════
-    df_price = _load_daily_price_data(ticker, period="1mo")
-    if df_price is None or df_price.empty:
-        return None, None
+    # ── 1. Baca history dari sheet ──
+    df = load_foreign_flow_history(ticker, days=30)
 
-    df = df_price.copy().tail(30)   # 30 hari terakhir
-    df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
-    df['typical'] = (df['High'] + df['Low'] + df['Close']) / 3.0
-    df['proxy'] = (df['Volume'].astype(float)
-                   * df['typical'].astype(float)
-                   * df['direction'])
-
-    FOREIGN_CATS = {"Foreign", "BUMN"}
-    fb_lot = sum(b['volume_lot'] for b in data['buyers']
-                 if b['category'] in FOREIGN_CATS)
-    fs_lot = sum(s['volume_lot'] for s in data['sellers']
-                 if s['category'] in FOREIGN_CATS)
-    net_foreign_lot = fb_lot - fs_lot
-
-    total_proxy = df['proxy'].sum()
-    avg_price = df['typical'].mean()
-
-    if abs(total_proxy) > 0 and net_foreign_lot != 0 and not pd.isna(avg_price):
-        target_value = net_foreign_lot * avg_price
-        df['net_foreign'] = df['proxy'] * (target_value / total_proxy)
-    else:
-        df['net_foreign'] = df['proxy']
-
-    df['foreign_buy'] = df['net_foreign'].where(df['net_foreign'] > 0, 0)
-    df['foreign_sell'] = df['net_foreign'].where(df['net_foreign'] < 0, 0)
-    df['price'] = df['Close']
-    df['source'] = 'proxy'
-
-    # ═══════════════════════════════════════════════════════
-    # STEP 2 — Replace hari terakhir dengan IDX ASLI
-    # ═══════════════════════════════════════════════════════
-    source_label = " (Proxy)"
-    idx_data = None
-    try:
+    # ── 2. Kalau kosong, coba fetch IDX 1 hari ──
+    if df is None or df.empty:
         items = _fetch_idx_all_stock_summary()
         if items:
             for it in items:
                 if not isinstance(it, dict):
                     continue
-                code = str(it.get('StockCode', '')).upper().strip()
-                if code != ticker:
+                if str(it.get("StockCode", "")).upper() != ticker:
                     continue
 
                 def _f(k):
@@ -3572,75 +3537,90 @@ def build_foreign_flow_chart(data):
                 close = _f("Close")
                 fb_rp = fb * close if close > 0 else 0.0
                 fs_rp = fs * close if close > 0 else 0.0
+                date_str = str(it.get("Date") or "")[:10]
 
-                idx_data = {
-                    'fb': fb_rp,
-                    'fs': fs_rp,
-                    'net': fb_rp - fs_rp,
-                }
+                df = pd.DataFrame([{
+                    "date": date_str,
+                    "close": close,
+                    "foreign_buy": fb_rp,
+                    "foreign_sell": fs_rp,
+                    "net_foreign": fb_rp - fs_rp,
+                }])
                 break
-    except Exception:
-        idx_data = None
 
-    if idx_data and len(df) > 0:
-        # Replace baris terakhir
-        df.iloc[-1, df.columns.get_loc('foreign_buy')] = idx_data['fb']
-        df.iloc[-1, df.columns.get_loc('foreign_sell')] = -idx_data['fs']
-        df.iloc[-1, df.columns.get_loc('net_foreign')] = idx_data['net']
-        df.iloc[-1, df.columns.get_loc('source')] = 'idx'
-        source_label = " (IDX Asli di hari terakhir)"
+    if df is None or df.empty:
+        return None, None, None
 
-    # ── Build bar values ──
-    df['buy_bar'] = df['foreign_buy'].where(df['foreign_buy'] > 0, 0)
-    df['sell_bar'] = df['foreign_sell'].where(df['foreign_sell'] < 0, 0)
-    df['date_str'] = pd.to_datetime(df.index).strftime("%d %b")
+    # ── 3. Stats untuk card ──
+    latest = df.iloc[-1]
+    stats = {
+        'fb': float(latest['foreign_buy']),
+        'fs': float(latest['foreign_sell']),
+        'net': float(latest['net_foreign']),
+        'date': str(latest['date']),
+        'days': len(df),
+    }
 
-    # ═══════════════════════════════════════════════════════
-    # STEP 3 — Build chart (sama seperti sebelumnya)
-    # ═══════════════════════════════════════════════════════
+    # ── 4. Kalau < 7 hari → tampilkan info chart ──
+    if len(df) < 7:
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"📊 Butuh minimal 7 hari data<br>"
+                 f"<span style='font-size:11px;color:#94a3b8;'>"
+                 f"Saat ini: {len(df)} hari — cron IDX akan accumulate otomatis"
+                 f"</span>",
+            xref="paper", yref="paper", x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color='#cbd5e1'),
+            align='center',
+        )
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
+            height=280,
+            margin=dict(l=10, r=10, t=40, b=10),
+            title=dict(
+                text=f"Net Foreign Flow – {ticker}",
+                font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
+            ),
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+        )
+        return fig, df, stats
+
+    # ── 5. Build chart net foreign + price line ──
+    df_chart = df.copy()
+    df_chart['date_str'] = pd.to_datetime(df_chart['date']).dt.strftime("%d %b")
+
+    bar_colors = ['#10b981' if v >= 0 else '#ef4444' for v in df_chart['net_foreign']]
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=df['date_str'], y=df['buy_bar'], name="Foreign Buy",
-        marker_color="#10b981",
-        hovertemplate="<b>Foreign Buy</b>: %{y:,.0f}<extra></extra>"
+        x=df_chart['date_str'], y=df_chart['net_foreign'], name="Net F Buy",
+        marker_color=bar_colors,
+        customdata=[['Net F Buy' if v >= 0 else 'Net F Sell'] for v in df_chart['net_foreign']],
+        hovertemplate="<b>%{customdata[0]}</b>: %{y:,.0f}<extra></extra>"
     ))
-    fig.add_trace(go.Bar(
-        x=df['date_str'], y=df['sell_bar'], name="Foreign Sell",
-        marker_color="#ef4444",
-        hovertemplate="<b>Foreign Sell</b>: %{y:,.0f}<extra></extra>"
+    fig.add_trace(go.Scatter(
+        x=df_chart['date_str'], y=df_chart['close'], mode="lines", name="Price",
+        line=dict(color="#0284c7", width=2), yaxis="y2",
+        hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
     ))
-    if df['price'].notna().any():
-        fig.add_trace(go.Scatter(
-            x=df['date_str'], y=df['price'], mode="lines", name="Price",
-            line=dict(color="#0284c7", width=2), yaxis="y2",
-            hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
-        ))
 
-    # ── Highlight hari terakhir kalau IDX berhasil ──
-    if idx_data:
-        last_date = df['date_str'].iloc[-1]
-        fig.add_annotation(
-            x=last_date, y=1.0, yref='paper',
-            text="IDX Asli",
-            showarrow=False,
-            yanchor='bottom',
-            font=dict(size=9, color='#a855f7'),
-            bgcolor='rgba(168, 85, 247, 0.15)',
-            bordercolor='#a855f7', borderwidth=1, borderpad=2,
-        )
+    date_range = f"{df_chart['date_str'].iloc[0]} – {df_chart['date_str'].iloc[-1]}"
 
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
+        height=380, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Foreign Flow (Foreign + BUMN, 30D){source_label} – {ticker}",
+            text=f"Net Foreign Flow – {ticker} <span style='font-size:11px;color:#64748b;'>({date_range})</span>",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         legend=dict(
-            orientation="h", yanchor="top", y=-0.15,
+            orientation="h", yanchor="top", y=-0.18,
             xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")
         ),
         xaxis=dict(
@@ -3649,15 +3629,16 @@ def build_foreign_flow_chart(data):
             spikethickness=1, spikecolor="#64748b", spikedash="dot"
         ),
         yaxis=dict(
-            title="Net Foreign Value (Rp)", showgrid=True, gridcolor="#262626",
-            zeroline=True, zerolinecolor="#525252"
+            title="Net Foreign (Rp)", showgrid=True, gridcolor="#262626",
+            zeroline=True, zerolinecolor="#525252",
+            tickformat=".2s",
         ),
         yaxis2=dict(
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
 
-    return fig, df
+    return fig, df, stats
 
 def _ipf_allocate(row_sums, col_sums, iterations=20):
     """
@@ -3985,12 +3966,40 @@ def display_bandarmology_tab(ticker):
     # ═══════════════════════════════════════════════
     # CHART 3: FOREIGN FLOW
     # ═══════════════════════════════════════════════
-    st.markdown("#### 3. Foreign Flow (Foreign + BUMN)")
-    fig3, df3 = build_foreign_flow_chart(data)
-    if fig3 is not None and df3 is not None and len(df3) > 0:
-        render_plotly_realtime(fig3, height=420)
+        st.markdown("#### 3. Foreign Flow")
+    fig3, df3, stats3 = build_foreign_flow_chart(data)
+
+    # ── CARD ala Stockbit ──
+    if stats3:
+        fb_str = fmt_money(stats3['fb'])
+        fs_str = fmt_money(stats3['fs'])
+        net_str = fmt_money(stats3['net'])
+        net_color = "#10b981" if stats3['net'] >= 0 else "#ef4444"
+        net_sign = "+" if stats3['net'] >= 0 else ""
+
+        st.markdown(f"""
+        <div style="background:#1a1d24; border-radius:8px; padding:14px 18px; margin:8px 0 12px 0; border:1px solid #262626; display:flex; justify-content:space-around; align-items:center; font-family:-apple-system, sans-serif;">
+            <div style="text-align:center;">
+                <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">F Buy</div>
+                <div style="color:#10b981; font-size:18px; font-weight:600;">{fb_str}</div>
+            </div>
+            <div style="color:#334155; font-size:18px;">|</div>
+            <div style="text-align:center;">
+                <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">F Sell</div>
+                <div style="color:#ef4444; font-size:18px; font-weight:600;">{fs_str}</div>
+            </div>
+            <div style="color:#334155; font-size:18px;">|</div>
+            <div style="text-align:center;">
+                <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Net F</div>
+                <div style="color:{net_color}; font-size:18px; font-weight:600;">{net_sign}{net_str}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if fig3 is not None:
+        render_plotly_realtime(fig3, height=380)
     else:
-        st.caption("(Data harga harian tidak tersedia dari yfinance)")
+        st.caption("(Data foreign flow tidak tersedia — tunggu cron IDX akumulasi data)")
 
     st.divider()
 
@@ -4578,40 +4587,6 @@ with st.sidebar:
     with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
         render_broksum_scan_ui(api_key=st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
-    # ▼ TEST SEMENTARA — hapus kalau sudah selesai
-    if st.button("🧪 Test Save Foreign", use_container_width=True, key="test_foreign_btn"):
-        # ── DEBUG ──
-        try:
-            from curl_cffi import requests as curl_test
-            st.write("✅ `curl_cffi` installed")
-            try:
-                test_url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=1&start=0"
-                test_headers = {
-                    "accept": "application/json, text/plain, */*",
-                    "egrum": "isAjax:true",
-                    "referer": "https://www.idx.co.id/",
-                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "x-requested-with": "XMLHttpRequest",
-                }
-                r = curl_test.get(test_url, headers=test_headers,
-                                   timeout=15, impersonate="chrome120")
-                st.write(f"📡 HTTP Status: `{r.status_code}`")
-                st.write(f"📄 Body preview: `{r.text[:200]}`")
-            except Exception as e:
-                st.write(f"❌ Fetch error: {type(e).__name__}: {e}")
-        except ImportError as e:
-            st.write(f"❌ `curl_cffi` NOT installed: {e}")
-            st.write("→ Tambah `curl_cffi` ke `requirements.txt`")
-
-        # ── TEST SAVE ──
-        result = save_foreign_flow_snapshot("BBRI")
-        st.write(f"Save result: `{result}`")
-        df_test = load_foreign_flow_history("BBRI", days=30)
-        if df_test is not None:
-            st.write(f"Rows: {len(df_test)}")
-            st.dataframe(df_test)
-        else:
-            st.warning("No data yet")
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
             sheet = get_gsheet().worksheet("riwayat")
