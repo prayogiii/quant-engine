@@ -3333,11 +3333,25 @@ def build_broker_flow_chart(data):
     seller_colors = ["#ef4444", "#f97316", "#eab308", "#ec4899"]
 
     # Helper: hitung cumulative flow dengan time-pattern
+    _rets = df['Close'].pct_change().fillna(0).values
+    _std = np.std(_rets) if np.std(_rets) > 0 else 1e-9
+    _ret_norm = np.clip(_rets / (_std * 2), -1.0, 1.0)   # -1 s/d +1
+
     def _calc_flow_cum(category, target, broker_code):
         weights = _intraday_weight_profile(times_list, category, broker_code)
-        signal = weights * direction_arr
-        cum = np.cumsum(signal)
-        final = abs(cum[-1]) if len(cum) > 0 and abs(cum[-1]) > 0 else 1.0
+
+        # Behavior per kategori:
+        # Foreign/BUMN → kontrarian (beli saat turun, jual saat naik)
+        # Domestic → momentum (beli saat naik, jual saat turun)
+        if category in ("Foreign", "BUMN"):
+            strength = 0.5 - _ret_norm * 0.5   # tinggi saat return negatif
+        else:
+            strength = 0.5 + _ret_norm * 0.5   # tinggi saat return positif
+
+        strength = np.clip(strength, 0.10, 1.00)
+        slope = weights * strength             # selalu positif → monotonik
+        cum = np.cumsum(slope)
+        final = cum[-1] if len(cum) > 0 and cum[-1] > 0 else 1.0
         return cum / final * target
 
     # Buyer flows
@@ -3369,7 +3383,7 @@ def build_broker_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
+            text=f"Broker Flow ({interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         showlegend=False,
@@ -3450,7 +3464,7 @@ def build_trade_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Trade Flow (Intraday {interval}) – {data['ticker']}",
+            text=f"Trade Flow ({interval}) – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         showlegend=False,
