@@ -3290,7 +3290,7 @@ def build_broker_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
+            text=f"Broker Flow ({interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         showlegend=False,
@@ -3942,10 +3942,10 @@ def display_bandarmology_tab(ticker):
         )
         return
 
-    st.markdown(f"### 🏦 Bandarmology – {data['ticker']}")
+    st.markdown(f"### 🕵🏻‍♂️ Bandarmology – {data['ticker']}")
     st.caption(
         f"Snapshot: **{data['upload_date']}** | Status: **{data['bandarmology_status']}** "
-        f"| ℹ️ Flow intraday = interpolasi dari snapshot broksum (Opsi Hybrid)"
+        f"| ℹ️ Flow intraday = interpolasi dari snapshot broksum "
     )
     if data.get('summary_narrative'):
         st.info(f"📝 {data['summary_narrative']}")
