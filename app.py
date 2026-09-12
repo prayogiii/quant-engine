@@ -984,25 +984,46 @@ def get_gsheet():
     return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
 
 def init_sheets():
-    """Membuat sheet 'riwayat', 'v12_memory', 'v12_predictions', dan 'broksum_history' jika belum ada."""
+    """Membuat sheet 'riwayat', 'v12_memory', 'v12_predictions', 'broksum_history', dan 'foreign_flow_history' jika belum ada."""
     try:
         sheet = get_gsheet()
-        existing = {ws.title: ws for ws in sheet.worksheets()}   # ⬅️ ubah di sini
+        existing = {ws.title: ws for ws in sheet.worksheets()}
+
         if "riwayat" not in existing:
             sheet.add_worksheet("riwayat", rows=3000, cols=35)
+
         if "v12_memory" not in existing:
             sheet.add_worksheet("v12_memory", rows=100, cols=3)
+
         if "v12_predictions" not in existing:
             sheet.add_worksheet("v12_predictions", rows=500, cols=9)
         else:
             ws = existing["v12_predictions"]
             if ws.col_count < 9:
                 ws.add_cols(9 - ws.col_count)
+
         if "riwayat_actual" not in existing:
             sheet.add_worksheet("riwayat_actual", rows=100, cols=7)
+
         if "broksum_history" not in existing:
             ws = sheet.add_worksheet("broksum_history", rows=2000, cols=8)
-            ws.update("A1:H1", [["ticker", "upload_date", "bandarmology_status", "top_buyers", "top_sellers", "summary_narrative", "full_data", "source"]], value_input_option='RAW')
+            ws.update(
+                "A1:H1",
+                [["ticker", "upload_date", "bandarmology_status", "top_buyers",
+                  "top_sellers", "summary_narrative", "full_data", "source"]],
+                value_input_option='RAW'
+            )
+
+        # ▼ BARU: Sheet foreign_flow_history
+        if "foreign_flow_history" not in existing:
+            ws = sheet.add_worksheet("foreign_flow_history", rows=5000, cols=7)
+            ws.update(
+                "A1:G1",
+                [["ticker", "date", "close",
+                  "foreign_buy", "foreign_sell", "net_foreign", "source"]],
+                value_input_option='RAW'
+            )
+
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -1168,6 +1189,174 @@ def get_latest_broksum_for_ticker(ticker):
     except Exception as e:
         st.error(f"❌ Error get latest broksum: {e}")
         return None
+    
+@st.cache_data(ttl=1800, show_spinner=False)
+def _fetch_idx_all_stock_summary():
+    """Ambil semua data saham dari IDX sekali request (cache 30 menit)."""
+    url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=9999&start=0"
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9,id;q=0.8",
+        "egrum": "isAjax:true",
+        "referer": "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "x-requested-with": "XMLHttpRequest",
+    }
+    try:
+        try:
+            from curl_cffi import requests as curl_requests
+            r = curl_requests.get(url, headers=headers, timeout=25,
+                                   impersonate="chrome120")
+        except ImportError:
+            r = requests.get(url, headers=headers, timeout=20)
+
+        if r.status_code != 200:
+            return None
+        payload = r.json()
+        if isinstance(payload, dict):
+            return payload.get("data") or payload.get("Data") or []
+        if isinstance(payload, list):
+            return payload
+        return None
+    except Exception:
+        return None
+    
+def save_foreign_flow_snapshot(ticker):
+    """
+    Ambil data foreign flow IDX hari ini, simpan ke sheet.
+    Skip kalau ticker + tanggal sudah ada di sheet.
+    Return: True kalau berhasil/skip, False kalau gagal.
+    """
+    try:
+        ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+        if not ticker_clean:
+            return False
+
+        items = _fetch_idx_all_stock_summary()
+        if not items:
+            return False
+
+        row_data = None
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            code = str(it.get("StockCode", "")).upper().strip()
+            if code != ticker_clean:
+                continue
+
+            def _f(k):
+                v = it.get(k)
+                if v in (None, "", "N/A", "-"):
+                    return 0.0
+                try:
+                    return float(str(v).replace(",", ""))
+                except Exception:
+                    return 0.0
+
+            fb = _f("ForeignBuy")
+            fs = _f("ForeignSell")
+            close = _f("Close")
+
+            fb_rp = fb * close if close > 0 else 0.0
+            fs_rp = fs * close if close > 0 else 0.0
+
+            date_str = str(it.get("Date") or "")[:10]
+            if not date_str:
+                date_str = datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d")
+
+            row_data = {
+                "ticker": ticker_clean,
+                "date": date_str,
+                "close": close,
+                "foreign_buy": fb_rp,
+                "foreign_sell": fs_rp,
+                "net_foreign": fb_rp - fs_rp,
+                "source": "idx",
+            }
+            break
+
+        if not row_data:
+            return False
+
+        sheet = get_gsheet().worksheet("foreign_flow_history")
+        records = sheet.get_all_records()
+
+        # Cek duplikat: ticker + date
+        for r in records:
+            if (str(r.get("ticker", "")).upper() == row_data["ticker"]
+                    and str(r.get("date", "")) == row_data["date"]):
+                return True   # sudah ada, skip
+
+        sheet.append_row([
+            row_data["ticker"],
+            row_data["date"],
+            row_data["close"],
+            row_data["foreign_buy"],
+            row_data["foreign_sell"],
+            row_data["net_foreign"],
+            row_data["source"],
+        ], value_input_option='RAW')
+        return True
+
+    except Exception as e:
+        st.error(f"❌ Gagal simpan foreign flow snapshot: {e}")
+        return False
+def load_foreign_flow_history(ticker, days=30):
+    """
+    Ambil history foreign flow dari sheet.
+    Return: DataFrame [date, close, foreign_buy, foreign_sell, net_foreign]
+            atau None kalau kosong.
+    """
+    try:
+        ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+        sheet = get_gsheet().worksheet("foreign_flow_history")
+        records = sheet.get_all_records()
+
+        rows = []
+        for r in records:
+            if str(r.get("ticker", "")).upper() != ticker_clean:
+                continue
+            try:
+                rows.append({
+                    "date": str(r.get("date", "")),
+                    "close": float(r.get("close", 0) or 0),
+                    "foreign_buy": float(r.get("foreign_buy", 0) or 0),
+                    "foreign_sell": float(r.get("foreign_sell", 0) or 0),
+                    "net_foreign": float(r.get("net_foreign", 0) or 0),
+                })
+            except Exception:
+                continue
+
+        if not rows:
+            return None
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values("date").tail(days).reset_index(drop=True)
+        return df if not df.empty else None
+
+    except Exception:
+        return None
+def fmt_money(v):
+    """Format Rupiah dengan satuan T/B/M/K."""
+    try:
+        v = float(v)
+    except Exception:
+        return "0"
+    av = abs(v)
+    sign = "-" if v < 0 else ""
+    if av >= 1e12:
+        return f"{sign}{av/1e12:.2f}T"
+    if av >= 1e9:
+        return f"{sign}{av/1e9:.2f}B"
+    if av >= 1e6:
+        return f"{sign}{av/1e6:.2f}M"
+    if av >= 1e3:
+        return f"{sign}{av/1e3:.1f}K"
+    return f"{sign}{av:,.0f}"
 
 def analyze_broksum_insight_with_gemini(ticker, broksum_data, price_data, api_key):
     """
@@ -4389,6 +4578,16 @@ with st.sidebar:
     with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
         render_broksum_scan_ui(api_key=st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
+    # ▼ TEST SEMENTARA — hapus kalau sudah selesai
+    if st.button("🧪 Test Save Foreign", use_container_width=True, key="test_foreign_btn"):
+        result = save_foreign_flow_snapshot("BBRI")
+        st.write(f"Save result: `{result}`")
+        df_test = load_foreign_flow_history("BBRI", days=30)
+        if df_test is not None:
+            st.write(f"Rows: {len(df_test)}")
+            st.dataframe(df_test)
+        else:
+            st.warning("No data yet")
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
             sheet = get_gsheet().worksheet("riwayat")
