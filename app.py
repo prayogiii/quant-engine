@@ -2551,7 +2551,7 @@ def build_broker_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=50, b=15),
+        height=480, margin=dict(l=10, r=10, t=50, b=75),
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
@@ -2560,10 +2560,10 @@ def build_broker_flow_chart(data):
         ),
         legend=dict(
             orientation="h",
-            yanchor="top", y=0.99,
-            xanchor="right", x=0.99,
+            yanchor="top", y=-0.18,
+            xanchor="center", x=0.5,
             font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(15,17,22,0.80)"
+            bgcolor="rgba(0,0,0,0)"
         ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
@@ -2625,7 +2625,7 @@ def build_trade_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=50, b=15), barmode="relative",
+        height=480, margin=dict(l=10, r=10, t=50, b=75), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
@@ -2634,10 +2634,10 @@ def build_trade_flow_chart(data):
         ),
         legend=dict(
             orientation="h",
-            yanchor="top", y=0.99,
-            xanchor="right", x=0.99,
+            yanchor="top", y=-0.18,
+            xanchor="center", x=0.5,
             font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(15,17,22,0.80)"
+            bgcolor="rgba(0,0,0,0)"
         ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
@@ -2713,7 +2713,7 @@ def build_foreign_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=50, b=15), barmode="relative",
+        height=480, margin=dict(l=10, r=10, t=50, b=75), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
@@ -2722,10 +2722,10 @@ def build_foreign_flow_chart(data):
         ),
         legend=dict(
             orientation="h",
-            yanchor="top", y=0.99,
-            xanchor="right", x=0.99,
+            yanchor="top", y=-0.18,
+            xanchor="center", x=0.5,
             font=dict(size=10, color="#94a3b8"),
-            bgcolor="rgba(15,17,22,0.80)"
+            bgcolor="rgba(0,0,0,0)"
         ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
