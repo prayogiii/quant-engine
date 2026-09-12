@@ -357,14 +357,18 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     components.html(html, height=iframe_h, scrolling=False)
 def render_sankey_interactive(fig, height=520):
     """
-    Sankey dengan:
-    - Chip broker untuk highlight
-    - Link gradient: warna source node → warna target node
-    - Tap ↻ Reset untuk kembali normal
+    Sankey interaktif lengkap:
+    - Chip broker untuk highlight (strict match, no cascade)
+    - Toggle Volume / Value
+    - Gradient link (source color → target color)
+    - Dynamic label (flow per broker saat highlight)
+    - Hover disabled
+    - Haptic feedback (Android)
     """
     if fig is None:
         return
 
+    # ── Extract chip labels dari node labels ──
     try:
         labels = list(fig.data[0].node.label or [])
     except Exception:
@@ -391,10 +395,7 @@ def render_sankey_interactive(fig, height=520):
     chips_html = ""
     for name in chip_labels:
         chips_html += (
-            f'<button class="chip" data-broker="{name}" '
-            f'style="background:#1e293b;color:#cbd5e1;border:1px solid #334155;'
-            f'border-radius:14px;padding:5px 12px;font-size:11px;cursor:pointer;'
-            f'margin:2px;">{name}</button>'
+            f'<button class="chip" data-broker="{name}">{name}</button>'
         )
 
     html = f"""
@@ -404,41 +405,93 @@ def render_sankey_interactive(fig, height=520):
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
         <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
         <style>
-            html, body {{ margin:0; padding:0; background:#0f1116;
-                font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                overflow:hidden; }}
-            #chart {{ width:100%; height:{height}px; }}
-            #panel {{ padding:6px 8px 10px 8px; background:#0f1116;
-                display:flex; flex-wrap:wrap; justify-content:center;
-                gap:4px; }}
-            .chip {{ user-select:none; -webkit-tap-highlight-color:transparent;
-                transition:all 0.15s; }}
-            .chip:active {{ background:#334155 !important; }}
-            .chip.active {{ background:#a855f7 !important; color:#fff !important;
-                border-color:#a855f7 !important; }}
-            #reset {{ background:rgba(168,85,247,0.15); color:#a855f7;
-                border:1px solid #a855f7; border-radius:14px;
-                padding:5px 14px; font-size:11px; cursor:pointer;
-                margin-left:6px; font-weight:bold; }}
-            #hint {{ text-align:center; color:#64748b; font-size:10px;
-                padding:2px 0 4px 0; }}
+            html, body {{
+                margin: 0; padding: 0;
+                background: #0f1116;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                overflow: hidden;
+            }}
+            #chart {{ width: 100%; height: {height}px; }}
+            #mode-toggle {{
+                display: flex; gap: 6px; justify-content: center;
+                padding: 6px 0 2px 0; background: #0f1116;
+            }}
+            .mode-btn {{
+                background: #1e293b; color: #94a3b8;
+                border: 1px solid #334155; border-radius: 16px;
+                padding: 6px 16px; font-size: 12px; font-weight: 600;
+                cursor: pointer; user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                transition: all 0.15s;
+            }}
+            .mode-btn:active {{ background: #334155; }}
+            .mode-btn.active {{
+                background: rgba(168, 85, 247, 0.20) !important;
+                color: #a855f7 !important;
+                border-color: #a855f7 !important;
+            }}
+            #hint {{
+                text-align: center; color: #64748b;
+                font-size: 10px; padding: 2px 0 4px 0;
+                background: #0f1116;
+            }}
+            #panel {{
+                padding: 4px 8px 10px 8px; background: #0f1116;
+                display: flex; flex-wrap: wrap; justify-content: center;
+                gap: 4px;
+            }}
+            .chip {{
+                background: #1e293b; color: #cbd5e1;
+                border: 1px solid #334155; border-radius: 14px;
+                padding: 5px 12px; font-size: 11px; cursor: pointer;
+                margin: 2px;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                transition: all 0.15s;
+            }}
+            .chip:active {{ background: #334155; }}
+            .chip.active {{
+                background: #a855f7 !important;
+                color: #fff !important;
+                border-color: #a855f7 !important;
+            }}
+            #reset {{
+                background: rgba(168, 85, 247, 0.15);
+                color: #a855f7;
+                border: 1px solid #a855f7;
+                border-radius: 14px;
+                padding: 5px 14px; font-size: 11px;
+                cursor: pointer; font-weight: bold;
+                margin: 2px 2px 2px 6px;
+                -webkit-tap-highlight-color: transparent;
+            }}
+            #reset:active {{ background: rgba(168, 85, 247, 0.30); }}
         </style>
     </head>
     <body>
-        <div id="chart"></div>
+        <div id="mode-toggle">
+            <button class="mode-btn active" data-mode="volume">📊 Volume (Lot)</button>
+            <button class="mode-btn" data-mode="value">💰 Value (Rp)</button>
+        </div>
         <div id="hint">👆 Tap broker di bawah untuk highlight</div>
         <div id="panel">
             {chips_html}
             <button id="reset">↻ Reset</button>
         </div>
+        <div id="chart"></div>
         <script>
             (function() {{
                 var figData = {fig_json};
-                var config = {{ displayModeBar:false, responsive:true,
-                    scrollZoom:false, displaylogo:false }};
+                var config = {{
+                    displayModeBar: false,
+                    responsive: true,
+                    scrollZoom: false,
+                    displaylogo: false
+                }};
                 var gd = document.getElementById('chart');
                 var SVG_NS = 'http://www.w3.org/2000/svg';
 
+                // ── Original state ──
                 var ORIG = JSON.parse(JSON.stringify(figData.data[0]));
                 var LAYOUT = JSON.parse(JSON.stringify(figData.layout));
 
@@ -446,12 +499,32 @@ def render_sankey_interactive(fig, height=520):
                 var sources = ORIG.link.source || [];
                 var targets = ORIG.link.target || [];
                 var origNodeColors = [].concat(ORIG.node.color || []);
-
-                // Simpan original labels & values untuk rebuild dinamis
                 var origNodeLabels = [].concat(ORIG.node.label || []);
                 var origLinkValues = [].concat(ORIG.link.value || []);
 
-                // Format value untuk label (auto-scale)
+                if (origNodeColors.length < labels.length) {{
+                    var base = origNodeColors[0] || '#a855f7';
+                    origNodeColors = labels.map(function(){{ return base; }});
+                }}
+
+                var GRAY_N = 'rgba(100, 116, 139, 0.20)';
+                var currentHighlight = null;
+                var CURRENT_MODE = 'volume';
+                var MODE_PAYLOAD = (figData.layout && figData.layout.meta && figData.layout.meta.mode_toggle) || null;
+
+                // ═══════════════════════════════════════════════════
+                // HELPER: Clean label (buang nilai dalam kurung)
+                // ═══════════════════════════════════════════════════
+                function cleanLabel(s) {{
+                    s = String(s).replace(/\\s*\\([^)]*\\)/g, '').trim();
+                    s = s.replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '').trim();
+                    s = s.replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
+                    return s;
+                }}
+
+                // ═══════════════════════════════════════════════════
+                // HELPER: Format value auto-scale
+                // ═══════════════════════════════════════════════════
                 function fmtFlow(v) {{
                     if (v >= 1e12) return (v/1e12).toFixed(2) + ' T';
                     if (v >= 1e9) return (v/1e9).toFixed(2) + ' B';
@@ -460,11 +533,12 @@ def render_sankey_interactive(fig, height=520):
                     return Math.round(v).toString();
                 }}
 
-                // Bangun label dinamis: node aktif = total flow aktif, non-aktif = code saja
+                // ═══════════════════════════════════════════════════
+                // HELPER: Build label dinamis (node aktif = flow, lain = kode saja)
+                // ═══════════════════════════════════════════════════
                 function buildDynamicLabels(activeNodes, activeLinksMap) {{
                     if (!activeLinksMap) return origNodeLabels.slice();
 
-                    // Hitung flow per node dari link aktif
                     var flowPerNode = {{}};
                     for (var i = 0; i < labels.length; i++) flowPerNode[i] = 0;
 
@@ -475,10 +549,8 @@ def render_sankey_interactive(fig, height=520):
                         flowPerNode[targets[j]] += v;
                     }}
 
-                    // Rebuild label
                     var out = [];
                     for (var k = 0; k < labels.length; k++) {{
-                        // Ambil broker code dari label asli (karakter A-Z di depan)
                         var codeMatch = String(origNodeLabels[k]).match(/^([A-Z]{{2,4}})/);
                         var code = codeMatch ? codeMatch[1] : String(origNodeLabels[k]).split(' ')[0];
 
@@ -491,19 +563,59 @@ def render_sankey_interactive(fig, height=520):
                     return out;
                 }}
 
-                var GRAY_N = 'rgba(100,116,139,0.20)';
-
-                var currentHighlight = null;
-
-                function cleanLabel(s) {{
-                    s = String(s).replace(/\\s*\\([^)]*\\)/g, '').trim();
-                    s = s.replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '').trim();
-                    s = s.replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
-                    return s;
+                // ═══════════════════════════════════════════════════
+                // HELPER: Build trace dengan warna & label sesuai state
+                // ═══════════════════════════════════════════════════
+                function buildTrace(activeNodes, activeLinksMap) {{
+                    var t = JSON.parse(JSON.stringify(ORIG));
+                    t.node.color = origNodeColors.map(function(c, i) {{
+                        return activeNodes[i] ? c : GRAY_N;
+                    }});
+                    t.link.color = sources.map(function() {{
+                        return 'rgba(148, 163, 184, 0.20)';
+                    }});
+                    t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
+                    return t;
                 }}
 
-                // ── Inject SVG gradient untuk setiap link ──
-                                function applyGradients(activeLinksMap) {{
+                // ═══════════════════════════════════════════════════
+                // HELPER: Cari link path elements (multi-selector + heuristic)
+                // ═══════════════════════════════════════════════════
+                function findLinkElements() {{
+                    var selectors = [
+                        'path.sankey-link',
+                        'g.sankey-links path',
+                        'g.sankey-links > path',
+                        'g.sankey > g > path.link',
+                        'g.sankey path'
+                    ];
+                    for (var i = 0; i < selectors.length; i++) {{
+                        try {{
+                            var els = gd.querySelectorAll(selectors[i]);
+                            if (els && els.length > 0) {{
+                                console.log('[Sankey] selector:', selectors[i], '→', els.length);
+                                return els;
+                            }}
+                        }} catch (e) {{}}
+                    }}
+                    var svg = gd.querySelector('svg');
+                    if (!svg) return null;
+                    var allPaths = svg.querySelectorAll('path');
+                    var links = [];
+                    allPaths.forEach(function(p) {{
+                        var d = p.getAttribute('d') || '';
+                        if (d.indexOf('C') !== -1 && d.length > 40) {{
+                            links.push(p);
+                        }}
+                    }});
+                    console.log('[Sankey] heuristic:', links.length, 'of', allPaths.length);
+                    return links.length > 0 ? links : null;
+                }}
+
+                // ═══════════════════════════════════════════════════
+                // HELPER: Inject SVG gradients ke link paths
+                // ═══════════════════════════════════════════════════
+                function applyGradients(activeLinksMap) {{
                     var svg = gd.querySelector('svg');
                     if (!svg) return;
 
@@ -514,21 +626,11 @@ def render_sankey_interactive(fig, height=520):
                     defs.setAttribute('id', 'sg-defs');
                     svg.insertBefore(defs, svg.firstChild);
 
-                    // Coba beberapa selector (beda versi Plotly beda class)
-                    var linkEls = gd.querySelectorAll('path.sankey-link');
+                    var linkEls = findLinkElements();
                     if (!linkEls || linkEls.length === 0) {{
-                        linkEls = gd.querySelectorAll('g.sankey g.link path');
-                    }}
-                    if (!linkEls || linkEls.length === 0) {{
-                        linkEls = gd.querySelectorAll('g.sankey path');
-                    }}
-                    if (!linkEls || linkEls.length === 0) {{
-                        console.warn('[Sankey] link path tidak ditemukan');
+                        console.warn('[Sankey] no link elements');
                         return;
                     }}
-
-                    // Debug: berapa link ketemu vs berapa link data
-                    // console.log('[Sankey] link elements:', linkEls.length, 'data:', sources.length);
 
                     var count = Math.min(linkEls.length, sources.length);
 
@@ -536,69 +638,51 @@ def render_sankey_interactive(fig, height=520):
                         var linkEl = linkEls[i];
                         var isActive = !activeLinksMap || activeLinksMap[i];
 
-                        var srcNode = sources[i];
-                        var tgtNode = targets[i];
-                        var srcColor = origNodeColors[srcNode] || '#64748b';
-                        var tgtColor = origNodeColors[tgtNode] || '#64748b';
+                        var srcColor = origNodeColors[sources[i]] || '#64748b';
+                        var tgtColor = origNodeColors[targets[i]] || '#64748b';
 
                         var gradId = 'sg-grad-' + i;
                         var grad = document.createElementNS(SVG_NS, 'linearGradient');
                         grad.setAttribute('id', gradId);
-                        // ▼ KUNCI FIX: objectBoundingBox — otomatis ikut bbox link
                         grad.setAttribute('gradientUnits', 'objectBoundingBox');
                         grad.setAttribute('x1', '0%');
                         grad.setAttribute('y1', '0%');
                         grad.setAttribute('x2', '100%');
                         grad.setAttribute('y2', '0%');
 
+                        var s1 = document.createElementNS(SVG_NS, 'stop');
+                        var s2 = document.createElementNS(SVG_NS, 'stop');
+
                         if (isActive) {{
-                            var s1 = document.createElementNS(SVG_NS, 'stop');
                             s1.setAttribute('offset', '0%');
                             s1.setAttribute('stop-color', srcColor);
-                            s1.setAttribute('stop-opacity', '0.85');
-
-                            var s2 = document.createElementNS(SVG_NS, 'stop');
+                            s1.setAttribute('stop-opacity', '0.90');
                             s2.setAttribute('offset', '100%');
                             s2.setAttribute('stop-color', tgtColor);
-                            s2.setAttribute('stop-opacity', '0.85');
+                            s2.setAttribute('stop-opacity', '0.90');
                         }} else {{
-                            // Gray out — gradient abu tipis
-                            var s1 = document.createElementNS(SVG_NS, 'stop');
                             s1.setAttribute('offset', '0%');
                             s1.setAttribute('stop-color', '#64748b');
-                            s1.setAttribute('stop-opacity', '0.06');
-
-                            var s2 = document.createElementNS(SVG_NS, 'stop');
+                            s1.setAttribute('stop-opacity', '0.05');
                             s2.setAttribute('offset', '100%');
                             s2.setAttribute('stop-color', '#64748b');
-                            s2.setAttribute('stop-opacity', '0.06');
+                            s2.setAttribute('stop-opacity', '0.05');
                         }}
 
                         grad.appendChild(s1);
                         grad.appendChild(s2);
                         defs.appendChild(grad);
 
-                        // Force fill pakai !important biar override Plotly
                         linkEl.setAttribute('fill', 'url(#' + gradId + ')');
                         linkEl.style.setProperty('fill', 'url(#' + gradId + ')', 'important');
                     }}
                 }}
 
-                    function buildTrace(activeNodes, activeLinksMap) {{
-                    var t = JSON.parse(JSON.stringify(ORIG));
-                    t.node.color = origNodeColors.map(function(c, i) {{
-                        return activeNodes[i] ? c : GRAY_N;
-                    }});
-                    t.link.color = sources.map(function() {{
-                        return 'rgba(148,163,184,0.20)';
-                    }});
-                    // ▼ Label dinamis: node aktif = flow ke broker terpilih
-                    t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
-                    return t;
-                }}
-
-                    function renderWithGradients(activeNodes, activeLinksMap) {{
-                    var t = buildTrace(activeNodes, activeLinksMap);  // ← tambah arg
+                // ═══════════════════════════════════════════════════
+                // RENDER: React + apply gradient setelah render selesai
+                // ═══════════════════════════════════════════════════
+                function renderWithGradients(activeNodes, activeLinksMap) {{
+                    var t = buildTrace(activeNodes, activeLinksMap);
                     return Plotly.react(gd, [t], LAYOUT, config).then(function() {{
                         return new Promise(function(resolve) {{
                             requestAnimationFrame(function() {{
@@ -611,6 +695,9 @@ def render_sankey_interactive(fig, height=520):
                     }});
                 }}
 
+                // ═══════════════════════════════════════════════════
+                // ACTION: Highlight broker
+                // ═══════════════════════════════════════════════════
                 function highlightBroker(brokerName) {{
                     var activeNodes = {{}};
                     var activeLinks = {{}};
@@ -631,7 +718,6 @@ def render_sankey_interactive(fig, height=520):
                     }}
 
                     currentHighlight = brokerName;
-
                     renderWithGradients(activeNodes, activeLinks);
 
                     document.querySelectorAll('.chip').forEach(function(c) {{
@@ -647,6 +733,9 @@ def render_sankey_interactive(fig, height=520):
                     }}
                 }}
 
+                // ═══════════════════════════════════════════════════
+                // ACTION: Reset
+                // ═══════════════════════════════════════════════════
                 function resetAll() {{
                     currentHighlight = null;
                     var allNodes = {{}};
@@ -657,17 +746,54 @@ def render_sankey_interactive(fig, height=520):
                     document.querySelectorAll('.chip').forEach(function(c) {{
                         c.classList.remove('active');
                     }});
+
                     if (navigator.vibrate) {{
                         try {{ navigator.vibrate(8); }} catch(e) {{}}
                     }}
                 }}
 
-                // Initial render
-                var initTrace = buildTrace((function(){{
-                    var a = {{}};
-                    for (var i = 0; i < labels.length; i++) a[i] = true;
-                    return a;
-                }})());
+                // ═══════════════════════════════════════════════════
+                // ACTION: Toggle mode Volume / Value
+                // ═══════════════════════════════════════════════════
+                function applyMode(mode) {{
+                    if (!MODE_PAYLOAD || !MODE_PAYLOAD[mode]) return;
+                    var md = MODE_PAYLOAD[mode];
+
+                    ORIG.link.value = md.link_values.slice();
+                    ORIG.node.label = md.node_labels.slice();
+                    origNodeLabels = md.node_labels.slice();
+                    origLinkValues = md.link_values.slice();
+                    labels = ORIG.node.label;
+
+                    CURRENT_MODE = mode;
+
+                    document.querySelectorAll('.mode-btn').forEach(function(b) {{
+                        if (b.getAttribute('data-mode') === mode) {{
+                            b.classList.add('active');
+                        }} else {{
+                            b.classList.remove('active');
+                        }}
+                    }});
+
+                    if (currentHighlight) {{
+                        highlightBroker(currentHighlight);
+                    }} else {{
+                        var allNodes = {{}};
+                        for (var i = 0; i < labels.length; i++) allNodes[i] = true;
+                        renderWithGradients(allNodes, null);
+                    }}
+
+                    if (navigator.vibrate) {{
+                        try {{ navigator.vibrate(8); }} catch(e) {{}}
+                    }}
+                }}
+
+                // ═══════════════════════════════════════════════════
+                // INITIAL RENDER + EVENT LISTENERS
+                // ═══════════════════════════════════════════════════
+                var initNodes = {{}};
+                for (var i = 0; i < labels.length; i++) initNodes[i] = true;
+                var initTrace = buildTrace(initNodes, null);
 
                 Plotly.newPlot(gd, [initTrace], LAYOUT, config).then(function() {{
                     requestAnimationFrame(function() {{
@@ -676,6 +802,15 @@ def render_sankey_interactive(fig, height=520):
                         }});
                     }});
 
+                    // Mode toggle listeners
+                    document.querySelectorAll('.mode-btn').forEach(function(b) {{
+                        b.addEventListener('click', function() {{
+                            var m = b.getAttribute('data-mode');
+                            if (m !== CURRENT_MODE) applyMode(m);
+                        }});
+                    }});
+
+                    // Chip listeners
                     document.querySelectorAll('.chip').forEach(function(c) {{
                         c.addEventListener('click', function() {{
                             var br = c.getAttribute('data-broker');
@@ -687,8 +822,10 @@ def render_sankey_interactive(fig, height=520):
                         }});
                     }});
 
+                    // Reset button
                     document.getElementById('reset').addEventListener('click', resetAll);
 
+                    // Native Sankey click (best-effort)
                     gd.on('plotly_click', function(data) {{
                         if (!data || !data.points || !data.points.length) return;
                         var pt = data.points[0];
