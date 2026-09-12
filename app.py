@@ -571,9 +571,9 @@ def render_sankey_interactive(fig, height=520):
                     t.node.color = origNodeColors.map(function(c, i) {{
                         return activeNodes[i] ? c : GRAY_N;
                     }});
-                    t.link.color = sources.map(function() {{
-                        return 'rgba(148, 163, 184, 0.20)';
-                    }});
+                    // ⚠️ JANGAN override link.color — biarkan warna source dari Python.
+                    // Kalau gradient JS berhasil, akan di-override oleh applyGradients.
+                    // Kalau gagal, minimal link tetap berwarna (bukan abu).
                     t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
                     return t;
                 }}
@@ -3414,8 +3414,9 @@ def build_broker_sankey(data):
             vol_values.append(flow_vol)
             val_values.append(flow_val)
 
+            # Warna link = warna source node (buyer) — opacity naik biar tegas
             rgb = category_rgb.get(b.get('category', 'Domestic'), "148, 163, 184")
-            link_colors.append(f"rgba({rgb}, 0.35)")
+            link_colors.append(f"rgba({rgb}, 0.55)")
 
     if not vol_values:
         return None
