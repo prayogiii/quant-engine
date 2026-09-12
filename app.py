@@ -94,6 +94,19 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                 display: inline-flex;
                 align-items: center;
                 white-space: nowrap;
+                cursor: pointer;
+                user-select: none;
+                -webkit-tap-highlight-color: transparent;
+                padding: 2px 6px;
+                border-radius: 4px;
+                transition: opacity 0.15s, background 0.15s;
+            }}
+            #legend .item.hidden {{
+                opacity: 0.30;
+                text-decoration: line-through;
+            }}
+            #legend .item:active {{
+                background: rgba(168, 85, 247, 0.20);
             }}
             #legend .swatch {{
                 display: inline-block;
@@ -132,7 +145,7 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                 var legendDiv = document.getElementById('legend');
 
                 Plotly.newPlot(gd, figData.data, figData.layout, config).then(function() {{
-                    // ── Bangun legend HTML dari trace ──
+                    // ── Bangun legend HTML dari trace (dengan interaksi) ──
                     var legendHtml = '';
                     for (var i = 0; i < gd._fullData.length; i++) {{
                         var t = gd._fullData[i];
@@ -140,11 +153,36 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         var color = (t.line && t.line.color) ||
                                     (t.marker && t.marker.color) ||
                                     '#a855f7';
-                        legendHtml += '<span class="item">' +
+                        legendHtml += '<span class="item" data-idx="' + i + '">' +
                                       '<span class="swatch" style="background:' + color + '"></span>' +
                                       name + '</span>';
                     }}
                     legendDiv.innerHTML = legendHtml;
+
+                    // ── Click handler: toggle trace visibility ──
+                    var hiddenTraces = {{}};
+                    legendDiv.querySelectorAll('.item').forEach(function(el) {{
+                        el.addEventListener('click', function() {{
+                            var idx = parseInt(el.getAttribute('data-idx'));
+                            var nowHidden = !hiddenTraces[idx];
+
+                            // Plotly: 'legendonly' = hidden, true = visible
+                            var vis = nowHidden ? 'legendonly' : true;
+                            Plotly.restyle(gd, {{ visible: vis }}, [idx]);
+
+                            hiddenTraces[idx] = nowHidden;
+                            if (nowHidden) {{
+                                el.classList.add('hidden');
+                            }} else {{
+                                el.classList.remove('hidden');
+                            }}
+
+                            // Haptic feedback (Android only)
+                            if (HAPTIC && navigator.vibrate) {{
+                                try {{ navigator.vibrate(10); }} catch(e) {{}}
+                            }}
+                        }});
+                    }});
 
                     // ── Ambil xValues ──
                     var xValues = null;
@@ -224,6 +262,9 @@ def render_plotly_realtime(fig, height=420, haptic=True):
 
                         var lines = ['<b>' + xVal + '</b>'];
                         for (var i = 0; i < yPerTrace.length; i++) {{
+                            // Skip trace yang di-hide via legend
+                            if (hiddenTraces[i]) continue;
+
                             var yv = yPerTrace[i][idx];
                             if (typeof yv === 'number' && !isNaN(yv)) {{
                                 var fv = yv.toLocaleString('id-ID', {{ maximumFractionDigits: 0 }});
