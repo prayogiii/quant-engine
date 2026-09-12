@@ -3714,6 +3714,25 @@ def build_broker_sankey(data):
 
 
 # ---------- TAB RENDERER ----------
+    # ── DEBUG SEMENTARA ──
+    with st.expander("🔧 DEBUG: Test IDX Access", expanded=False):
+        if st.button("Test IDX dari Server", key="test_idx_debug"):
+            try:
+                url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=5&start=0"
+                headers = {
+                    "accept": "application/json, text/plain, */*",
+                    "egrum": "isAjax:true",
+                    "referer": "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
+                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "x-requested-with": "XMLHttpRequest",
+                }
+                r = requests.get(url, headers=headers, timeout=15)
+                st.write(f"**Status:** `{r.status_code}`")
+                st.write(f"**Content-Type:** `{r.headers.get('Content-Type')}`")
+                st.code(r.text[:600], language="json")
+            except Exception as e:
+                st.error(f"Error: {e}")
+    # ── END DEBUG ──
 def display_bandarmology_tab(ticker):
     """Render section Bandarmology lengkap (4 chart realtime) di tab."""
     data = load_bandarmology_data(ticker)
