@@ -540,18 +540,33 @@ def render_sankey_interactive(fig, height=520):
                     t.node.color = origNodeColors.map(function(c, i) {{
                         return activeNodes[i] ? c : GRAY_N;
                     }});
-                    // ▼ FIX: Set warna link LANGSUNG di trace — fallback solid
-                    if (activeLinksMap) {{
-                        t.link.color = [];
-                        for (var i = 0; i < sources.length; i++) {{
-                            if (activeLinksMap[i]) {{
-                                t.link.color.push(origLinkColors[i] || 'rgba(148,163,184,0.55)');
-                            }} else {{
-                                t.link.color.push('rgba(100, 116, 139, 0.06)');
+                    // ▼ FIX: Selalu build array warna link yang bersih (defensive)
+                    try {{
+                        var baseLinkColor = 'rgba(148,163,184,0.55)';
+                        // Ambil warna asli — handle jika bukan array
+                        if (!Array.isArray(origLinkColors) || origLinkColors.length === 0) {{
+                            origLinkColors = [];
+                            for (var k = 0; k < sources.length; k++) {{
+                                origLinkColors.push(baseLinkColor);
                             }}
                         }}
+                        var newColors = [];
+                        for (var i = 0; i < sources.length; i++) {{
+                            if (!activeLinksMap) {{
+                                // Default: pakai warna asli
+                                newColors.push(origLinkColors[i] || baseLinkColor);
+                            }} else if (activeLinksMap[i]) {{
+                                // Aktif: warna asli
+                                newColors.push(origLinkColors[i] || baseLinkColor);
+                            }} else {{
+                                // Non-aktif: abu tipis
+                                newColors.push('rgba(100, 116, 139, 0.06)');
+                            }}
+                        }}
+                        t.link.color = newColors;
+                    }} catch(e) {{
+                        console.error('[Sankey] buildTrace link color error:', e);
                     }}
-                    // kalau activeLinksMap null → pakai warna asli dari Python (semua warna)
                     t.node.label = buildDynamicLabels(activeNodes, activeLinksMap);
                     return t;
                 }}
