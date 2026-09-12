@@ -20,7 +20,95 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 # Google Sheets integration
 import gspread
 from google.oauth2.service_account import Credentials
+import streamlit.components.v1 as components
 
+# ═══════════════════════════════════════════════════════════════
+# REALTIME PLOTLY HELPER
+# ═══════════════════════════════════════════════════════════════
+def render_plotly_realtime(fig, height=420):
+    """
+    Embed Plotly.js chart client-side untuk realtime tap-drag di mobile.
+    - Realtime hover cursor mengikuti jari
+    - Info panel di bawah chart update live
+    - Touch vertical = scroll halaman, horizontal = gerak spike
+    """
+    if fig is None:
+        return
+
+    fig_json = fig.to_json()
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+        <style>
+            html, body {{
+                margin: 0; padding: 0;
+                background: #0f1116;
+                font-family: 'Courier New', monospace;
+            }}
+            #chart {{ width: 100%; height: {height}px; }}
+            #info {{
+                padding: 8px 14px;
+                background: #1e293b;
+                color: #cbd5e1;
+                font-size: 12px;
+                border-radius: 6px;
+                margin: 4px 4px 6px 4px;
+                min-height: 20px;
+                line-height: 1.5;
+                border-left: 3px solid #a855f7;
+            }}
+            #info b {{ color: #a855f7; }}
+        </style>
+    </head>
+    <body>
+        <div id="chart"></div>
+        <div id="info">📱 <b>Tap &amp; geser</b> di chart untuk lihat nilai realtime</div>
+        <script>
+            var figData = {fig_json};
+            var config = {{
+                displayModeBar: false,
+                responsive: true,
+                scrollZoom: false,
+                displaylogo: false
+            }};
+
+            Plotly.newPlot('chart', figData.data, figData.layout, config).then(function(gd) {{
+                // Kunci: touch-action pan-y = vertical scroll lewat, horizontal drag ditangkap chart
+                var plotlyDiv = gd.querySelector('.plotly');
+                if (plotlyDiv) {{
+                    plotlyDiv.style.touchAction = 'pan-y';
+                }}
+
+                // Realtime hover update info panel
+                gd.on('plotly_hover', function(evt) {{
+                    if (!evt.points || evt.points.length === 0) return;
+                    var xVal = evt.points[0].x;
+                    var lines = ['📍 <b>' + xVal + '</b>'];
+                    evt.points.forEach(function(pt) {{
+                        var name = pt.data.name || '';
+                        var val = pt.y;
+                        if (typeof val === 'number' && !isNaN(val)) {{
+                            var formatted = val.toLocaleString('id-ID', {{ maximumFractionDigits: 0 }});
+                            lines.push(name + ': ' + formatted);
+                        }}
+                    }});
+                    document.getElementById('info').innerHTML = lines.join(' &nbsp;|&nbsp; ');
+                }});
+
+                // Resize handler
+                window.addEventListener('resize', function() {{
+                    Plotly.Plots.resize('chart');
+                }});
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    components.html(html, height=height + 60, scrolling=False)
 # ====================== FALLBACK HANDLERS ======================
 PIL_AVAILABLE = True
 try:
@@ -2322,7 +2410,7 @@ def build_broker_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
-    return fig
+    return fig, df
 
 
 # ---------- CHART 2: TRADE FLOW (TIME-SERIES) ----------
@@ -2391,7 +2479,7 @@ def build_trade_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
-    return fig
+    return fig, df
 
 
 # ---------- CHART 3: FOREIGN FLOW (DAILY TIME-SERIES) ----------
@@ -2473,7 +2561,7 @@ def build_foreign_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
-    return fig
+    return fig, df
 
 
 # ---------- CHART 4: BROKER DISTRIBUTION (SANKEY) ----------
@@ -2545,7 +2633,7 @@ def build_broker_sankey(data):
 
 # ---------- TAB RENDERER ----------
 def display_bandarmology_tab(ticker):
-    """Render section Bandarmology lengkap (4 chart) di tab."""
+    """Render section Bandarmology lengkap (4 chart realtime) di tab."""
     data = load_bandarmology_data(ticker)
 
     if not data:
@@ -2563,31 +2651,50 @@ def display_bandarmology_tab(ticker):
     if data.get('summary_narrative'):
         st.info(f"📝 {data['summary_narrative']}")
 
+    # ═══════════════════════════════════════════════
+    # CHART 1: BROKER FLOW
+    # ═══════════════════════════════════════════════
     st.markdown("#### 1. Broker Flow")
-    fig1 = build_broker_flow_chart(data)
-    if fig1:
-        st.plotly_chart(fig1, use_container_width=True, config={"displayModeBar": False})
+    fig1, df1 = build_broker_flow_chart(data)
+    if fig1 is not None and df1 is not None and len(df1) > 0:
+        render_plotly_realtime(fig1, height=420)
     else:
         st.caption("(Data harga intraday tidak tersedia dari yfinance)")
 
+    st.divider()
+
+    # ═══════════════════════════════════════════════
+    # CHART 2: TRADE FLOW
+    # ═══════════════════════════════════════════════
     st.markdown("#### 2. Trade Flow")
-    fig2 = build_trade_flow_chart(data)
-    if fig2:
-        st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
+    fig2, df2 = build_trade_flow_chart(data)
+    if fig2 is not None and df2 is not None and len(df2) > 0:
+        render_plotly_realtime(fig2, height=420)
     else:
         st.caption("(Data harga intraday tidak tersedia dari yfinance)")
 
+    st.divider()
+
+    # ═══════════════════════════════════════════════
+    # CHART 3: FOREIGN FLOW
+    # ═══════════════════════════════════════════════
     st.markdown("#### 3. Foreign Flow (Foreign + BUMN)")
-    fig3 = build_foreign_flow_chart(data)
-    if fig3:
-        st.plotly_chart(fig3, use_container_width=True, config={"displayModeBar": False})
+    fig3, df3 = build_foreign_flow_chart(data)
+    if fig3 is not None and df3 is not None and len(df3) > 0:
+        render_plotly_realtime(fig3, height=420)
     else:
         st.caption("(Data harga harian tidak tersedia dari yfinance)")
 
+    st.divider()
+
+    # ═══════════════════════════════════════════════
+    # CHART 4: SANKEY (TIDAK PAKAI EMBED)
+    # ═══════════════════════════════════════════════
     st.markdown("#### 4. Broker Distribution (Sankey)")
     fig4 = build_broker_sankey(data)
     if fig4:
-        st.plotly_chart(fig4, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig4, use_container_width=True,
+                        config={"displayModeBar": False})
         st.markdown("""
         <div style="display: flex; justify-content: center; gap: 20px; font-size: 12px; margin-top: 4px; color: #94a3b8;">
             <div><span style="color: #a855f7; font-size: 14px;">■</span> Domestic</div>
@@ -2598,10 +2705,16 @@ def display_bandarmology_tab(ticker):
     else:
         st.caption("(Tidak ada data buyer/seller yang cukup untuk diagram Sankey)")
 
+    # ═══════════════════════════════════════════════
+    # RIWAYAT UPLOAD
+    # ═══════════════════════════════════════════════
     if len(data['history']) > 1:
         with st.expander(f"📜 Riwayat Upload ({len(data['history'])} entri)"):
             for h in data['history'][:10]:
-                st.caption(f"• {h.get('upload_date', 'N/A')} — {h.get('bandarmology_status', 'N/A')}")
+                st.caption(
+                    f"• {h.get('upload_date', 'N/A')} — "
+                    f"{h.get('bandarmology_status', 'N/A')}"
+                )
 
 # ==========================================
 # KONFIGURASI HALAMAN & STYLING
