@@ -3199,26 +3199,51 @@ def build_broker_sankey(data):
     if not values:
         return None
 
-    def fmt(v):
-        return f"{v/1e6:,.2f}M" if v >= 1e6 else f"{v:,.0f}"
+    # ── Formatter inline (tanpa def function — hindari scope issue) ──
+    def _fv(v):
+        try:
+            v = float(v)
+        except Exception:
+            return "0"
+        if v >= 1e6:
+            return f"{v/1e6:,.2f}M"
+        return f"{v:,.0f}"
+
+    def _fval(v):
+        try:
+            v = float(v)
+        except Exception:
+            return "0"
+        if v >= 1e12: return f"{v/1e12:.2f} T"
+        if v >= 1e9:  return f"{v/1e9:.2f} B"
+        if v >= 1e6:  return f"{v/1e6:,.0f} M"
+        if v >= 1e3:  return f"{v/1e3:,.0f} K"
+        return f"{v:,.0f}"
+
+    labels_vol = []
+    for b in buyers:
+        labels_vol.append(f"{b['broker']} ({_fv(b['volume_lot'])})")
+    for s in sellers:
+        labels_vol.append(f"{s['broker']} ({_fv(s['volume_lot'])})")
+
+    labels_val = []
+    for b in buyers:
+        labels_val.append(f"{b['broker']} ({_fval(_value_of(b))})")
+    for s in sellers:
+        labels_val.append(f"{s['broker']} ({_fval(_value_of(s))})")
 
     cat_hex = {"Domestic": "#a855f7", "BUMN": "#10b981", "Foreign": "#ef4444"}
-    node_colors = [cat_hex.get(b['category'], "#94a3b8") for b in buyers] + \
-                  [cat_hex.get(s['category'], "#94a3b8") for s in sellers]
-    labels = [f"{b['broker']} ({fmt(b['volume_lot'])})" for b in buyers] + \
-             [f"{s['broker']} ({fmt(s['volume_lot'])})" for s in sellers]
-
-    # Defensive: redefine di sini biar gak bergantung scope di atas
-    _labels_vol = [f"{b['broker']} ({fmt_vol(b['volume_lot'])})" for b in buyers] + \
-                  [f"{s['broker']} ({fmt_vol(s['volume_lot'])})" for s in sellers]
-    _node_colors = [cat_hex.get(b['category'], "#94a3b8") for b in buyers] + \
-                   [cat_hex.get(s['category'], "#94a3b8") for s in sellers]
+    node_colors = []
+    for b in buyers:
+        node_colors.append(cat_hex.get(b['category'], "#94a3b8"))
+    for s in sellers:
+        node_colors.append(cat_hex.get(s['category'], "#94a3b8"))
 
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
         node=dict(
             pad=16, thickness=12, line=dict(color="#121212", width=1),
-            label=_labels_vol, color=_node_colors,
+            label=labels_vol, color=node_colors,
         ),
         link=dict(source=sources, target=targets,
                   value=vol_values, color=link_colors)
