@@ -465,11 +465,10 @@ def render_sankey_interactive(fig, height=520):
                 }}
 
                 // ── Inject SVG gradient untuk setiap link ──
-                function applyGradients(activeLinksMap) {{
+                                function applyGradients(activeLinksMap) {{
                     var svg = gd.querySelector('svg');
                     if (!svg) return;
 
-                    // Buang defs lama
                     var oldDefs = svg.querySelector('#sg-defs');
                     if (oldDefs) oldDefs.remove();
 
@@ -477,12 +476,26 @@ def render_sankey_interactive(fig, height=520):
                     defs.setAttribute('id', 'sg-defs');
                     svg.insertBefore(defs, svg.firstChild);
 
-                    var linkEls = gd.querySelectorAll('.sankey-link');
-                    if (!linkEls || linkEls.length === 0) return;
+                    // Coba beberapa selector (beda versi Plotly beda class)
+                    var linkEls = gd.querySelectorAll('path.sankey-link');
+                    if (!linkEls || linkEls.length === 0) {{
+                        linkEls = gd.querySelectorAll('g.sankey g.link path');
+                    }}
+                    if (!linkEls || linkEls.length === 0) {{
+                        linkEls = gd.querySelectorAll('g.sankey path');
+                    }}
+                    if (!linkEls || linkEls.length === 0) {{
+                        console.warn('[Sankey] link path tidak ditemukan');
+                        return;
+                    }}
 
-                    linkEls.forEach(function(linkEl, i) {{
-                        if (i >= sources.length) return;
+                    // Debug: berapa link ketemu vs berapa link data
+                    // console.log('[Sankey] link elements:', linkEls.length, 'data:', sources.length);
 
+                    var count = Math.min(linkEls.length, sources.length);
+
+                    for (var i = 0; i < count; i++) {{
+                        var linkEl = linkEls[i];
                         var isActive = !activeLinksMap || activeLinksMap[i];
 
                         var srcNode = sources[i];
@@ -490,43 +503,47 @@ def render_sankey_interactive(fig, height=520):
                         var srcColor = origNodeColors[srcNode] || '#64748b';
                         var tgtColor = origNodeColors[tgtNode] || '#64748b';
 
-                        var opacity = isActive ? '0.85' : '0.06';
-
                         var gradId = 'sg-grad-' + i;
                         var grad = document.createElementNS(SVG_NS, 'linearGradient');
                         grad.setAttribute('id', gradId);
-                        grad.setAttribute('gradientUnits', 'userSpaceOnUse');
+                        // ▼ KUNCI FIX: objectBoundingBox — otomatis ikut bbox link
+                        grad.setAttribute('gradientUnits', 'objectBoundingBox');
+                        grad.setAttribute('x1', '0%');
+                        grad.setAttribute('y1', '0%');
+                        grad.setAttribute('x2', '100%');
+                        grad.setAttribute('y2', '0%');
 
-                        // Bounding box link → koordinat gradient horizontal
-                        var bbox = {{ x:0, y:0, width:100, height:10 }};
-                        try {{
-                            var bb = linkEl.getBBox();
-                            if (bb && bb.width > 0) bbox = bb;
-                        }} catch(e) {{}}
+                        if (isActive) {{
+                            var s1 = document.createElementNS(SVG_NS, 'stop');
+                            s1.setAttribute('offset', '0%');
+                            s1.setAttribute('stop-color', srcColor);
+                            s1.setAttribute('stop-opacity', '0.85');
 
-                        grad.setAttribute('x1', bbox.x);
-                        grad.setAttribute('y1', bbox.y);
-                        grad.setAttribute('x2', bbox.x + bbox.width);
-                        grad.setAttribute('y2', bbox.y);
+                            var s2 = document.createElementNS(SVG_NS, 'stop');
+                            s2.setAttribute('offset', '100%');
+                            s2.setAttribute('stop-color', tgtColor);
+                            s2.setAttribute('stop-opacity', '0.85');
+                        }} else {{
+                            // Gray out — gradient abu tipis
+                            var s1 = document.createElementNS(SVG_NS, 'stop');
+                            s1.setAttribute('offset', '0%');
+                            s1.setAttribute('stop-color', '#64748b');
+                            s1.setAttribute('stop-opacity', '0.06');
 
-                        var s1 = document.createElementNS(SVG_NS, 'stop');
-                        s1.setAttribute('offset', '0%');
-                        s1.setAttribute('stop-color', isActive ? srcColor : '#64748b');
-                        s1.setAttribute('stop-opacity', opacity);
-
-                        var s2 = document.createElementNS(SVG_NS, 'stop');
-                        s2.setAttribute('offset', '100%');
-                        s2.setAttribute('stop-color', isActive ? tgtColor : '#64748b');
-                        s2.setAttribute('stop-opacity', opacity);
+                            var s2 = document.createElementNS(SVG_NS, 'stop');
+                            s2.setAttribute('offset', '100%');
+                            s2.setAttribute('stop-color', '#64748b');
+                            s2.setAttribute('stop-opacity', '0.06');
+                        }}
 
                         grad.appendChild(s1);
                         grad.appendChild(s2);
                         defs.appendChild(grad);
 
-                        // Override fill link — via attribute DAN style (biar aman)
+                        // Force fill pakai !important biar override Plotly
                         linkEl.setAttribute('fill', 'url(#' + gradId + ')');
-                        linkEl.style.fill = 'url(#' + gradId + ')';
-                    }});
+                        linkEl.style.setProperty('fill', 'url(#' + gradId + ')', 'important');
+                    }}
                 }}
 
                 function buildTrace(activeNodes) {{
@@ -534,9 +551,9 @@ def render_sankey_interactive(fig, height=520):
                     t.node.color = origNodeColors.map(function(c, i) {{
                         return activeNodes[i] ? c : GRAY_N;
                     }});
-                    // Link color = placeholder, akan di-override gradient
+                    // Placeholder abu tipis — biar kalau gradient gagal, tidak kelihatan putih
                     t.link.color = sources.map(function() {{
-                        return 'rgba(255,255,255,1)';
+                        return 'rgba(148,163,184,0.20)';
                     }});
                     return t;
                 }}
