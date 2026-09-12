@@ -3271,6 +3271,46 @@ def build_foreign_flow_chart(data):
     )
     return fig, df
 
+def _ipf_allocate(row_sums, col_sums, iterations=20):
+    """
+    Iterative Proportional Fitting.
+    Return: matrix X[i][j] s.t. sum_j X[i][j] ≈ row_sums[i] dan
+    sum_i X[i][j] ≈ col_sums[j].
+    """
+    n = len(row_sums)
+    m = len(col_sums)
+    if n == 0 or m == 0:
+        return []
+
+    total_row = sum(row_sums)
+    total_col = sum(col_sums)
+    if total_row <= 0 or total_col <= 0:
+        return [[0.0] * m for _ in range(n)]
+
+    total = min(total_row, total_col)
+    row_target = [r * total / total_row for r in row_sums]
+    col_target = [c * total / total_col for c in col_sums]
+
+    # Init semua cell = 1
+    X = [[1.0] * m for _ in range(n)]
+
+    for _ in range(iterations):
+        # Scale rows
+        for i in range(n):
+            s = sum(X[i])
+            if s > 0:
+                f = row_target[i] / s
+                for j in range(m):
+                    X[i][j] *= f
+        # Scale cols
+        for j in range(m):
+            s = sum(X[i][j] for i in range(n))
+            if s > 0:
+                f = col_target[j] / s
+                for i in range(n):
+                    X[i][j] *= f
+
+    return X
 
 # ---------- CHART 4: BROKER DISTRIBUTION (SANKEY) ----------
 def build_broker_sankey(data):
@@ -3352,45 +3392,52 @@ def build_broker_sankey(data):
         "Foreign": "239, 68, 68"
     }
 
-    for b in buyers:
-        bv = float(b.get('volume_lot', 0) or 0)
-        if bv <= 0:
-            continue
-        b_ppl = _val(b, global_price) / bv if bv > 0 else 0.0
+    # ── Hitung alokasi optimal pakai IPF ──
+    row_sums = [float(b.get('volume_lot', 0) or 0) for b in buyers]
+    col_sums = [float(s.get('volume_lot', 0) or 0) for s in sellers]
+    allocation = _ipf_allocate(row_sums, col_sums, iterations=20)
 
-        for s in sellers:
-            sv = float(s.get('volume_lot', 0) or 0)
-            if sv <= 0:
+    # ── Precompute value per lot untuk tiap buyer & seller ──
+    buyer_vpl = []   # value per lot
+    for i, b in enumerate(buyers):
+        bv = row_sums[i]
+        buyer_vpl.append(_val(b, global_price) / bv if bv > 0 else 0)
+
+    seller_vpl = []
+    for j, s in enumerate(sellers):
+        sv = col_sums[j]
+        seller_vpl.append(_val(s, global_price) / sv if sv > 0 else 0)
+
+    # ── Build links dari alokasi IPF ──
+    for i, b in enumerate(buyers):
+        if row_sums[i] <= 0:
+            continue
+        for j, s in enumerate(sellers):
+            if col_sums[j] <= 0:
                 continue
 
-            # Distribusi flow proporsional (min dari 2 rasio)
-            if total_buy > 0 and total_sell > 0:
-                flow_vol = min(bv * sv / total_buy, bv * sv / total_sell)
-            else:
-                flow_vol = 0.0
-
+            flow_vol = allocation[i][j] if (i < len(allocation) and j < len(allocation[i])) else 0.0
             if flow_vol <= 0:
                 continue
 
-            s_ppl = _val(s, global_price) / sv if sv > 0 else 0.0
-
-            if b_ppl > 0 and s_ppl > 0:
-                avg_ppl = (b_ppl + s_ppl) / 2
-            elif b_ppl > 0:
-                avg_ppl = b_ppl
-            elif s_ppl > 0:
-                avg_ppl = s_ppl
+            b_vpl = buyer_vpl[i]
+            s_vpl = seller_vpl[j]
+            if b_vpl > 0 and s_vpl > 0:
+                avg_vpl = (b_vpl + s_vpl) / 2
+            elif b_vpl > 0:
+                avg_vpl = b_vpl
+            elif s_vpl > 0:
+                avg_vpl = s_vpl
             else:
-                avg_ppl = global_price * 100
+                avg_vpl = global_price * 100
 
-            flow_val = flow_vol * avg_ppl
+            flow_val = flow_vol * avg_vpl
 
             sources.append(node_idx[f"{b.get('broker', '??')} (Buy)"])
             targets.append(node_idx[f"{s.get('broker', '??')} (Sell)"])
             vol_values.append(flow_vol)
             val_values.append(flow_val)
 
-            # Warna link = warna source node (buyer) — opacity naik biar tegas
             rgb = category_rgb.get(b.get('category', 'Domestic'), "148, 163, 184")
             link_colors.append(f"rgba({rgb}, 0.55)")
 
