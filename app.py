@@ -3210,22 +3210,21 @@ def build_broker_sankey(data):
 
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
-        hoverinfo="none",        # ← matikan hover gray-out
         node=dict(
             pad=16, thickness=12, line=dict(color="#121212", width=1),
             label=labels_vol, color=node_colors,
-            hoverinfo="none",    # ← matikan hover per node
         ),
         link=dict(source=sources, target=targets,
-                  value=vol_values, color=link_colors,
-                  hoverinfo="none")  # ← matikan hover per link
+                  value=vol_values, color=link_colors)
     )])
     fig.update_layout(
         template="plotly_dark", paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
         height=450, margin=dict(l=5, r=5, t=40, b=5),
+        hovermode=False,                    # ← tambah ini
         title=dict(text=f"Broker Distribution – {data['ticker']}",
                    font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'),
         font=dict(size=11, color="#94a3b8"),
+        meta={...}                          # tetap
     )
     return fig
 
