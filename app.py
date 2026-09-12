@@ -2551,15 +2551,23 @@ def build_broker_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=45, b=10),
+        height=420, margin=dict(l=10, r=10, t=50, b=15),
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
             text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(orientation="h", yanchor="top", y=-0.15,
-                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        legend=dict(
+            orientation="h",
+            yanchor="top", y=0.99,
+            xanchor="right", x=0.99,
+            font=dict(size=10, color="#94a3b8"),
+            bgcolor="rgba(15,17,22,0.80)",
+            bordercolor="#374151",
+            borderwidth=1,
+            borderpad=4
+        ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             tickmode="array", tickvals=tick_vals,
@@ -2620,15 +2628,23 @@ def build_trade_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
+        height=420, margin=dict(l=10, r=10, t=50, b=15), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
             text=f"Trade Flow (Intraday {interval}) – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(orientation="h", yanchor="top", y=-0.15,
-                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        legend=dict(
+            orientation="h",
+            yanchor="top", y=0.99,
+            xanchor="right", x=0.99,
+            font=dict(size=10, color="#94a3b8"),
+            bgcolor="rgba(15,17,22,0.80)",
+            bordercolor="#374151",
+            borderwidth=1,
+            borderpad=4
+        ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             tickmode="array", tickvals=tick_vals,
@@ -2703,15 +2719,23 @@ def build_foreign_flow_chart(data):
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
+        height=420, margin=dict(l=10, r=10, t=50, b=15), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
             text=f"Foreign Flow (Foreign + BUMN, 30D) – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        legend=dict(orientation="h", yanchor="top", y=-0.15,
-                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
+        legend=dict(
+            orientation="h",
+            yanchor="top", y=0.99,
+            xanchor="right", x=0.99,
+            font=dict(size=10, color="#94a3b8"),
+            bgcolor="rgba(15,17,22,0.80)",
+            bordercolor="#374151",
+            borderwidth=1,
+            borderpad=4
+        ),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             showspikes=True, spikemode="across", spikesnap="cursor",
