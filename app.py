@@ -1196,11 +1196,14 @@ def get_adaptive_weights(ticker, regime, v12_mem=None):
         elif acc>=0.35: w *= 0.5
         else: w = max(w*0.2, WEIGHT_MIN/2)
         w_pri[k] = max(WEIGHT_MIN, min(WEIGHT_MAX, w))
-    err = {k: mem.get('error_ema',{}).get(k,1.0) for k in FACTOR_KEYS}
-    scores = {k: 1.0/(err[k]+1e-6) for k in FACTOR_KEYS}
-    exp_s = {k: math.exp(v/SOFTMAX_TEMP) for k,v in scores.items()}
-    sum_exp = sum(exp_s.values())
-    sm = {k: v/sum_exp for k,v in exp_s.items()}
+        err = {k: mem.get('error_ema',{}).get(k,1.0) for k in FACTOR_KEYS}
+    # Clamp error minimal supaya score tidak meledak
+    scores = {k: 1.0/(max(err[k], 1e-3) + 1e-6) for k in FACTOR_KEYS}
+    # Stable softmax: subtract max sebelum exp → identik matematis, no overflow
+    max_score = max(scores.values()) if scores else 1.0
+    exp_s = {k: math.exp((v - max_score) / SOFTMAX_TEMP) for k, v in scores.items()}
+    sum_exp = sum(exp_s.values()) if sum(exp_s.values()) > 0 else 1.0
+    sm = {k: v / sum_exp for k, v in exp_s.items()}
     final = {}
     for k in FACTOR_KEYS:
         bw = w_pri[k]; sw = max(0.10, sm[k])
