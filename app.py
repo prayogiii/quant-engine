@@ -3966,7 +3966,7 @@ def display_bandarmology_tab(ticker):
     # ═══════════════════════════════════════════════
     # CHART 3: FOREIGN FLOW
     # ═══════════════════════════════════════════════
-        st.markdown("#### 3. Foreign Flow")
+    st.markdown("#### 3. Foreign Flow")
     fig3, df3, stats3 = build_foreign_flow_chart(data)
 
     # ── CARD ala Stockbit ──
