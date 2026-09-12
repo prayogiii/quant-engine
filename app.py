@@ -357,38 +357,40 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     components.html(html, height=iframe_h, scrolling=False)
 def render_sankey_interactive(fig, height=520):
     """
-    Sankey dengan highlight:
-    - Tap node/link di chart (kalau browser support)
-    - Tap chip broker di bawah (SELALU work di mobile)
-    - Tap ↻ untuk reset
+    Sankey dengan highlight via chip:
+    - Tap chip broker → hanya broker itu + link terkait yang tetap warna
+    - Node lain jadi abu-abu (TIDAK cascade)
+    - Tap ↻ Reset untuk kembali normal
     """
     if fig is None:
         return
 
-    # Extract daftar broker dari trace untuk bikin chips
     try:
         trace_data = fig.data[0]
         labels = list(trace_data.node.label or [])
     except Exception:
         labels = []
 
-    # Buat daftar chip dari label (buang angka nilai kalau ada)
     import re as _re
+
+    def _clean_label(s):
+        s = _re.sub(r'\s*\([^)]*\)', '', str(s)).strip()
+        s = _re.sub(r'^[\d\.,]+\s*[MBK]?\s*', '', s).strip()
+        s = _re.sub(r'\s*[\d\.,]+\s*[MBK]?$', '', s).strip()
+        return s
+
     chip_labels = []
     seen = set()
     for lb in labels:
-        clean = _re.sub(r'\s*\([^)]*\)', '', str(lb)).strip()
-        clean = _re.sub(r'^[\d\.,]+\s*[MBK]?\s*', '', clean).strip()
-        clean = _re.sub(r'\s*[\d\.,]+\s*[MBK]?$', '', clean).strip()
-        if clean and clean not in seen:
-            seen.add(clean)
-            chip_labels.append(clean)
+        c = _clean_label(lb)
+        if c and c not in seen:
+            seen.add(c)
+            chip_labels.append(c)
 
     fig_json = fig.to_json()
 
-    # Pre-generate chips HTML
     chips_html = ""
-    for i, name in enumerate(chip_labels):
+    for name in chip_labels:
         chips_html += (
             f'<button class="chip" data-broker="{name}" '
             f'style="background:#1e293b;color:#cbd5e1;border:1px solid #334155;'
@@ -437,7 +439,6 @@ def render_sankey_interactive(fig, height=520):
                     scrollZoom:false, displaylogo:false }};
                 var gd = document.getElementById('chart');
 
-                // Deep clone original
                 var ORIG = JSON.parse(JSON.stringify(figData.data[0]));
                 var LAYOUT = JSON.parse(JSON.stringify(figData.layout));
 
@@ -447,7 +448,6 @@ def render_sankey_interactive(fig, height=520):
                 var origNodeColors = [].concat(ORIG.node.color || []);
                 var origLinkColors = [].concat(ORIG.link.color || []);
 
-                // Normalisasi jadi array penuh
                 if (origNodeColors.length < labels.length) {{
                     var base = origNodeColors[0] || '#a855f7';
                     origNodeColors = labels.map(function(){{ return base; }});
@@ -460,15 +460,22 @@ def render_sankey_interactive(fig, height=520):
                 var GRAY_N = 'rgba(100,116,139,0.20)';
                 var GRAY_L = 'rgba(100,116,139,0.05)';
 
-                var currentHighlight = null;  // broker name aktif
+                var currentHighlight = null;
 
-                function buildTrace(activeSet) {{
+                function cleanLabel(s) {{
+                    s = String(s).replace(/\\s*\\([^)]*\\)/g, '').trim();
+                    s = s.replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '').trim();
+                    s = s.replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
+                    return s;
+                }}
+
+                function buildTrace(activeNodes, activeLinks) {{
                     var t = JSON.parse(JSON.stringify(ORIG));
                     t.node.color = origNodeColors.map(function(c, i) {{
-                        return activeSet.nodes[i] ? c : GRAY_N;
+                        return activeNodes[i] ? c : GRAY_N;
                     }});
                     t.link.color = origLinkColors.map(function(c, i) {{
-                        return activeSet.links[i] ? c : GRAY_L;
+                        return activeLinks[i] ? c : GRAY_L;
                     }});
                     return t;
                 }}
@@ -477,31 +484,28 @@ def render_sankey_interactive(fig, height=520):
                     var activeNodes = {{}};
                     var activeLinks = {{}};
                     var found = false;
-                    // Cari semua node yang label-nya mengandung brokerName
+
+                    // ── 1. Mark node yang labelnya PERSIS brokerName ──
                     for (var i = 0; i < labels.length; i++) {{
-                        var clean = String(labels[i]).replace(/\\s*\\([^)]*\\)/g, '')
-                            .replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '')
-                            .replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
-                        if (clean === brokerName || String(labels[i]).indexOf(brokerName) !== -1) {{
+                        if (cleanLabel(labels[i]) === brokerName) {{
                             activeNodes[i] = true;
                             found = true;
                         }}
                     }}
                     if (!found) return;
 
-                    // Aktifkan link yang nyentuh node aktif
+                    // ── 2. Mark link yang endpoint-nya node aktif ──
+                    // JANGAN expand activeNodes dari sini — biar tidak cascade
                     for (var j = 0; j < sources.length; j++) {{
                         if (activeNodes[sources[j]] || activeNodes[targets[j]]) {{
                             activeLinks[j] = true;
-                            activeNodes[sources[j]] = true;
-                            activeNodes[targets[j]] = true;
                         }}
                     }}
-                    Plotly.react(gd, [buildTrace({{nodes: activeNodes, links: activeLinks}})],
+
+                    Plotly.react(gd, [buildTrace(activeNodes, activeLinks)],
                         LAYOUT, config);
                     currentHighlight = brokerName;
 
-                    // Update chip style
                     document.querySelectorAll('.chip').forEach(function(c) {{
                         if (c.getAttribute('data-broker') === brokerName) {{
                             c.classList.add('active');
@@ -527,9 +531,7 @@ def render_sankey_interactive(fig, height=520):
                     }}
                 }}
 
-                // Initial render
                 Plotly.newPlot(gd, [ORIG], LAYOUT, config).then(function() {{
-                    // Attach chip listeners
                     document.querySelectorAll('.chip').forEach(function(c) {{
                         c.addEventListener('click', function() {{
                             var br = c.getAttribute('data-broker');
@@ -541,19 +543,14 @@ def render_sankey_interactive(fig, height=520):
                         }});
                     }});
 
-                    // Reset button
                     document.getElementById('reset').addEventListener('click', resetAll);
 
-                    // Native Sankey click (best-effort)
                     gd.on('plotly_click', function(data) {{
                         if (!data || !data.points || !data.points.length) return;
                         var pt = data.points[0];
                         if (pt.pointType === 'node' && typeof pt.pointNumber === 'number') {{
-                            var nodeLabel = String(labels[pt.pointNumber] || '');
-                            var clean = nodeLabel.replace(/\\s*\\([^)]*\\)/g, '')
-                                .replace(/^[\\d\\.,]+\\s*[MBK]?\\s*/, '')
-                                .replace(/\\s*[\\d\\.,]+\\s*[MBK]?$/, '').trim();
-                            if (clean) highlightBroker(clean);
+                            var cl = cleanLabel(labels[pt.pointNumber] || '');
+                            if (cl) highlightBroker(cl);
                         }}
                     }});
                 }});
