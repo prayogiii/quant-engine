@@ -4580,6 +4580,30 @@ with st.sidebar:
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     # ▼ TEST SEMENTARA — hapus kalau sudah selesai
     if st.button("🧪 Test Save Foreign", use_container_width=True, key="test_foreign_btn"):
+        # ── DEBUG ──
+        try:
+            from curl_cffi import requests as curl_test
+            st.write("✅ `curl_cffi` installed")
+            try:
+                test_url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=1&start=0"
+                test_headers = {
+                    "accept": "application/json, text/plain, */*",
+                    "egrum": "isAjax:true",
+                    "referer": "https://www.idx.co.id/",
+                    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "x-requested-with": "XMLHttpRequest",
+                }
+                r = curl_test.get(test_url, headers=test_headers,
+                                   timeout=15, impersonate="chrome120")
+                st.write(f"📡 HTTP Status: `{r.status_code}`")
+                st.write(f"📄 Body preview: `{r.text[:200]}`")
+            except Exception as e:
+                st.write(f"❌ Fetch error: {type(e).__name__}: {e}")
+        except ImportError as e:
+            st.write(f"❌ `curl_cffi` NOT installed: {e}")
+            st.write("→ Tambah `curl_cffi` ke `requirements.txt`")
+
+        # ── TEST SAVE ──
         result = save_foreign_flow_snapshot("BBRI")
         st.write(f"Save result: `{result}`")
         df_test = load_foreign_flow_history("BBRI", days=30)
