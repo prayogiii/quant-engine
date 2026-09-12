@@ -3190,72 +3190,235 @@ def build_trade_flow_chart(data):
     )
     return fig, df
 
+@st.cache_data(ttl=1800, show_spinner=False)   # cache 30 menit
+def _fetch_idx_foreign_flow(ticker, days=30):
+    """
+    Scrape Foreign Flow harian dari IDX Trading Summary.
+    Return: DataFrame [date, foreign_buy, foreign_sell, net_foreign] atau None.
+    """
+    ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.idx.co.id/",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    rows = []
+    today = datetime.now(pytz.timezone("Asia/Jakarta")).date()
+    max_iter = days + 20   # buffer weekend + libur bursa
+
+    for i in range(max_iter):
+        if len(rows) >= days:
+            break
+        d = today - timedelta(days=i)
+        if d.weekday() >= 5:   # skip Sabtu/Minggu
+            continue
+
+        date_str = d.strftime("%Y-%m-%d")
+        date_alt = d.strftime("%Y%m%d")
+
+        # Coba 2 format tanggal endpoint (beda versi IDX pakai beda format)
+        endpoints = [
+            f"https://www.idx.co.id/primary/TradingSummary/GetStockSummary"
+            f"?length=9999&start=0&date={date_str}",
+            f"https://www.idx.co.id/primary/TradingSummary/GetStockSummary"
+            f"?length=9999&start=0&date={date_alt}",
+        ]
+
+        items = None
+        for url in endpoints:
+            try:
+                r = requests.get(url, headers=headers, timeout=12)
+                if r.status_code != 200:
+                    continue
+                try:
+                    payload = r.json()
+                except Exception:
+                    continue
+                # Struktur: {"data": [...]} atau langsung list
+                if isinstance(payload, dict):
+                    items = payload.get("data") or payload.get("Data") or []
+                elif isinstance(payload, list):
+                    items = payload
+                if items:
+                    break
+            except Exception:
+                continue
+
+        if not items:
+            continue
+
+        # Cari baris yang match ticker
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            code = str(
+                it.get("StockCode") or it.get("KodeSaham") or ""
+            ).upper().strip()
+            if code != ticker_clean:
+                continue
+
+            def _f(*keys):
+                """Ambil nilai float dari beberapa kandidat field."""
+                for k in keys:
+                    v = it.get(k)
+                    if v not in (None, "", "N/A", "-"):
+                        try:
+                            return float(str(v).replace(",", ""))
+                        except Exception:
+                            continue
+                return 0.0
+
+            fb = _f(
+                "ForeignBuy", "ForeignBuyValue", "Foreign_Buy",
+                "ForeignBuyIDR", "ForeignBuyRp", "ForeignBuyValueIDR"
+            )
+            fs = _f(
+                "ForeignSell", "ForeignSellValue", "Foreign_Sell",
+                "ForeignSellIDR", "ForeignSellRp", "ForeignSellValueIDR"
+            )
+
+            # Kalau nilainya kecil banget (< 1e8), kemungkinan dalam lot → konversi ke Rupiah
+            close_px = _f("Close", "Previous", "ClosePrice", "Price")
+            if 0 < fb < 1e8 and close_px > 0:
+                fb *= 100 * close_px
+            if 0 < fs < 1e8 and close_px > 0:
+                fs *= 100 * close_px
+
+            rows.append({
+                "date": d,
+                "foreign_buy": abs(fb),
+                "foreign_sell": abs(fs),
+                "net_foreign": fb - fs,
+            })
+            break
+
+    if not rows:
+        return None
+
+    df = pd.DataFrame(rows).drop_duplicates(subset=["date"]).sort_values("date")
+    df = df[(df["foreign_buy"] > 0) | (df["foreign_sell"] > 0)]
+    return df if not df.empty else None
 
 # ---------- CHART 3: FOREIGN FLOW (DAILY TIME-SERIES) ----------
 def build_foreign_flow_chart(data):
     """
     Foreign Flow harian (30D):
-    Net foreign didistribusi dari total net foreign broksum (Foreign+BUMN)
-    mengikuti pola volume × arah × harga harian.
+    - Prioritas 1: data ASLI dari IDX Trading Summary
+    - Fallback: proxy dari snapshot broksum (Foreign + BUMN)
+    - Visual tetap sama, hanya label sumber yang beda
     """
     if not data:
         return None
 
-    df = _load_daily_price_data(data['ticker'], period="1mo")
-    if df is None or df.empty:
-        return None
+    source_label = ""
+    df = None
 
-    df = df.copy()
-    df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
-    df['proxy'] = df['Volume'].astype(float) * df['Close'].astype(float) * df['direction']
+    # ── Coba IDX dulu ──
+    try:
+        df_idx = _fetch_idx_foreign_flow(data['ticker'], days=30)
+    except Exception:
+        df_idx = None
 
-    FOREIGN_CATS = {"Foreign", "BUMN"}
-    fb = sum(b['volume_lot'] for b in data['buyers'] if b['category'] in FOREIGN_CATS)
-    fs = sum(s['volume_lot'] for s in data['sellers'] if s['category'] in FOREIGN_CATS)
-    net_foreign_lot = fb - fs
+    if df_idx is not None and not df_idx.empty:
+        df = df_idx.copy()
+        source_label = " (IDX Asli)"
 
-    total_proxy = df['proxy'].sum()
-    avg_price = df['Close'].mean()
+        # Merge harga harian dari yfinance untuk overlay
+        df_price = _load_daily_price_data(data['ticker'], period="1mo")
+        if df_price is not None and not df_price.empty:
+            try:
+                dfp = df_price.reset_index()
+                # Handle kolom Date (case bisa beda)
+                date_col = "Date" if "Date" in dfp.columns else dfp.columns[0]
+                dfp['date'] = pd.to_datetime(dfp[date_col]).dt.date
+                dfp_price = dfp[['date', 'Close']].rename(
+                    columns={'Close': 'price'}
+                )
+                df = df.merge(dfp_price, on='date', how='left')
+                df['price'] = df['price'].ffill().bfill()
+            except Exception:
+                df['price'] = None
+        else:
+            df['price'] = None
 
-    if abs(total_proxy) > 0 and net_foreign_lot != 0 and not pd.isna(avg_price):
-        target_value = net_foreign_lot * avg_price
-        df['net_foreign'] = df['proxy'] * (target_value / total_proxy)
+        df['date_str'] = pd.to_datetime(df['date']).dt.strftime("%d %b")
+
     else:
-        df['net_foreign'] = df['proxy']
+        # ── Fallback: proxy dari broksum snapshot ──
+        df_price = _load_daily_price_data(data['ticker'], period="1mo")
+        if df_price is None or df_price.empty:
+            return None
 
-    df['net_buy'] = df['net_foreign'].where(df['net_foreign'] > 0, 0)
-    df['net_sell'] = df['net_foreign'].where(df['net_foreign'] < 0, 0)
-    df['date'] = df.index.strftime("%d %b")
+        df = df_price.copy()
+        df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
+        df['typical'] = (df['High'] + df['Low'] + df['Close']) / 3.0
+        df['proxy'] = (df['Volume'].astype(float)
+                       * df['typical'].astype(float)
+                       * df['direction'])
+
+        FOREIGN_CATS = {"Foreign", "BUMN"}
+        fb = sum(b['volume_lot'] for b in data['buyers']
+                 if b['category'] in FOREIGN_CATS)
+        fs = sum(s['volume_lot'] for s in data['sellers']
+                 if s['category'] in FOREIGN_CATS)
+        net_foreign_lot = fb - fs
+
+        total_proxy = df['proxy'].sum()
+        avg_price = df['typical'].mean()
+
+        if abs(total_proxy) > 0 and net_foreign_lot != 0 and not pd.isna(avg_price):
+            target_value = net_foreign_lot * avg_price
+            df['net_foreign'] = df['proxy'] * (target_value / total_proxy)
+        else:
+            df['net_foreign'] = df['proxy']
+
+        df['foreign_buy'] = df['net_foreign'].where(df['net_foreign'] > 0, 0)
+        df['foreign_sell'] = df['net_foreign'].where(df['net_foreign'] < 0, 0)
+        df['price'] = df['Close']
+        df['date_str'] = df.index.strftime("%d %b")
+        source_label = " (Proxy)"
+
+    # ── Build bars ──
+    df['buy_bar'] = df['foreign_buy'].where(df['foreign_buy'] > 0, 0)
+    df['sell_bar'] = df['foreign_sell'].where(df['foreign_sell'] < 0, 0)
 
     fig = go.Figure()
-
     fig.add_trace(go.Bar(
-        x=df['date'], y=df['net_buy'], name="Foreign Buy",
+        x=df['date_str'], y=df['buy_bar'], name="Foreign Buy",
         marker_color="#10b981",
         hovertemplate="<b>Foreign Buy</b>: %{y:,.0f}<extra></extra>"
     ))
     fig.add_trace(go.Bar(
-        x=df['date'], y=df['net_sell'], name="Foreign Sell",
+        x=df['date_str'], y=df['sell_bar'], name="Foreign Sell",
         marker_color="#ef4444",
         hovertemplate="<b>Foreign Sell</b>: %{y:,.0f}<extra></extra>"
     ))
-    fig.add_trace(go.Scatter(
-        x=df['date'], y=df['Close'], mode="lines", name="Price",
-        line=dict(color="#0284c7", width=2), yaxis="y2",
-        hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
-    ))
+    if df['price'].notna().any():
+        fig.add_trace(go.Scatter(
+            x=df['date_str'], y=df['price'], mode="lines", name="Price",
+            line=dict(color="#0284c7", width=2), yaxis="y2",
+            hovertemplate="<b>Price</b>: %{y:,.0f}<extra></extra>"
+        ))
 
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0f1116", plot_bgcolor="#0f1116",
-        height=420, margin=dict(l=10, r=10, t=55, b=10), barmode="relative",
+        height=420, margin=dict(l=10, r=10, t=45, b=10), barmode="relative",
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Foreign Flow (Foreign + BUMN, 30D) – {data['ticker']}",
+            text=f"Foreign Flow (Foreign + BUMN, 30D){source_label} – {data['ticker']}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
-        showlegend=False,
+        legend=dict(orientation="h", yanchor="top", y=-0.15,
+                    xanchor="center", x=0.5, font=dict(size=11, color="#94a3b8")),
         xaxis=dict(
             showgrid=True, gridcolor="#262626", type="category",
             showspikes=True, spikemode="across", spikesnap="cursor",
@@ -3269,7 +3432,7 @@ def build_foreign_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
-    return fig, df
+    return fig
 
 def _ipf_allocate(row_sums, col_sums, iterations=20):
     """
