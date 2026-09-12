@@ -3970,15 +3970,16 @@ def display_bandarmology_tab(ticker):
     fig3, df3, stats3 = build_foreign_flow_chart(data)
 
     # ── CARD ala Stockbit ──
-    if stats3:
+        if stats3:
         fb_str = fmt_money(stats3['fb'])
         fs_str = fmt_money(stats3['fs'])
         net_str = fmt_money(stats3['net'])
         net_color = "#10b981" if stats3['net'] >= 0 else "#ef4444"
         net_sign = "+" if stats3['net'] >= 0 else ""
+        tanggal = stats3.get('date', '')
 
         st.markdown(f"""
-        <div style="background:#1a1d24; border-radius:8px; padding:14px 18px; margin:8px 0 12px 0; border:1px solid #262626; display:flex; justify-content:space-around; align-items:center; font-family:-apple-system, sans-serif;">
+        <div style="background:#1a1d24; border-radius:8px; padding:14px 18px; margin:8px 0 4px 0; border:1px solid #262626; display:flex; justify-content:space-around; align-items:center; font-family:-apple-system, sans-serif;">
             <div style="text-align:center;">
                 <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">F Buy</div>
                 <div style="color:#10b981; font-size:18px; font-weight:600;">{fb_str}</div>
@@ -3993,6 +3994,9 @@ def display_bandarmology_tab(ticker):
                 <div style="color:#94a3b8; font-size:11px; margin-bottom:4px;">Net F</div>
                 <div style="color:{net_color}; font-size:18px; font-weight:600;">{net_sign}{net_str}</div>
             </div>
+        </div>
+        <div style="text-align:center; color:#64748b; font-size:10px; margin-bottom:12px; font-style:italic;">
+            📊 Sumber: IDX resmi (data per {tanggal})
         </div>
         """, unsafe_allow_html=True)
 
