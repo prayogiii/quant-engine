@@ -3205,7 +3205,7 @@ def build_broker_sankey(data):
     labels = [f"{b['broker']} ({fmt(b['volume_lot'])})" for b in buyers] + \
              [f"{s['broker']} ({fmt(s['volume_lot'])})" for s in sellers]
 
-        fig = go.Figure(data=[go.Sankey(
+    fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
         hoverinfo="none",        # ← matikan hover gray-out
         node=dict(
