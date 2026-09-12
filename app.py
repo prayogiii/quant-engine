@@ -563,44 +563,56 @@ def render_sankey_interactive(fig, height=520):
                         '.sankey-link',
                         'path.sankey-link',
                         'g.sankey-links path',
+                        'g.sankey-links > path',
                         'g.link path',
-                        'g.sankey path'
+                        'g.sankey path',
+                        'path[class*="sankey"]',
+                        'path[class*="link"]'
                     ];
                     for (var i = 0; i < sels.length; i++) {{
                         try {{
                             var els = gd.querySelectorAll(sels[i]);
-                            if (els && els.length > 0) {{
-                                console.log('[Sankey] selector:', sels[i], '→', els.length, 'els');
-                                return els;
-                            }}
+                            console.log('[Sankey] try selector:', sels[i],
+                                        '→', els.length, 'elements');
+                            if (els && els.length > 0) return els;
                         }} catch (e) {{}}
                     }}
-                    // Heuristic fallback
                     var svg = gd.querySelector('svg');
-                    if (!svg) return null;
-                    var all = svg.querySelectorAll('path');
-                    var links = [];
-                    all.forEach(function(p) {{
+                    if (!svg) {{
+                        console.warn('[Sankey] ❌ no svg element');
+                        return null;
+                    }}
+                    var allPaths = svg.querySelectorAll('path');
+                    console.log('[Sankey] total paths in svg:', allPaths.length);
+                    var withCurve = [];
+                    allPaths.forEach(function(p) {{
                         var d = p.getAttribute('d') || '';
-                        if (d.indexOf('C') !== -1 && d.length > 60) links.push(p);
+                        if (d.indexOf('C') !== -1 || d.indexOf('c') !== -1) {{
+                            withCurve.push(p);
+                        }}
                     }});
-                    console.log('[Sankey] heuristic:', links.length, 'of', all.length, 'paths');
-                    return links.length > 0 ? links : null;
+                    console.log('[Sankey] paths with curve:', withCurve.length);
+                    if (withCurve.length > 0) return withCurve;
+                    return allPaths.length > 0 ? allPaths : null;
                 }}
 
                 function applyGradients(activeLinksMap) {{
+                    console.log('[Sankey] === applyGradients START ===');
+
                     var svg = gd.querySelector('svg');
                     if (!svg) {{
-                        console.warn('[Sankey] applyGradients: no svg yet');
+                        console.warn('[Sankey] no svg yet');
                         return false;
                     }}
 
                     var linkEls = findLinkElements();
                     if (!linkEls || linkEls.length === 0) {{
-                        console.warn('[Sankey] applyGradients: no link elements found');
+                        console.warn('[Sankey] ❌ no link elements found');
                         return false;
                     }}
+                    console.log('[Sankey] ✅ using', linkEls.length, 'link elements');
 
+                    // Buang defs lama
                     var oldDefs = svg.querySelector('#sg-defs');
                     if (oldDefs) oldDefs.remove();
                     var defs = document.createElementNS(SVG_NS, 'defs');
@@ -613,10 +625,15 @@ def render_sankey_interactive(fig, height=520):
                     for (var i = 0; i < count; i++) {{
                         var linkEl = linkEls[i];
                         var isActive = !activeLinksMap || activeLinksMap[i];
+
                         if (!isActive) continue;
 
                         var srcColor = origNodeColors[sources[i]] || '#64748b';
                         var tgtColor = origNodeColors[targets[i]] || '#64748b';
+                        if (i < 3) {{
+                            console.log('[Sankey] link', i, 'src:', sources[i],
+                                        srcColor, '→ tgt:', targets[i], tgtColor);
+                        }}
 
                         var gid = 'sg-grad-' + i;
                         var gr = document.createElementNS(SVG_NS, 'linearGradient');
@@ -633,16 +650,18 @@ def render_sankey_interactive(fig, height=520):
                         s2.setAttribute('offset', '100%');
                         s2.setAttribute('stop-color', tgtColor);
                         s2.setAttribute('stop-opacity', '0.85');
-                        gr.appendChild(s1); gr.appendChild(s2);
+                        gr.appendChild(s1);
+                        gr.appendChild(s2);
                         defs.appendChild(gr);
 
                         linkEl.setAttribute('fill', 'url(#' + gid + ')');
                         linkEl.style.setProperty('fill', 'url(#' + gid + ')', 'important');
+                        linkEl.setAttribute('opacity', '0.9');
                         applied++;
                     }}
 
-                    console.log('[Sankey] ✅ gradient applied:', applied,
-                        'of', count, 'links');
+                    console.log('[Sankey] ✅ gradient applied to', applied, 'of', count, 'links');
+                    console.log('[Sankey] === applyGradients END ===');
                     return applied > 0 || count === 0;
                 }}
 
