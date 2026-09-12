@@ -3219,87 +3219,11 @@ def load_bandarmology_data(ticker):
         'summary_narrative': latest.get('summary_narrative', ''),
     }
 
-def _intraday_weight_profile(times_list, category, broker_code="XX"):
-    """
-    Return array weight per bar.
-    - Base pattern per kategori (Foreign/BUMN U-shape, Domestic merata)
-    - + per-broker jitter deterministik supaya tiap broker beda
-    """
-    weights = np.ones(len(times_list), dtype=float)
-
-    # Seed deterministik dari broker code
-    seed = sum(ord(c) for c in str(broker_code).upper())
-    rng = np.random.RandomState(seed % 99991)
-
-    for i, t in enumerate(times_list):
-        try:
-            h, m = map(int, str(t).split(':'))
-            minutes = h * 60 + m
-        except Exception:
-            weights[i] = 1.0
-            continue
-
-        # ── Base pattern per kategori ──
-        if category == "Foreign":
-            # U-shape: aktif di buka + tutup, sepi di tengah
-            if minutes < 9 * 60 + 30:          # 09:00–09:30
-                w = 3.5
-            elif minutes < 10 * 60:             # 09:30–10:00
-                w = 1.8
-            elif minutes < 11 * 60:             # 10:00–11:00
-                w = 0.8
-            elif minutes < 14 * 60 + 30:        # 11:00–14:30
-                w = 0.35
-            elif minutes < 15 * 60:             # 14:30–15:00
-                w = 3.5
-            else:
-                w = 0.5
-        elif category == "BUMN":
-            # BUMN: mirip foreign tapi lebih spread (mulai agak siang)
-            if minutes < 10 * 60:               # 09:00–10:00
-                w = 1.5
-            elif minutes < 11 * 60:             # 10:00–11:00
-                w = 2.5
-            elif minutes < 14 * 60:             # 11:00–14:00
-                w = 1.0
-            elif minutes < 15 * 60:             # 14:00–15:00
-                w = 2.8
-            else:
-                w = 0.5
-        else:
-            # Domestic: agak naik di tengah + tutup
-            if minutes < 9 * 60 + 30:
-                w = 1.5
-            elif minutes < 11 * 60:
-                w = 1.2
-            elif minutes < 13 * 60 + 30:
-                w = 0.9
-            elif minutes < 14 * 60 + 30:
-                w = 1.4
-            elif minutes < 15 * 60:
-                w = 2.0
-            else:
-                w = 0.6
-
-        weights[i] = w
-
-    # ── Per-broker jitter (±20%) supaya tidak identik meski kategori sama ──
-    jitter = 0.80 + rng.random(len(times_list)) * 0.40   # 0.80 s/d 1.20
-    weights = weights * jitter
-
-    # Smooth jitter biar tidak terlihat seperti noise random
-    if len(weights) >= 5:
-        kernel = np.array([0.15, 0.20, 0.30, 0.20, 0.15])
-        weights = np.convolve(weights, kernel, mode='same')
-
-    return weights
-
 # ---------- CHART 1: BROKER FLOW (TIME-SERIES) ----------
 def build_broker_flow_chart(data):
     """
-    Broker Flow time-series dengan time-of-day pattern per kategori broker.
-    - Foreign/BUMN: U-shape (aktif di jam buka + jam tutup)
-    - Domestic: merata sepanjang hari
+    Broker Flow time-series: harga intraday + garis net flow kumulatif per broker.
+    Flow didistribusi dari snapshot broksum mengikuti pola volume × arah bar.
     """
     if not data:
         return None, None
@@ -3311,13 +3235,16 @@ def build_broker_flow_chart(data):
     df = df.copy()
     df['direction'] = np.where(df['Close'] >= df['Open'], 1.0, -1.0)
     df['delta_vol'] = df['Volume'].astype(float) * df['direction']
-    df['time'] = df.index.strftime("%H:%M")
 
-    direction_arr = np.sign(df['delta_vol'].values)
-    times_list = df['time'].tolist()
+    raw_cum = df['delta_vol'].cumsum().values
+    if len(raw_cum) == 0:
+        return None, None
+    final_raw = raw_cum[-1] if abs(raw_cum[-1]) > 0 else 1.0
 
     buyers = sorted(data['buyers'], key=lambda x: x['volume_lot'], reverse=True)[:4]
     sellers = sorted(data['sellers'], key=lambda x: x['volume_lot'], reverse=True)[:4]
+
+    df['time'] = df.index.strftime("%H:%M")
 
     fig = go.Figure()
 
@@ -3332,31 +3259,10 @@ def build_broker_flow_chart(data):
     buyer_colors = ["#10b981", "#06b6d4", "#3b82f6", "#a855f7"]
     seller_colors = ["#ef4444", "#f97316", "#eab308", "#ec4899"]
 
-    # Helper: hitung cumulative flow dengan time-pattern
-    _rets = df['Close'].pct_change().fillna(0).values
-    _std = np.std(_rets) if np.std(_rets) > 0 else 1e-9
-    _ret_norm = np.clip(_rets / (_std * 2), -1.0, 1.0)   # -1 s/d +1
-
-    def _calc_flow_cum(category, target, broker_code):
-        weights = _intraday_weight_profile(times_list, category, broker_code)
-
-        # Behavior per kategori:
-        # Foreign/BUMN → kontrarian (beli saat turun, jual saat naik)
-        # Domestic → momentum (beli saat naik, jual saat turun)
-        if category in ("Foreign", "BUMN"):
-            strength = 0.5 - _ret_norm * 0.5   # tinggi saat return negatif
-        else:
-            strength = 0.5 + _ret_norm * 0.5   # tinggi saat return positif
-
-        strength = np.clip(strength, 0.10, 1.00)
-        slope = weights * strength             # selalu positif → monotonik
-        cum = np.cumsum(slope)
-        final = cum[-1] if len(cum) > 0 and cum[-1] > 0 else 1.0
-        return cum / final * target
-
-    # Buyer flows
+    # Buyer flows (kumulatif ke atas)
     for idx, b in enumerate(buyers):
-        flow_cum = _calc_flow_cum(b['category'], b['volume_lot'], b['broker'])
+        target = b['volume_lot']
+        flow_cum = raw_cum / abs(final_raw) * target
         label = get_broker_label(b['broker'])
         fig.add_trace(go.Scatter(
             x=df['time'], y=flow_cum, mode="lines", name=f"Accum {label}",
@@ -3364,9 +3270,10 @@ def build_broker_flow_chart(data):
             hovertemplate=f"<b>{label}</b>: %{{y:,.0f}} Lot<extra></extra>"
         ))
 
-    # Seller flows
+    # Seller flows (kumulatif ke bawah)
     for idx, s in enumerate(sellers):
-        flow_cum = -_calc_flow_cum(s['category'], s['volume_lot'], s['broker'])
+        target = s['volume_lot']
+        flow_cum = -raw_cum / abs(final_raw) * target
         label = get_broker_label(s['broker'])
         fig.add_trace(go.Scatter(
             x=df['time'], y=flow_cum, mode="lines", name=f"Dist {label}",
@@ -3383,7 +3290,7 @@ def build_broker_flow_chart(data):
         dragmode=False, hovermode="x unified",
         hoverdistance=100, spikedistance=100,
         title=dict(
-            text=f"Broker Flow ({interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
+            text=f"Broker Flow (Intraday {interval}) – {data['ticker']} • snapshot {data['upload_date'][:10]}",
             font=dict(size=13, color='#e0e0e0'), x=0.01, xanchor='left'
         ),
         showlegend=False,
@@ -3402,7 +3309,6 @@ def build_broker_flow_chart(data):
         )
     )
     return fig, df
-
 
 # ---------- CHART 2: TRADE FLOW (TIME-SERIES) ----------
 def build_trade_flow_chart(data):
