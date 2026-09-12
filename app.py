@@ -559,46 +559,61 @@ def render_sankey_interactive(fig, height=520):
                 }}
 
                 function findLinkElements() {{
-                    var sels = ['path.sankey-link', 'g.sankey-links path',
-                        'g.sankey-links > path', 'g.sankey path'];
+                    var sels = [
+                        '.sankey-link',
+                        'path.sankey-link',
+                        'g.sankey-links path',
+                        'g.link path',
+                        'g.sankey path'
+                    ];
                     for (var i = 0; i < sels.length; i++) {{
                         try {{
                             var els = gd.querySelectorAll(sels[i]);
                             if (els && els.length > 0) {{
-                                console.log('[Sankey] selector:', sels[i], '→', els.length);
+                                console.log('[Sankey] selector:', sels[i], '→', els.length, 'els');
                                 return els;
                             }}
                         }} catch (e) {{}}
                     }}
+                    // Heuristic fallback
                     var svg = gd.querySelector('svg');
                     if (!svg) return null;
                     var all = svg.querySelectorAll('path');
                     var links = [];
                     all.forEach(function(p) {{
                         var d = p.getAttribute('d') || '';
-                        if (d.indexOf('C') !== -1 && d.length > 40) links.push(p);
+                        if (d.indexOf('C') !== -1 && d.length > 60) links.push(p);
                     }});
-                    console.log('[Sankey] heuristic:', links.length, 'of', all.length);
+                    console.log('[Sankey] heuristic:', links.length, 'of', all.length, 'paths');
                     return links.length > 0 ? links : null;
                 }}
 
                 function applyGradients(activeLinksMap) {{
                     var svg = gd.querySelector('svg');
-                    if (!svg) return;
+                    if (!svg) {{
+                        console.warn('[Sankey] applyGradients: no svg yet');
+                        return false;
+                    }}
+
+                    var linkEls = findLinkElements();
+                    if (!linkEls || linkEls.length === 0) {{
+                        console.warn('[Sankey] applyGradients: no link elements found');
+                        return false;
+                    }}
+
                     var oldDefs = svg.querySelector('#sg-defs');
                     if (oldDefs) oldDefs.remove();
                     var defs = document.createElementNS(SVG_NS, 'defs');
                     defs.setAttribute('id', 'sg-defs');
                     svg.insertBefore(defs, svg.firstChild);
 
-                    var linkEls = findLinkElements();
-                    if (!linkEls || linkEls.length === 0) return;
                     var count = Math.min(linkEls.length, sources.length);
+                    var applied = 0;
 
                     for (var i = 0; i < count; i++) {{
                         var linkEl = linkEls[i];
                         var isActive = !activeLinksMap || activeLinksMap[i];
-                        if (!isActive) continue;   // Non-aktif: biarkan warna abu dari trace
+                        if (!isActive) continue;
 
                         var srcColor = origNodeColors[sources[i]] || '#64748b';
                         var tgtColor = origNodeColors[targets[i]] || '#64748b';
@@ -623,18 +638,32 @@ def render_sankey_interactive(fig, height=520):
 
                         linkEl.setAttribute('fill', 'url(#' + gid + ')');
                         linkEl.style.setProperty('fill', 'url(#' + gid + ')', 'important');
+                        applied++;
                     }}
+
+                    console.log('[Sankey] ✅ gradient applied:', applied,
+                        'of', count, 'links');
+                    return applied > 0 || count === 0;
                 }}
 
                 function renderWithGradients(activeNodes, activeLinksMap) {{
                     var t = buildTrace(activeNodes, activeLinksMap);
                     return Plotly.react(gd, [t], LAYOUT, config).then(function() {{
-                        return new Promise(function(resolve) {{
+                        function tryApply(attempt) {{
+                            if (attempt > 6) {{
+                                console.warn('[Sankey] gradient retry exhausted');
+                                return;
+                            }}
+                            var ok = applyGradients(activeLinksMap);
+                            if (!ok) {{
+                                setTimeout(function() {{
+                                    tryApply(attempt + 1);
+                                }}, 120 + attempt * 80);
+                            }}
+                        }}
+                        requestAnimationFrame(function() {{
                             requestAnimationFrame(function() {{
-                                requestAnimationFrame(function() {{
-                                    applyGradients(activeLinksMap);
-                                    resolve();
-                                }});
+                                tryApply(0);
                             }});
                         }});
                     }});
