@@ -17,3 +17,5 @@ easyocr
 tenacity
 playwright>=1.40
 playwright-stealth>=1.0.6
+curl_cffi>=0.6.0
+
