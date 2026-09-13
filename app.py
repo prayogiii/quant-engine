@@ -5156,7 +5156,7 @@ with st.sidebar:
     with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
         render_broksum_scan_ui(api_key=st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
-        st.markdown("---")
+    st.markdown("---")
     with st.expander("🐛 DEBUG Foreign Flow", expanded=False):
         st.caption("Tools untuk tracing kenapa Foreign Flow kosong.")
 
