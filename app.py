@@ -23,6 +23,9 @@ from google.oauth2.service_account import Credentials
 import streamlit.components.v1 as components
 import asyncio
 import nest_asyncio
+import threading
+import subprocess
+import glob
 
 # ═══════════════════════════════════════════════════════════════
 # REALTIME PLOTLY HELPER
@@ -1197,24 +1200,45 @@ def _setup_playwright_browser():
     Download Chromium ke /tmp (writable di Streamlit Cloud).
     Cached — hanya download sekali.
     """
-    import os
     browsers_path = "/tmp/playwright_browsers"
     os.makedirs(browsers_path, exist_ok=True)
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
 
-    # Cek apakah chromium sudah ada
-    chromium_path = os.path.join(browsers_path, "chromium-1148")
-    if not os.path.exists(chromium_path):
+    # Cek apakah ADA folder chromium (versi apapun)
+    existing = glob.glob(os.path.join(browsers_path, "chromium-*"))
+    if existing:
+        print(f"[Playwright setup] Chromium sudah ada: {existing}")
+        return browsers_path
+
+    # Coba beberapa cara install
+    install_cmds = [
+        ["playwright", "install", "chromium"],
+        ["python", "-m", "playwright", "install", "chromium"],
+        ["python3", "-m", "playwright", "install", "chromium"],
+    ]
+
+    for cmd in install_cmds:
         try:
-            import subprocess
-            subprocess.run(
-                ["playwright", "install", "chromium"],
+            print(f"[Playwright setup] Mencoba: {' '.join(cmd)}")
+            r = subprocess.run(
+                cmd,
                 check=True,
                 capture_output=True,
-                timeout=180,
+                timeout=300,
+                text=True,
             )
-        except Exception as e:
-            print(f"[Playwright setup] {e}")
+            print(f"[Playwright setup] ✅ Berhasil install via: {' '.join(cmd)}")
+            return browsers_path
+        except FileNotFoundError:
+            continue
+        except subprocess.CalledProcessError as e:
+            print(f"[Playwright setup] ❌ Gagal: {e.stderr[:500] if e.stderr else e}")
+            continue
+        except subprocess.TimeoutExpired:
+            print(f"[Playwright setup] ⏱️ Timeout pada: {' '.join(cmd)}")
+            continue
+
+    print("[Playwright setup] ⚠️ Semua cara install gagal")
     return browsers_path
 
 
@@ -1223,15 +1247,21 @@ async def _fetch_idx_via_playwright_async(idx_url: str):
     Fetch IDX via Playwright headless dengan stealth.
     Return: list of dict atau None.
     """
-    from playwright.async_api import async_playwright
-
+    # ⚠️ Set env DULU sebelum import playwright
+    browsers_path = "/tmp/playwright_browsers"
+    os.makedirs(browsers_path, exist_ok=True)
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
     _setup_playwright_browser()
+
+    from playwright.async_api import async_playwright
 
     try:
         from playwright_stealth import stealth_async
         has_stealth = True
+        print("[Playwright] stealth_async tersedia")
     except ImportError:
         has_stealth = False
+        print("[Playwright] ⚠️ playwright_stealth tidak ada, lanjut tanpa stealth")
 
     browser = None
     try:
@@ -1249,6 +1279,7 @@ async def _fetch_idx_via_playwright_async(idx_url: str):
                     "--disable-gpu",
                 ],
             )
+            print("[Playwright] ✅ Browser launched")
 
             context = await browser.new_context(
                 viewport={"width": 1366, "height": 768},
@@ -1260,34 +1291,33 @@ async def _fetch_idx_via_playwright_async(idx_url: str):
                 locale="id-ID",
                 timezone_id="Asia/Jakarta",
             )
-
             page = await context.new_page()
 
             if has_stealth:
                 try:
                     await stealth_async(page)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[Playwright] stealth error: {e}")
 
-            # Buka halaman IDX dulu untuk set cookie
+            print("[Playwright] Buka halaman IDX...")
             await page.goto(
                 "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
                 wait_until="domcontentloaded",
                 timeout=45000,
             )
+            print(f"[Playwright] Title: {await page.title()}")
 
-            # Tunggu Cloudflare challenge selesai
             try:
                 await page.wait_for_function(
                     "() => !document.title.includes('Just a moment')",
                     timeout=20000,
                 )
+                print("[Playwright] ✅ Cloudflare challenge lewat")
             except Exception:
-                pass  # mungkin tidak ada challenge
+                print("[Playwright] ⚠️ Challenge tidak selesai / tidak ada challenge")
 
             await page.wait_for_timeout(3000)
 
-            # Fetch JSON API via page.evaluate (same-origin, cookie terkirim)
             result = await page.evaluate(
                 """async (url) => {
                     try {
@@ -1309,17 +1339,23 @@ async def _fetch_idx_via_playwright_async(idx_url: str):
 
             await context.close()
             await browser.close()
+            browser = None   # ← cegah close dobel di finally
 
             if not result or not isinstance(result, dict):
+                print("[Playwright] ❌ result kosong / bukan dict")
                 return None
             if "error" in result:
+                print(f"[Playwright] ❌ {result['error']}")
                 return None
 
             data = result.get("data") or result.get("Data") or []
+            print(f"[Playwright] ✅ Dapat {len(data)} baris data")
             return data if data else None
 
     except Exception as e:
-        print(f"[Playwright fetch error] {e}")
+        print(f"[Playwright fetch error] {type(e).__name__}: {e}")
+        return None
+    finally:
         if browser:
             try:
                 await browser.close()
@@ -1370,7 +1406,6 @@ def _fetch_idx_via_playwright_sync(idx_url):
 
     return result_holder["data"]
     
-@st.cache_data(ttl=1800, show_spinner=False)
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_idx_all_stock_summary():
     """
