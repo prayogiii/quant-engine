@@ -15,5 +15,5 @@ google-auth==2.36.0
 pytesseract
 easyocr
 tenacity
-playwright
-playwright-stealth
+playwright>=1.40
+playwright-stealth>=1.0.6
