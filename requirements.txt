@@ -15,4 +15,6 @@ google-auth==2.36.0
 pytesseract
 easyocr
 tenacity
-curl_cffi
+playwright
+playwright-stealth
+nest-asyncio
