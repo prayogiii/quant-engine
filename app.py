@@ -26,6 +26,8 @@ import nest_asyncio
 import threading
 import subprocess
 import glob
+import traceback
+import time
 
 # ═══════════════════════════════════════════════════════════════
 # REALTIME PLOTLY HELPER
@@ -1554,6 +1556,293 @@ def save_foreign_flow_snapshot(ticker):
     except Exception as e:
         st.error(f"❌ Gagal simpan foreign flow snapshot: {e}")
         return False
+# ═══════════════════════════════════════════════════════════════
+# DEBUG TOOLKIT — FOREIGN FLOW IDX
+# ═══════════════════════════════════════════════════════════════
+def _debug_playwright_environment():
+    """Cek apakah Playwright & deps terinstall dengan benar."""
+    out = {}
+
+    # 1. Module Python
+    try:
+        import playwright
+        out['playwright_module'] = f"✅ OK (v{getattr(playwright, '__version__', '?')})"
+    except ImportError as e:
+        out['playwright_module'] = f"❌ {e}"
+
+    # 2. Stealth
+    try:
+        import playwright_stealth
+        out['stealth_module'] = "✅ OK"
+    except ImportError as e:
+        out['stealth_module'] = f"⚠️ Tidak ada: {e}"
+
+    # 3. curl_cffi
+    try:
+        from curl_cffi import requests as _cr
+        out['curl_cffi'] = "✅ OK"
+    except ImportError as e:
+        out['curl_cffi'] = f"⚠️ Tidak ada: {e}"
+
+    # 4. Binary path
+    for name in ["playwright", "python", "python3"]:
+        p = shutil.which(name) if (shutil := __import__('shutil')) else None
+        out[f'bin_{name}'] = p or "❌ tidak ditemukan"
+
+    # 5. Folder browsers
+    bp = "/tmp/playwright_browsers"
+    if os.path.exists(bp):
+        try:
+            subdirs = os.listdir(bp)
+            out['browsers_dir'] = f"📁 {bp} → {subdirs}"
+        except Exception as e:
+            out['browsers_dir'] = f"❌ {e}"
+    else:
+        out['browsers_dir'] = f"❌ {bp} tidak ada"
+
+    return out
+
+
+def _debug_test_playwright_fetch(url="https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=10&start=0"):
+    """Test fetch IDX via Playwright, capture SEMUA error detail."""
+    log = []
+    def _log(msg):
+        log.append(msg)
+        print(f"[DEBUG-PW] {msg}")
+
+    try:
+        # Set env sebelum import
+        browsers_path = "/tmp/playwright_browsers"
+        os.makedirs(browsers_path, exist_ok=True)
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+        _log(f"PLAYWRIGHT_BROWSERS_PATH = {browsers_path}")
+
+        from playwright.async_api import async_playwright
+        _log("✅ import playwright.async_api OK")
+
+        try:
+            from playwright_stealth import stealth_async
+            has_stealth = True
+            _log("✅ stealth_async OK")
+        except ImportError:
+            has_stealth = False
+            _log("⚠️ stealth tidak ada, lanjut")
+
+        async def _run():
+            browser = None
+            try:
+                async with async_playwright() as p:
+                    _log("🚀 Launching chromium...")
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=[
+                            "--no-sandbox",
+                            "--disable-setuid-sandbox",
+                            "--disable-blink-features=AutomationControlled",
+                            "--disable-dev-shm-usage",
+                            "--no-first-run",
+                            "--no-zygote",
+                            "--disable-gpu",
+                        ],
+                    )
+                    _log(f"✅ Browser launched: {browser.version if hasattr(browser, 'version') else 'OK'}")
+
+                    ctx = await browser.new_context(
+                        viewport={"width": 1366, "height": 768},
+                        user_agent=(
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/120.0.0.0 Safari/537.36"
+                        ),
+                        locale="id-ID",
+                        timezone_id="Asia/Jakarta",
+                    )
+                    page = await ctx.new_page()
+                    _log("✅ Page created")
+
+                    if has_stealth:
+                        try:
+                            await stealth_async(page)
+                            _log("✅ stealth applied")
+                        except Exception as e:
+                            _log(f"⚠️ stealth error: {e}")
+
+                    _log("🌐 Buka IDX homepage...")
+                    await page.goto(
+                        "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
+                        wait_until="domcontentloaded",
+                        timeout=45000,
+                    )
+                    title = await page.title()
+                    _log(f"✅ Page loaded — Title: {title}")
+
+                    try:
+                        await page.wait_for_function(
+                            "() => !document.title.includes('Just a moment')",
+                            timeout=20000,
+                        )
+                        _log("✅ Cloudflare challenge selesai")
+                    except Exception as e:
+                        _log(f"⚠️ Challenge wait timeout: {e}")
+
+                    await page.wait_for_timeout(3000)
+
+                    _log(f"🔍 Fetch API: {url[:80]}...")
+                    result = await page.evaluate(
+                        """async (url) => {
+                            try {
+                                const resp = await fetch(url, {
+                                    headers: {
+                                        'accept': 'application/json, text/plain, */*',
+                                        'egrum': 'isAjax:true',
+                                        'x-requested-with': 'XMLHttpRequest'
+                                    }
+                                });
+                                if (!resp.ok) return { error: 'HTTP ' + resp.status };
+                                const txt = await resp.text();
+                                if (txt.length > 200000) return { error: 'Response terlalu besar' };
+                                try { return JSON.parse(txt); }
+                                catch(e) { return { error: 'JSON parse error: ' + e.toString(), preview: txt.slice(0, 300) }; }
+                            } catch (e) {
+                                return { error: e.toString() };
+                            }
+                        }""",
+                        url,
+                    )
+
+                    await ctx.close()
+                    await browser.close()
+                    browser = None
+
+                    if not result:
+                        _log("❌ Result kosong")
+                        return None
+                    if "error" in result:
+                        _log(f"❌ API Error: {result['error']}")
+                        if 'preview' in result:
+                            _log(f"   Preview: {result['preview']}")
+                        return None
+
+                    data = result.get("data") or result.get("Data") or []
+                    _log(f"✅ Dapat {len(data)} baris")
+                    if data:
+                        _log(f"   Sample keys: {list(data[0].keys())[:10]}")
+                    return data
+
+            except Exception as e:
+                _log(f"❌ Exception: {type(e).__name__}: {e}")
+                _log(traceback.format_exc()[:1500])
+                return None
+            finally:
+                if browser:
+                    try:
+                        await browser.close()
+                    except:
+                        pass
+
+        # Run di thread terpisah biar gak bentrok event loop
+        result_holder = {}
+        def _worker():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result_holder['data'] = loop.run_until_complete(_run())
+                loop.close()
+            except Exception as e:
+                _log(f"❌ Worker error: {e}")
+                _log(traceback.format_exc()[:1000])
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        t.join(timeout=120)
+
+        if t.is_alive():
+            _log("⏱️ TIMEOUT 120s — thread masih jalan")
+
+        return result_holder.get('data'), log
+
+    except Exception as e:
+        _log(f"❌ Outer error: {e}")
+        _log(traceback.format_exc()[:1000])
+        return None, log
+
+
+def _debug_test_direct_fetch(url="https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=10&start=0"):
+    """Test fetch langsung via requests & curl_cffi, capture detail."""
+    log = []
+    def _log(msg):
+        log.append(msg)
+        print(f"[DEBUG-DIRECT] {msg}")
+
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9,id;q=0.8",
+        "egrum": "isAjax:true",
+        "referer": "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "x-requested-with": "XMLHttpRequest",
+    }
+
+    # Test requests
+    _log("=== requests biasa ===")
+    try:
+        t0 = time.time()
+        r = requests.get(url, headers=headers, timeout=20)
+        dt = time.time() - t0
+        _log(f"Status: {r.status_code} ({dt:.2f}s)")
+        _log(f"Content-Type: {r.headers.get('content-type')}")
+        _log(f"Server: {r.headers.get('server')}")
+        _log(f"Body preview: {r.text[:200]}")
+    except Exception as e:
+        _log(f"❌ {type(e).__name__}: {e}")
+
+    # Test curl_cffi
+    _log("=== curl_cffi ===")
+    try:
+        from curl_cffi import requests as cr
+        t0 = time.time()
+        r = cr.get(url, headers=headers, timeout=20, impersonate="chrome120")
+        dt = time.time() - t0
+        _log(f"Status: {r.status_code} ({dt:.2f}s)")
+        _log(f"Content-Type: {r.headers.get('content-type')}")
+        _log(f"Body preview: {r.text[:200]}")
+    except ImportError:
+        _log("⚠️ curl_cffi tidak terinstall")
+    except Exception as e:
+        _log(f"❌ {type(e).__name__}: {e}")
+
+    return log
+
+
+def _debug_check_sheet():
+    """Cek isi sheet foreign_flow_history & broksum_history."""
+    out = {}
+    try:
+        sheet = get_gsheet()
+        existing = {ws.title: ws for ws in sheet.worksheets()}
+        out['sheets_ada'] = list(existing.keys())
+
+        if "foreign_flow_history" in existing:
+            ws = existing["foreign_flow_history"]
+            vals = ws.get_all_values()
+            out['ff_rows'] = len(vals)
+            out['ff_header'] = vals[0] if vals else None
+            out['ff_sample'] = vals[1:6] if len(vals) > 1 else []
+        else:
+            out['ff_sheet'] = "❌ Sheet belum dibuat"
+
+        if "broksum_history" in existing:
+            ws = existing["broksum_history"]
+            vals = ws.get_all_values()
+            out['broksum_rows'] = len(vals)
+    except Exception as e:
+        out['error'] = f"{type(e).__name__}: {e}"
+
+    return out
 def load_foreign_flow_history(ticker, days=30):
     """
     Ambil history foreign flow dari sheet.
@@ -4867,6 +5156,64 @@ with st.sidebar:
     with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
         render_broksum_scan_ui(api_key=st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
+        st.markdown("---")
+    with st.expander("🐛 DEBUG Foreign Flow", expanded=False):
+        st.caption("Tools untuk tracing kenapa Foreign Flow kosong.")
+
+        if st.button("1️⃣ Cek Environment", key="dbg_env", use_container_width=True):
+            st.write("**Environment**")
+            for k, v in _debug_playwright_environment().items():
+                st.caption(f"`{k}` → {v}")
+
+        if st.button("2️⃣ Cek Isi Sheet", key="dbg_sheet", use_container_width=True):
+            res = _debug_check_sheet()
+            if 'error' in res:
+                st.error(res['error'])
+            else:
+                st.write(f"**Sheets:** {res.get('sheets_ada')}")
+                st.write(f"**foreign_flow_history rows:** {res.get('ff_rows', 0)}")
+                if res.get('ff_header'):
+                    st.caption(f"Header: `{res['ff_header']}`")
+                if res.get('ff_sample'):
+                    st.write("Sample 5 baris terakhir:")
+                    st.dataframe(pd.DataFrame(res['ff_sample']))
+
+        if st.button("3️⃣ Test Direct Fetch (requests/curl)", key="dbg_direct", use_container_width=True):
+            with st.spinner("Testing..."):
+                logs = _debug_test_direct_fetch()
+            st.code("\n".join(logs), language=None)
+
+        if st.button("4️⃣ Test Playwright Fetch", key="dbg_pw", use_container_width=True):
+            with st.spinner("Playwright launching... (±30-60 detik)"):
+                data, logs = _debug_test_playwright_fetch()
+            st.code("\n".join(logs), language=None)
+            if data:
+                st.success(f"✅ Dapat {len(data)} baris")
+                st.dataframe(pd.DataFrame(data[:5]))
+            else:
+                st.error("❌ Playwright fetch gagal — lihat log di atas")
+
+        if st.button("5️⃣ Test Save Snapshot (BBRI)", key="dbg_save", use_container_width=True):
+            with st.spinner("Save..."):
+                ok = save_foreign_flow_snapshot("BBRI")
+            if ok:
+                st.success("✅ Tersimpan / sudah ada")
+                st.info("Cek lagi sheet via tombol 2️⃣")
+            else:
+                st.error("❌ Gagal simpan — cek log terminal")
+
+        if st.button("6️⃣ Full Traceback Test", key="dbg_full", use_container_width=True):
+            with st.spinner("Running full pipeline..."):
+                try:
+                    items = _fetch_idx_all_stock_summary()
+                    if items:
+                        st.success(f"✅ `_fetch_idx_all_stock_summary()` → {len(items)} baris")
+                    else:
+                        st.error("❌ `_fetch_idx_all_stock_summary()` → None (semua strategi gagal)")
+                        st.info("💡 Check log terminal Streamlit untuk `[IDX]` dan `[Playwright]`")
+                except Exception as e:
+                    st.error(f"Exception: {type(e).__name__}: {e}")
+                    st.code(traceback.format_exc())
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
             sheet = get_gsheet().worksheet("riwayat")
