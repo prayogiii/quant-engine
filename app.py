@@ -21,6 +21,10 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import gspread
 from google.oauth2.service_account import Credentials
 import streamlit.components.v1 as components
+import asyncio
+import nest_asyncio
+nest_asyncio.apply()
+
 
 # ═══════════════════════════════════════════════════════════════
 # REALTIME PLOTLY HELPER
@@ -1189,9 +1193,6 @@ def get_latest_broksum_for_ticker(ticker):
     except Exception as e:
         st.error(f"❌ Error get latest broksum: {e}")
         return None
-import asyncio
-import nest_asyncio
-nest_asyncio.apply()
 
 def _setup_playwright_browser():
     """
