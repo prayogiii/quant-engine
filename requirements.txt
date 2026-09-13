@@ -17,4 +17,3 @@ easyocr
 tenacity
 playwright
 playwright-stealth
-nest-asyncio
