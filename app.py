@@ -1189,11 +1189,188 @@ def get_latest_broksum_for_ticker(ticker):
     except Exception as e:
         st.error(f"❌ Error get latest broksum: {e}")
         return None
+import asyncio
+import nest_asyncio
+nest_asyncio.apply()
+
+def _setup_playwright_browser():
+    """
+    Download Chromium ke /tmp (writable di Streamlit Cloud).
+    Cached — hanya download sekali.
+    """
+    import os
+    browsers_path = "/tmp/playwright_browsers"
+    os.makedirs(browsers_path, exist_ok=True)
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+
+    # Cek apakah chromium sudah ada
+    chromium_path = os.path.join(browsers_path, "chromium-1148")
+    if not os.path.exists(chromium_path):
+        try:
+            import subprocess
+            subprocess.run(
+                ["playwright", "install", "chromium"],
+                check=True,
+                capture_output=True,
+                timeout=180,
+            )
+        except Exception as e:
+            print(f"[Playwright setup] {e}")
+    return browsers_path
+
+
+async def _fetch_idx_via_playwright_async(idx_url: str):
+    """
+    Fetch IDX via Playwright headless dengan stealth.
+    Return: list of dict atau None.
+    """
+    from playwright.async_api import async_playwright
+
+    _setup_playwright_browser()
+
+    try:
+        from playwright_stealth import stealth_async
+        has_stealth = True
+    except ImportError:
+        has_stealth = False
+
+    browser = None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--disable-accelerated-2d-canvas",
+                    "--no-first-run",
+                    "--no-zygote",
+                    "--disable-gpu",
+                ],
+            )
+
+            context = await browser.new_context(
+                viewport={"width": 1366, "height": 768},
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                locale="id-ID",
+                timezone_id="Asia/Jakarta",
+            )
+
+            page = await context.new_page()
+
+            if has_stealth:
+                try:
+                    await stealth_async(page)
+                except Exception:
+                    pass
+
+            # Buka halaman IDX dulu untuk set cookie
+            await page.goto(
+                "https://www.idx.co.id/id/data-pasar/ringkasan-perdagangan/ringkasan-saham/",
+                wait_until="domcontentloaded",
+                timeout=45000,
+            )
+
+            # Tunggu Cloudflare challenge selesai
+            try:
+                await page.wait_for_function(
+                    "() => !document.title.includes('Just a moment')",
+                    timeout=20000,
+                )
+            except Exception:
+                pass  # mungkin tidak ada challenge
+
+            await page.wait_for_timeout(3000)
+
+            # Fetch JSON API via page.evaluate (same-origin, cookie terkirim)
+            result = await page.evaluate(
+                """async (url) => {
+                    try {
+                        const resp = await fetch(url, {
+                            headers: {
+                                'accept': 'application/json, text/plain, */*',
+                                'egrum': 'isAjax:true',
+                                'x-requested-with': 'XMLHttpRequest'
+                            }
+                        });
+                        if (!resp.ok) return { error: 'HTTP ' + resp.status };
+                        return await resp.json();
+                    } catch (e) {
+                        return { error: e.toString() };
+                    }
+                }""",
+                idx_url,
+            )
+
+            await context.close()
+            await browser.close()
+
+            if not result or not isinstance(result, dict):
+                return None
+            if "error" in result:
+                return None
+
+            data = result.get("data") or result.get("Data") or []
+            return data if data else None
+
+    except Exception as e:
+        print(f"[Playwright fetch error] {e}")
+        if browser:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        return None
+
+
+def _fetch_idx_via_playwright_sync(idx_url: str):
+    """
+    Wrapper sync untuk Playwright async — handle event loop di Streamlit.
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Streamlit sudah punya event loop → pakai nest_asyncio
+            return loop.run_until_complete(_fetch_idx_via_playwright_async(idx_url))
+        else:
+            return asyncio.run(_fetch_idx_via_playwright_async(idx_url))
+    except RuntimeError:
+        # Kalau tidak ada event loop
+        return asyncio.run(_fetch_idx_via_playwright_async(idx_url))
+    except Exception as e:
+        print(f"[Playwright sync wrapper] {e}")
+        return None
     
 @st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_idx_all_stock_summary():
-    """Ambil semua data saham dari IDX sekali request (cache 30 menit)."""
-    url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=9999&start=0"
+    """
+    Fetch data IDX dengan 3 strategi berlapis:
+    1. Playwright + Stealth (paling ampuh untuk Cloudflare JS challenge)
+    2. curl_cffi direct (fallback)
+    3. requests biasa (fallback terakhir)
+    """
+    idx_url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=9999&start=0"
+
+    # ═══════════════════════════════════════════════════════
+    # STRATEGY 1 — Playwright + Stealth
+    # ═══════════════════════════════════════════════════════
+    try:
+        data = _fetch_idx_via_playwright_sync(idx_url)
+        if data and len(data) > 0:
+            return data
+    except Exception as e:
+        print(f"[Strategy 1 Playwright failed] {e}")
+
+    # ═══════════════════════════════════════════════════════
+    # STRATEGY 2 — curl_cffi direct
+    # ═══════════════════════════════════════════════════════
     headers = {
         "accept": "application/json, text/plain, */*",
         "accept-language": "en-US,en;q=0.9,id;q=0.8",
@@ -1206,24 +1383,38 @@ def _fetch_idx_all_stock_summary():
         ),
         "x-requested-with": "XMLHttpRequest",
     }
-    try:
-        try:
-            from curl_cffi import requests as curl_requests
-            r = curl_requests.get(url, headers=headers, timeout=25,
-                                   impersonate="chrome120")
-        except ImportError:
-            r = requests.get(url, headers=headers, timeout=20)
 
-        if r.status_code != 200:
-            return None
-        payload = r.json()
-        if isinstance(payload, dict):
-            return payload.get("data") or payload.get("Data") or []
-        if isinstance(payload, list):
-            return payload
-        return None
+    try:
+        from curl_cffi import requests as curl_requests
+        r = curl_requests.get(idx_url, headers=headers, timeout=25, impersonate="chrome120")
+        if r.status_code == 200:
+            payload = r.json()
+            if isinstance(payload, dict):
+                data = payload.get("data") or payload.get("Data") or []
+                if data:
+                    return data
+            elif isinstance(payload, list) and len(payload) > 0:
+                return payload
     except Exception:
-        return None
+        pass
+
+    # ═══════════════════════════════════════════════════════
+    # STRATEGY 3 — requests biasa
+    # ═══════════════════════════════════════════════════════
+    try:
+        r = requests.get(idx_url, headers=headers, timeout=25)
+        if r.status_code == 200:
+            payload = r.json()
+            if isinstance(payload, dict):
+                data = payload.get("data") or payload.get("Data") or []
+                if data:
+                    return data
+            elif isinstance(payload, list) and len(payload) > 0:
+                return payload
+    except Exception:
+        pass
+
+    return None
     
 def save_foreign_flow_snapshot(ticker):
     """
@@ -2499,40 +2690,55 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
     else:
         riwayat_text = "Belum ada riwayat sebelumnya."
 
-    # ===== LOAD BROKER FLOW DARI DATABASE (OPTIONAL) =====
+    # ===== LOAD SEMUA HISTORY BROKER FLOW DARI DATABASE =====
     broksum_context = ""
     if ticker:
         try:
-            latest_broksum = get_latest_broksum_for_ticker(ticker)
-            if latest_broksum:
-                buyers_list = latest_broksum.get('top_buyers', [])
-                sellers_list = latest_broksum.get('top_sellers', [])
-                
-                buyers_text = "\n".join([
-                    f"    - {b.get('broker')}: {b.get('volume_lot', 0):,} lot"
-                    for b in buyers_list
-                ]) if buyers_list else "    (Tidak ada data)"
-                
-                sellers_text = "\n".join([
-                    f"    - {s.get('broker')}: {s.get('volume_lot', 0):,} lot"
-                    for s in sellers_list
-                ]) if sellers_list else "    (Tidak ada data)"
-                
-                broksum_context = f"""
-**🕵🏻‍♂️ Bandarmology (Broker Flow) - Data Terbaru**
-Upload: {latest_broksum.get('upload_date', 'N/A')}
-Status: {latest_broksum.get('bandarmology_status', 'N/A')}
+            history = load_broksum_history(ticker)
+            if history:
+                # Sort terbaru dulu
+                history_sorted = sorted(
+                    history,
+                    key=lambda r: str(r.get('upload_date', '')),
+                    reverse=True
+                )
 
-🟢 Top Buyers:
-{buyers_text}
+                # Ambil maks 5 terbaru
+                broksum_entries = []
+                for h in history_sorted[:5]:
+                    buyers_list = json.loads(h.get('top_buyers', '[]')) if isinstance(h.get('top_buyers'), str) else h.get('top_buyers', [])
+                    sellers_list = json.loads(h.get('top_sellers', '[]')) if isinstance(h.get('top_sellers'), str) else h.get('top_sellers', [])
 
-🔴 Top Sellers:
-{sellers_text}
+                    buyers_text = ", ".join([
+                        f"{b.get('broker')}({b.get('volume_lot', 0):,.0f})"
+                        for b in buyers_list[:5]
+                    ]) if buyers_list else "(kosong)"
 
-📝 Summary: {latest_broksum.get('summary_narrative', 'N/A')}
-"""
+                    sellers_text = ", ".join([
+                        f"{s.get('broker')}({s.get('volume_lot', 0):,.0f})"
+                        for s in sellers_list[:5]
+                    ]) if sellers_list else "(kosong)"
+
+                    broksum_entries.append(
+                        f"**Upload {h.get('upload_date', 'N/A')}**\n"
+                        f"  Status: {h.get('bandarmology_status', 'N/A')}\n"
+                        f"  Top Buyers: {buyers_text}\n"
+                        f"  Top Sellers: {sellers_text}\n"
+                        f"  Summary: {h.get('summary_narrative', 'N/A')[:150]}"
+                    )
+
+                broksum_context = (
+                    f"**🕵🏻‍♂️ Bandarmology (Broker Flow) — {len(history_sorted)} snapshot terakhir**\n\n"
+                    + "\n\n".join(broksum_entries)
+                )
+
+                if len(history_sorted) > 1:
+                    broksum_context += (
+                        f"\n\n**⚠️ PENTING:** Ada {len(history_sorted)} snapshot. "
+                        f"Bandingkan perubahan broker (siapa yang akumulasi/distribusi antar waktu) "
+                        f"untuk mendeteksi pola bandarmology yang lebih kuat."
+                    )
         except Exception as e:
-            # Jika error load broker flow, lanjut saja (broksum_context tetap kosong)
             pass
 
     prompt = f"""
@@ -2565,6 +2771,7 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 Berdasarkan data di atas{' (khususnya aksi broker)' if broksum_context else ''}, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
 - Makna sinyal dalam konteks saat ini
 {f'- Aksi broker pembeli/penjual utama & implikasinya untuk harga' if broksum_context else ''}
+{f'- Bandingkan perubahan broker antara snapshot (siapa akumulasi/distribusi antar waktu) — ini sinyal paling kuat' if broksum_context and ticker else ''}
 - Kekuatan dan kelemahan saham
 - Risiko utama
 - Rekomendasi langkah selanjutnya (buy/hold/sell) dengan alasan singkat
