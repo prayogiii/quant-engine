@@ -23,8 +23,6 @@ from google.oauth2.service_account import Credentials
 import streamlit.components.v1 as components
 import asyncio
 import nest_asyncio
-nest_asyncio.apply()
-
 
 # ═══════════════════════════════════════════════════════════════
 # REALTIME PLOTLY HELPER
@@ -1330,23 +1328,47 @@ async def _fetch_idx_via_playwright_async(idx_url: str):
         return None
 
 
-def _fetch_idx_via_playwright_sync(idx_url: str):
+def _fetch_idx_via_playwright_sync(idx_url):
     """
-    Wrapper sync untuk Playwright async — handle event loop di Streamlit.
+    Jalankan Playwright di THREAD TERPISAH dengan event loop sendiri.
+    Ini menghindari konflik dengan event loop Streamlit.
     """
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Streamlit sudah punya event loop → pakai nest_asyncio
-            return loop.run_until_complete(_fetch_idx_via_playwright_async(idx_url))
-        else:
-            return asyncio.run(_fetch_idx_via_playwright_async(idx_url))
-    except RuntimeError:
-        # Kalau tidak ada event loop
-        return asyncio.run(_fetch_idx_via_playwright_async(idx_url))
-    except Exception as e:
-        print(f"[Playwright sync wrapper] {e}")
+    result_holder = {"data": None, "error": None}
+
+    def _worker():
+        # Setiap thread punya event loop sendiri
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        except Exception as e:
+            result_holder["error"] = f"Event loop error: {e}"
+            return
+
+        try:
+            data = loop.run_until_complete(_fetch_idx_via_playwright_async(idx_url))
+            result_holder["data"] = data
+        except Exception as e:
+            result_holder["error"] = str(e)
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    thread.join(timeout=120)   # 120 detik max (Playwright butuh waktu)
+
+    if thread.is_alive():
+        # Timeout — thread masih jalan
+        print("[Playwright] Timeout 120s — thread masih berjalan")
         return None
+
+    if result_holder["error"]:
+        print(f"[Playwright] Error: {result_holder['error']}")
+        return None
+
+    return result_holder["data"]
     
 @st.cache_data(ttl=1800, show_spinner=False)
 @st.cache_data(ttl=1800, show_spinner=False)
