@@ -2524,7 +2524,7 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
     else:
         riwayat_text = "Belum ada riwayat sebelumnya."
 
-        # ===== LOAD SEMUA HISTORY BROKER FLOW DARI DATABASE =====
+    # ===== LOAD SEMUA HISTORY BROKER FLOW DARI DATABASE =====
     broksum_context = ""
     if ticker:
         try:
@@ -3100,7 +3100,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
         except Exception as e_img:
             st.error(f"Gagal memuat gambar: {e_img}")
 
-    with st.expander("📝 Input Manual Broksum", expanded=True if uploaded_file is None else False):
+    with st.expander("📝 Input Manual Broksum", expanded=False):
         st.caption("Isi data Top Buyers & Top Sellers secara manual.")
         n_broker = st.number_input("Jumlah broker per sisi", min_value=1, max_value=10, value=5, key=f"{key_prefix}_n_broker")
 
@@ -4161,6 +4161,27 @@ with st.sidebar:
     else:
         ticker_input = ticker_raw
 
+    # ── Load Gemini API Key lebih awal (dibutuhkan untuk Scan Broksum di bawah) ──
+    def _get_api_key_early():
+        try:
+            return st.secrets["GEMINI_API_KEY"]
+        except Exception:
+            pass
+        env_key = os.getenv("GEMINI_API_KEY")
+        if env_key:
+            return env_key
+        return st.session_state.get("gemini_api_key", "")
+
+    if not st.session_state.get("gemini_api_key"):
+        st.session_state.gemini_api_key = _get_api_key_early()
+
+    # ── 📸 Scan Broksum (dipindah ke sini — tepat di bawah input ticker) ──
+    with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
+        render_broksum_scan_ui(
+            api_key=st.session_state.get("gemini_api_key", ""),
+            key_prefix="sb_broksum"
+        )
+
     # --- Cek Swing Aktif untuk Ticker ---
     ticker_clean = ticker_raw.replace(".JK", "").strip().upper()
     dict_active_swings = dapatkan_dict_swing_aktif()
@@ -4650,9 +4671,6 @@ with st.sidebar:
         st.success("🟢 Gemini API Key Terhubung")
     else:
         st.warning("⚠️ Gemini API Key belum ada di Secrets / ENV.")
-
-    with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
-        render_broksum_scan_ui(api_key=st.session_state.gemini_api_key, key_prefix="sb_broksum")
     ai_riwayat_btn = st.button("📊 Analisis Riwayat dgn AI", use_container_width=True)
     if st.button("🗑️ Hapus Semua Riwayat"):
         try:
@@ -6228,103 +6246,182 @@ def display_analysis_result(res):
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), dragmode='pan')
         st.plotly_chart(fig, use_container_width=True)
 
-    # ===== RINGKASAN EKSEKUTIF =====
+    # ═══════════════════════════════════════════════════════════
+    # RINGKASAN EKSEKUTIF — REDESIGN v2 (Visual & Interaktif)
+    # ═══════════════════════════════════════════════════════════
     st.markdown("---")
     st.header("📋 Ringkasan Eksekutif & Rekomendasi")
 
+    # ── Tentukan level sinyal ──
     if rrr < 1.0 and ("BUY" in signal):
-        ac, ai = "#ef4444", "⚠️"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {tp_low_f:,.0f} - {tp_high_f:,.0f}."
+        sig_color, sig_icon = "#ef4444", "⚠️"
+        sig_label = "BUY ON WEAKNESS"
+        sig_desc = "Tren valid, tapi RRR di bawah 1.0"
+        kondisi_txt = f"Tren valid, RRR {rrr:.2f} ({rrr_status})"
+        langkah_txt = f"Entry di zona {entry_zone_f}, SL Rp {sl_harga_f:,.0f}, TP bertahap Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}"
     elif "STRONG BUY" in signal:
-        ac, ai = "#10b981", "🟢"
-        at = f"• <b>KONDISI:</b> Tren Kuat & Akumulasi Volume<br>• <b>REKOMENDASI:</b> AGGRESSIVE BUY<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap {tp_low_f:,.0f} - {tp_high_f:,.0f}."
+        sig_color, sig_icon = "#10b981", "🟢"
+        sig_label = "AGGRESSIVE BUY"
+        sig_desc = "Tren kuat & akumulasi volume"
+        kondisi_txt = "Tren Kuat & Akumulasi Volume"
+        langkah_txt = f"Entry di zona {entry_zone_f}, SL Rp {sl_harga_f:,.0f} (-{sl_pct:.1f}%), TP bertahap Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}"
     elif "BUY" in signal:
-        ac, ai = "#f59e0b", "🟡"
-        at = f"• <b>KONDISI:</b> Tren Valid, RRR {rrr:.2f} ({rrr_status})<br>• <b>REKOMENDASI:</b> BUY ON WEAKNESS<br>• <b>LANGKAH:</b> Entry di zona {entry_zone_f}, SL {sl_harga_f:,.0f}, TP bertahap {tp_low_f:,.0f} - {tp_high_f:,.0f}."
+        sig_color, sig_icon = "#f59e0b", "🟡"
+        sig_label = "BUY ON WEAKNESS"
+        sig_desc = "Tren valid, entry bertahap"
+        kondisi_txt = f"Tren valid, RRR {rrr:.2f} ({rrr_status})"
+        langkah_txt = f"Entry di zona {entry_zone_f}, SL Rp {sl_harga_f:,.0f}, TP bertahap Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}"
     elif "HOLD" in signal:
-        ac, ai = "#3b82f6", "🔵"
-        at = f"• <b>KONDISI:</b> Konsolidasi / Transisi<br>• <b>REKOMENDASI:</b> HOLD<br>• <b>LANGKAH:</b> Jangan tambah posisi, pantau SL."
+        sig_color, sig_icon = "#3b82f6", "🔵"
+        sig_label = "HOLD"
+        sig_desc = "Konsolidasi / transisi"
+        kondisi_txt = "Konsolidasi / Transisi"
+        langkah_txt = "Jangan tambah posisi, pantau SL"
     else:
-        ac, ai = "#ef4444", "🔴"
-        at = f"• <b>KONDISI:</b> Risiko Penurunan / Distribusi<br>• <b>REKOMENDASI:</b> AVOID / LIQUIDATE<br>• <b>LANGKAH:</b> Amankan modal."
+        sig_color, sig_icon = "#ef4444", "🔴"
+        sig_label = "AVOID / LIQUIDATE"
+        sig_desc = "Risiko penurunan / distribusi"
+        kondisi_txt = "Risiko Penurunan / Distribusi"
+        langkah_txt = "Amankan modal, hindari entry baru"
 
-    # Catatan Adaptif RRR & Manajemen Risiko SL Lebar
+    # ═══ CARD 1 — SIGNAL BADGE (prominent) ═══
+    st.markdown(f"""
+    <div style="
+        background: linear-gradient(135deg, {sig_color}22 0%, {sig_color}08 100%);
+        border-left: 6px solid {sig_color};
+        border-radius: 12px;
+        padding: 18px 24px;
+        margin-bottom: 16px;
+    ">
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div style="font-size: 42px; line-height: 1;">{sig_icon}</div>
+            <div style="flex: 1;">
+                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">
+                    Rekomendasi
+                </div>
+                <div style="color: {sig_color}; font-size: 24px; font-weight: 700; line-height: 1.1;">
+                    {sig_label}
+                </div>
+                <div style="color: #cbd5e1; font-size: 13px; margin-top: 4px;">
+                    {sig_desc}
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ═══ CARD 2 — 3 PILAR: KONDISI | REKOMENDASI | LANGKAH ═══
+    col_k, col_r, col_l = st.columns(3)
+
+    with col_k:
+        st.markdown(f"""
+        <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #64748b;">
+            <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Kondisi</div>
+            <div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{kondisi_txt}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_r:
+        st.markdown(f"""
+        <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid {sig_color};">
+            <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Rekomendasi</div>
+            <div style="color:{sig_color}; font-size:13px; font-weight:600; margin-top:8px; line-height:1.5;">{sig_label}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_l:
+        st.markdown(f"""
+        <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #00ffcc;">
+            <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Langkah</div>
+            <div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{langkah_txt}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ═══ CARD 3 — POSITION STATUS (khusus sudah_beli) ═══
+    if sudah_beli:
+        if floating_pl_pct is not None:
+            if floating_pl_pct > 5:
+                pl_color, pl_icon, pl_status = "#10b981", "🚀", "PROFIT BESAR"
+                pl_action = "Take profit sebagian / trailing stop"
+            elif floating_pl_pct > 0:
+                pl_color, pl_icon, pl_status = "#84cc16", "✅", "PROFIT"
+                pl_action = "Pantau SL ketat, naikkan trailing stop"
+            elif floating_pl_pct > -3:
+                pl_color, pl_icon, pl_status = "#f59e0b", "⚠️", "RUGI KECIL"
+                pl_action = "Tahan dengan SL sesuai rekomendasi"
+            else:
+                pl_color, pl_icon, pl_status = "#ef4444", "🔴", "RUGI BESAR"
+                pl_action = "Jika menembus SL, segera keluar"
+        else:
+            pl_color, pl_icon, pl_status = "#64748b", "❔", "P/L Tidak Tersedia"
+            pl_action = "Isi harga beli untuk kalkulasi P/L"
+            floating_pl_pct = 0
+
+        # Gauge bar position (clamp -20..+20)
+        pl_val = floating_pl_pct or 0
+        pl_bar_pct = max(-20, min(20, pl_val))
+        pl_bar_position = (pl_bar_pct + 20) / 40 * 100  # 0..100
+
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%); border-radius:12px; padding:18px; margin-top:16px; border:1px solid #334155;">
+            <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;">
+                <div style="font-size:36px;">{pl_icon}</div>
+                <div style="flex:1; min-width:150px;">
+                    <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Status Posisi Kamu</div>
+                    <div style="color:{pl_color}; font-size:20px; font-weight:700; margin-top:2px;">{pl_status} {pl_val:+.2f}%</div>
+                </div>
+                <div style="background:{pl_color}22; border:1px solid {pl_color}; border-radius:8px; padding:6px 12px; color:{pl_color}; font-size:11px; font-weight:600;">
+                    {pl_action}
+                </div>
+            </div>
+
+            <div style="background:#0f1116; border-radius:6px; padding:6px; height:24px; position:relative; margin-top:8px;">
+                <div style="position:absolute; left:50%; top:0; bottom:0; width:2px; background:#475569;"></div>
+                <div style="position:absolute; left:{pl_bar_position}%; top:3px; bottom:3px; width:14px; margin-left:-7px; background:{pl_color}; border-radius:7px; box-shadow:0 0 8px {pl_color};"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; color:#64748b; font-size:10px; margin-top:6px;">
+                <span>-20%</span>
+                <span>0%</span>
+                <span>+20%</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Kalau belum punya posisi, tampilkan hint
+        st.markdown(f"""
+        <div style="background:#1e293b; border-radius:10px; padding:14px 18px; margin-top:16px; border-left:4px solid #64748b; display:flex; align-items:center; gap:12px;">
+            <div style="font-size:28px;">🆓</div>
+            <div>
+                <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Status Posisi</div>
+                <div style="color:#cbd5e1; font-size:13px; margin-top:2px;">Belum punya posisi di saham ini. Siap entry di zona rekomendasi.</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ═══ CARD 4 — TIPS & WARNINGS ═══
+    tips = []
     if "BUY" in signal:
         if rrr < 1.5:
-            at += f"<br><br>💡 <b>Tips Dip Entry (RRR 1:2.0):</b> Untuk RRR ideal 1:2.0, disarankan antri beli di <b>Rp {entry_ideal_f:,.0f}</b> atau lebih rendah."
+            tips.append(("💡", "#f59e0b",
+                         f"<b>Tips Dip Entry:</b> Untuk RRR ideal 1:2.0, antri beli di <b>Rp {entry_ideal_f:,.0f}</b> atau lebih rendah"))
         if sl_pct > 10.0:
-            at += f"<br><br>⚠️ <b>Manajemen Risiko SL Lebar:</b> Karena SL% cukup lebar (-{sl_pct:.1f}%), sesuaikan ukuran posisi maksimal <b>{risk_adjusted_alloc:.1f}%</b> dari modal agar risiko total terjaga (~1.5%)."
+            tips.append(("⚠️", "#ef4444",
+                         f"<b>SL Lebar (-{sl_pct:.1f}%):</b> Sesuaikan ukuran posisi maksimal <b>{risk_adjusted_alloc:.1f}%</b> dari modal agar risiko total terjaga"))
 
-    # Tambahan untuk status kepemilikan
-    if sudah_beli:
-        if "AVOID" in signal:
-            extra = "⚠️ Karena kamu sudah memegang saham ini, pertimbangkan untuk <b>take profit sebagian</b> atau <b>keluar seluruhnya</b> untuk mengamankan modal."
-        elif "HOLD" in signal:
-            extra = "🔒 Kamu sudah punya posisi. Disarankan <b>tahan</b> dan pasang <b>trailing stop</b> di bawah support terdekat."
-        elif "STRONG BUY" in signal or "BUY" in signal:
-            extra = "✅ Posisi sudah ada. Tidak perlu menambah agresif. Jika ingin averaging, tunggu harga menyentuh <b>entry zone</b>."
-        else:
-            extra = ""
+    if tips:
+        for icon, color, text in tips:
+            st.markdown(f"""
+            <div style="background:{color}12; border-left:4px solid {color}; border-radius:8px; padding:12px 16px; margin-top:10px; color:#cbd5e1; font-size:13px; line-height:1.5;">
+                <span style="color:{color}; font-weight:bold; font-size:15px;">{icon}</span>&nbsp;&nbsp;{text}
+            </div>
+            """, unsafe_allow_html=True)
 
-        if floating_pl_pct is not None:
-            pl_str = f"💰 <b>Floating P/L:</b> {floating_pl_pct:+.2f}%"
-            if floating_pl_pct > 5:
-                extra += f" (Profit sudah >5%. Pertimbangkan <b>take profit sebagian</b> atau <b>trailing stop</b>.)"
-            elif floating_pl_pct > 0:
-                extra += f" (Masih profit. Pantau SL ketat.)"
-            elif floating_pl_pct < -3:
-                extra += f" (Rugi >3%. Jika menembus SL, keluar.)"
-            else:
-                extra += f" (Rugi kecil. Tahan dengan SL sesuai rekomendasi.)"
-            extra = pl_str + " " + extra
-
-        if extra:
-            at += f"<br><br><b>📌 Status Posisi:</b> {extra}"
-
-    win_bt_str = f"{win_bt:.1%}" if trades_bt > 0 else "N/A"
-    bt_str = f"{win_bt_str} <span style=\"font-size:12px;color:#8892b0;\">({trades_bt} Trade | PF {pf_bt:.2f})</span>" if trades_bt > 0 else "<span style=\"font-size:12px;color:#8892b0;\">N/A</span>"
-    
-    act_ticker_data = hitung_winrate_ticker_actual(ticker_raw, st.session_state.get('riwayat_actual', {}))
-    if act_ticker_data and act_ticker_data['total'] > 0:
-        act_ticker_str = f"{act_ticker_data['win_rate']:.1f}% <span style=\"font-size:12px;color:#8892b0;\">({act_ticker_data['win']} Win / {act_ticker_data['loss']} Loss)</span>"
-    else:
-        act_ticker_str = "<span style=\"font-size:12px;color:#8892b0;\">Belum ada evaluasi</span>"
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if "AVOID" not in signal:
-            st.markdown(f'''
-                <div class="summary-card">
-                    <div class="summary-item">🕒 <b>Waktu Scan:</b> {waktu_str}</div>
-                    <div class="section-title">📌 Profil Risiko (Kontekstual)</div>
-                    <div class="summary-item">🛡️ <b>Stop Loss:</b> Rp {sl_harga_f:,.0f} (-{sl_pct:.1f}%)</div>
-                    <div class="summary-item">🎯 <b>Take Profit Range:</b> Rp {tp_low_f:,.0f} - Rp {tp_high_f:,.0f}<br>
-                        <span style="font-size:13px;color:#8892b0;">(+{tp_pct_low:.1f}% ~ +{tp_pct_high:.1f}%)</span></div>
-                    <div class="summary-item">⚖️ <b>Risk:Reward (min):</b> 1 : {rrr:.2f} ({rrr_status})</div>
-                    <div class="summary-item">💡 <b>Entry Ideal (RRR 1:2.0):</b> Rp {entry_ideal_f:,.0f}</div>
-                    <div class="summary-item">🏆 <b>Win Rate Backtest:</b> {bt_str}</div>
-                    <div class="summary-item">🎯 <b>Actual Record ({ticker_raw}):</b> {act_ticker_str}</div>
-                    <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
-                    <div class="summary-item">📊 <b>ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</b></div>
-                    <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% | <b>Risk-Adjusted:</b> {risk_adjusted_alloc:.1f}%</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        else:
-            st.markdown(f'''
-                <div class="summary-card">
-                    <div class="summary-item">🕒 <b>Waktu Scan:</b> {waktu_str}</div>
-                    <div class="section-title">⛔ Sinyal AVOID</div>
-                    <div class="summary-item">Tidak ada rekomendasi entry untuk saat ini.</div>
-                    <div class="summary-item">🏆 <b>Win Rate Backtest:</b> {bt_str}</div>
-                    <div class="summary-item">🎯 <b>Actual Record ({ticker_raw}):</b> {act_ticker_str}</div>
-                    <div class="summary-item">🏷️ <b>Rezim:</b> {regime} | {ihsg_cond}</div>
-                    <div class="summary-item">📊 <b>ADX {adx:.1f} | RSI {rsi14:.1f} | ATR {atr_pct:.2f}%</b></div>
-                    <div class="summary-item">🛡️ <b>Alokasi Maks (Kelly):</b> {kelly_adj*100:.1f}% | <b>Risk-Adjusted:</b> {risk_adjusted_alloc:.1f}%</div>
-                </div>
-            ''', unsafe_allow_html=True)
-
-    with col2:
-        st.markdown(f'<div class="action-card" style="border-left-color: {ac};"><div class="section-title">{ai} Panduan Eksekusi Trader</div><div class="summary-item" style="font-size:15px;margin-top:8px;line-height:1.6;">{at}</div><hr style="border-color:#334155;margin:15px 0;"><div style="color:#94a3b8;font-size:13px;">⚠️ <i>Disclaimer: Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.</i></div></div>', unsafe_allow_html=True)
+    # ═══ DISCLAIMER ═══
+    st.markdown("""
+    <div style="color:#64748b; font-size:11px; margin-top:20px; text-align:center; font-style:italic;">
+        ⚠️ Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.
+    </div>
+    """, unsafe_allow_html=True)
 
     # ===== DETAIL EXPANDER =====
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
@@ -6503,7 +6600,7 @@ def display_analysis_result(res):
     # ══════════════════════════════════════════════════════════
     # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
     # ══════════════════════════════════════════════════════════
-    with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)", expanded=True):
+    with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)"):
         st.info(
             "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
             "Engine secara otomatis mempelajari akurasi setiap faktor teknikal berdasarkan riwayat analisis kamu. "
