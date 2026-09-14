@@ -6743,6 +6743,27 @@ def display_analysis_result(res):
     st.markdown("---")
     if st.session_state.get("gemini_api_key"):
         with st.spinner("🧠 AI sedang menganalisis hasil dan riwayat..."):
+
+            # ═══ FIX: Definisikan act_ticker_data di sini (safe) ═══
+            act_ticker_data = hitung_winrate_ticker_actual(
+                ticker_raw,
+                st.session_state.get('riwayat_actual', {})
+            )
+
+            # Safe extraction
+            _act_str = "Belum ada evaluasi"
+            try:
+                if isinstance(act_ticker_data, dict):
+                    _tot = act_ticker_data.get('total', 0) or 0
+                    _wr  = act_ticker_data.get('win_rate')
+                    _w   = act_ticker_data.get('win', 0) or 0
+                    _l   = act_ticker_data.get('loss', 0) or 0
+                    if _tot > 0 and isinstance(_wr, (int, float)):
+                        _act_str = f"{_wr:.1f}% ({_w} Win / {_l} Loss)"
+            except Exception:
+                _act_str = "Belum ada evaluasi"
+            # ═══════════════════════════════════════════════════════
+
             data_ai = {
                 "Saham": ticker_raw,
                 "Harga": f"{harga_terakhir:,.0f}",
@@ -6756,7 +6777,7 @@ def display_analysis_result(res):
                 "Estimasi": f"{est_besok_f:,.0f}",
                 "Beta": f"{beta_ihsg:.2f}x",
                 "WinRate": f"{win_bt:.1%}" if trades_bt else "N/A",
-                "Actual_WinRate_Ticker": f"{act_ticker_data['win_rate']:.1f}% ({act_ticker_data['win']} Win / {act_ticker_data['loss']} Loss)" if (act_ticker_data and act_ticker_data['total'] > 0) else "Belum ada evaluasi",
+                "Actual_WinRate_Ticker": _act_str,   # ← pakai variable safe
                 "ProfitFactor": f"{pf_bt:.2f}" if trades_bt else "N/A",
                 "MaxDD": f"{max_dd_bt:.2f}%" if trades_bt else "N/A",
                 "Kelly": f"{kelly_adj*100:.1f}",
