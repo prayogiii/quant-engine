@@ -3068,7 +3068,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                     else:
                         st.info(f"💾 Siap simpan ke database untuk **{ticker_input}**")
                 with col_save_2:
-                    btn_save = st.button("💾 Simpan ke Database", key=f"{key_prefix}_btn_save", use_container_width=True)
+                    btn_save = st.button("💾 Simpan ", key=f"{key_prefix}_btn_save", use_container_width=True)
                     
                 if btn_save:
                     if not ticker_input:
@@ -3086,7 +3086,11 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                             if ff_ok:
                                 st.success(f"✅ Broksum + Foreign Flow IDX **{ticker_input}** tersimpan!")
                             else:
-                                st.success(f"✅ Broksum **{ticker_input}** tersimpan (foreign flow IDX belum tersedia / gagal).")
+                                st.warning(
+                                    f"✅ Broksum **{ticker_input}** tersimpan! "
+                                    f"⚠️ Foreign flow IDX gagal diambil sekarang (kemungkinan rate limit). "
+                                    f"Data akan di-nambal otomatis oleh cron jam 19:30 WIB."
+                                )
 
                             st.session_state[f"{key_prefix}_result"] = None
 
