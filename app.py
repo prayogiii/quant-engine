@@ -758,16 +758,28 @@ def render_sankey_interactive(fig, height=520):
                 }}
 
                 // ═══════════════════════════════════════════════════
-                // INITIAL RENDER
+                // INITIAL RENDER 
                 // ═══════════════════════════════════════════════════
                 var initNodes = {{}};
                 for (var ii = 0; ii < labels.length; ii++) initNodes[ii] = true;
                 var initTrace = buildTrace(initNodes, null);
 
                 Plotly.newPlot(gd, [initTrace], LAYOUT, config).then(function() {{
+                    function tryApplyInit(attempt) {{
+                        if (attempt > 6) {{
+                            console.warn('[Sankey] init gradient retry exhausted');
+                            return;
+                        }}
+                        var ok = applyGradients(null);
+                        if (!ok) {{
+                            setTimeout(function() {{
+                                tryApplyInit(attempt + 1);
+                            }}, 120 + attempt * 80);
+                        }}
+                    }}
                     requestAnimationFrame(function() {{
                         requestAnimationFrame(function() {{
-                            applyGradients(null);
+                            tryApplyInit(0);
                         }});
                     }});
                 }}).catch(function(err) {{
