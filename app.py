@@ -3051,11 +3051,19 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                     else:
                         with st.spinner(f"💾 Menyimpan data {ticker_input} ke Google Sheets..."):
                             success = save_broksum_data(ticker_input, res_json, source=source)
+
                         if success:
-                            st.success(f"✅ Data broker flow **{ticker_input}** berhasil disimpan! Dapat diakses saat analisis.")
+                            # ▼▼▼ TAMBAH INI ▼▼▼
+                            with st.spinner(f"📊 Mengambil foreign flow IDX untuk {ticker_input}..."):
+                                ff_ok = save_foreign_flow_snapshot(ticker_input)
+                            # ▲▲▲ ▲▲▲
+
+                            if ff_ok:
+                                st.success(f"✅ Broksum + Foreign Flow IDX **{ticker_input}** tersimpan!")
+                            else:
+                                st.success(f"✅ Broksum **{ticker_input}** tersimpan (foreign flow IDX belum tersedia / gagal).")
+
                             st.session_state[f"{key_prefix}_result"] = None
-                        else:
-                            st.error("❌ Gagal menyimpan ke database. Cek koneksi Sheets & API Key.")
 
             elif err:
                 st.warning(f"⚠️ {err}")
