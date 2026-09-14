@@ -1062,26 +1062,51 @@ MC_PESSIMISM  = 0.82
 
 # ====================== FRAKSI HARGA BEI ======================
 def fraksi_bei(harga):
-    """Membulatkan harga ke kelipatan fraksi sesuai aturan BEI."""
-    if harga < 200:
-        fraksi = 1
-    elif harga < 500:
-        fraksi = 2
-    elif harga < 2000:
-        fraksi = 5
-    elif harga < 5000:
-        fraksi = 10
-    else:
-        fraksi = 25
-    return round(harga / fraksi) * fraksi
+    """Membulatkan harga ke kelipatan fraksi sesuai aturan BEI.
+    
+    Defensive: kalau harga NaN / None / invalid, return 0.
+    """
+    try:
+        # ── NaN / None guard ──
+        if harga is None:
+            return 0
+        h = float(harga)
+        if math.isnan(h) or math.isinf(h) or h <= 0:
+            return 0
+
+        if h < 200:
+            fraksi = 1
+        elif h < 500:
+            fraksi = 2
+        elif h < 2000:
+            fraksi = 5
+        elif h < 5000:
+            fraksi = 10
+        else:
+            fraksi = 25
+        return round(h / fraksi) * fraksi
+    except (ValueError, TypeError, OverflowError):
+        return 0
 
 def fraksi_step(harga):
-    """Mengembalikan nilai kelipatan 1 fraksi BEI."""
-    if harga < 200: return 1
-    elif harga < 500: return 2
-    elif harga < 2000: return 5
-    elif harga < 5000: return 10
-    else: return 25
+    """Mengembalikan nilai kelipatan 1 fraksi BEI.
+    
+    Defensive: kalau harga NaN / None / invalid, return 1 (fraksi minimum).
+    """
+    try:
+        if harga is None:
+            return 1
+        h = float(harga)
+        if math.isnan(h) or math.isinf(h) or h <= 0:
+            return 1
+
+        if h < 200: return 1
+        elif h < 500: return 2
+        elif h < 2000: return 5
+        elif h < 5000: return 10
+        else: return 25
+    except (ValueError, TypeError, OverflowError):
+        return 1
 
 # ====================== GOOGLE SHEETS FUNCTIONS ======================
 def get_gsheet():
@@ -5906,6 +5931,14 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
 
     entry_high = min(entry_high, harga_terakhir)
     entry_low = min(entry_low, entry_high)
+
+    # ── Guard: kalau entry_low/high NaN, fallback ke harga_terakhir ──
+    if (entry_low is None) or (isinstance(entry_low, float) and math.isnan(entry_low)) or entry_low <= 0:
+        entry_low = harga_terakhir * 0.98 if harga_terakhir > 0 else 1
+    if (entry_high is None) or (isinstance(entry_high, float) and math.isnan(entry_high)) or entry_high <= 0:
+        entry_high = harga_terakhir if harga_terakhir > 0 else 1
+    if entry_low > entry_high:
+        entry_low, entry_high = entry_high, entry_low
 
     entry_low_f = fraksi_bei(entry_low)
     entry_high_f = fraksi_bei(entry_high)
