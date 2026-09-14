@@ -951,7 +951,105 @@ def _parse_broker_list(raw):
         except Exception:
             return []
     return []
+# ═══════════════════════════════════════════════════════════════
+# KLASIFIKASI BROKER — RETAIL vs BANDAR
+# ═══════════════════════════════════════════════════════════════
+RETAIL_BROKERS = {
+    "YP",  # Mirae Asset (banyak retail)
+    "PD",  # Indo Premier (Stockbit-heavy retail)
+    "XL",  # Stockbit Sekuritas
+    "XC",  # Bahana (retail)
+    "CC",  # Mandiri (mixed, banyak retail)
+    "NI",  # BNI Sekuritas (mixed)
+    "OD",  # BRI Danareksa (mixed)
+    "ID",  # Inti Fikasa (retail)
+    "SQ",  # BCA Sekuritas (retail)
+    "KK",  # Phillip (retail-heavy)
+    "DX",  # Bahana (retail)
+    "AZ",  # Sucor (retail)
+    "BK",  # Binaartha
+    "HP",  # Henan Putihrai
+    "KS",  # Kresna
+    "TF",  # Trimegah
+}
 
+BANDAR_BROKERS = {
+    "AK",  # UBS (institusi asing)
+    "KZ",  # Credit Suisse
+    "CS",  # Credit Suisse
+    "RX",  # Macquarie
+    "ZP",  # Maybank Kim Eng
+    "YU",  # CIMB
+    "DR",  # DBS Vickers
+    "CP",  # Valbury (institusi)
+    "HD",  # KGI
+    "AI",  # UOB Kay Hian
+    "LS",  # Reliance
+    "BB",  # Vickers (institusi)
+    "TP",  # OCBC
+    "DU",  # Danatama
+    "FS",  # Fajar Surya
+    "DP",  # Dipo Stars
+}
+
+def klasifikasi_broker(broker_code, volume_lot, freq=None):
+    """
+    Klasifikasi broker: Bandar / Retail / Mixed.
+
+    Rule:
+    1. Kalau code ada di BANDAR_BROKERS → Bandar 🐋
+    2. Kalau code ada di RETAIL_BROKERS → Retail 🧑
+    3. Kalau ada freq → pakai avg_lot_per_freq:
+       - avg > 200 lot/transaksi → Bandar
+       - avg < 50 lot/transaksi → Retail
+       - 50–200 → Mixed
+    4. Default → Mixed ⚖️
+
+    Return: (kategori_str, icon_str)
+    """
+    code = str(broker_code).upper().strip()
+    if code in BANDAR_BROKERS:
+        return "Bandar", "🐋"
+    if code in RETAIL_BROKERS:
+        return "Retail", "🧑"
+
+    try:
+        vol = float(volume_lot or 0)
+        frq = float(freq) if freq not in (None, "", "null") else None
+    except Exception:
+        vol, frq = 0, None
+
+    if frq and frq > 0 and vol > 0:
+        avg_per_freq = vol / frq
+        if avg_per_freq > 200:
+            return "Bandar", "🐋"
+        elif avg_per_freq < 50:
+            return "Retail", "🧑"
+        else:
+            return "Mixed", "⚖️"
+
+    return "Mixed", "⚖️"
+
+def enrich_broker_kategori(res_json):
+    """
+    Tambahkan field 'kategori' + 'kategori_icon' ke setiap item
+    di top_buyers & top_sellers. Mengembalikan dict res_json yang sama
+    (in-place) untuk chaining.
+
+    Input: res_json hasil analisis_broksum_gemini_vision (atau OCR)
+    Output: res_json dengan tambahan field kategori
+    """
+    for side_key in ("top_buyers", "top_sellers"):
+        for item in res_json.get(side_key, []) or []:
+            if not isinstance(item, dict):
+                continue
+            kode = item.get("broker", "")
+            vol = item.get("volume_lot", 0) or 0
+            frq = item.get("freq")
+            kat, icon = klasifikasi_broker(kode, vol, frq)
+            item["kategori"] = kat
+            item["kategori_icon"] = icon
+    return res_json
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
@@ -2623,11 +2721,32 @@ Berdasarkan data di atas{' (khususnya aksi broker)' if broksum_context else ''},
 - Jika ada pola dari riwayat, sebutkan.
 Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
 """
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip(), None
-    except Exception as e:
-        return None, f"Gagal menghasilkan insight AI: {str(e)}"
+        # ── Retry logic untuk handle 500/503 dari Google ──
+    import time as _time
+    max_retries = 3
+    last_error = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(prompt)
+            return response.text.strip(), None
+        except Exception as e:
+            err_str = str(e)
+            last_error = err_str
+            
+            # Cek apakah error sementara (500/503/overloaded)
+            is_transient = any(x in err_str for x in [
+                "500", "503", "Internal error", 
+                "overloaded", "temporarily", "try again"
+            ])
+            
+            if is_transient and attempt < max_retries - 1:
+                _time.sleep(2 ** attempt)  # 1s, 2s, 4s
+                continue
+            else:
+                break
+    
+    return None, f"Gagal menghasilkan insight AI: {last_error}"
 
 def analisis_riwayat_global(riwayat_data, riwayat_actual, api_key):
     model, error = dapatkan_model_gemini(api_key)
@@ -2830,24 +2949,40 @@ Tugas Anda: Analisis screenshot Broker Summary (Broksum) / Broker Flow / Trade F
 Ekstrak seluruh informasi tabel dan berikan analisis terstruktur dalam format JSON MURNI tanpa teks di luar JSON:
 {
   "ticker": "KODE_SAHAM (contoh: BBRI, tulis N/A jika tidak terlihat)",
-  "periode": "TANGGAL / PERIODE (contoh: 09 Sep 2026 atau Net 1D, tulis N/A jika tidak terlihat)",
+  "periode": "TANGGAL / PERIODE (contoh: 09 Sep 2026, tulis N/A jika tidak terlihat)",
   "bandarmology_status": "Big Accumulation / Normal Accumulation / Neutral / Normal Distribution / Big Distribution",
   "foreign_flow_status": "Net Buy / Net Sell / Neutral / N/A",
-  "summary_narrative": "Penjelasan singkat 2-3 kalimat mengenai siapa pembeli/penjual utama (broker mana), konsentrasi pembeli (top 1 vs top 3/5), dan implikasi pergerakan harga.",
+  "summary_narrative": "Penjelasan 2-3 kalimat: broker mana yang dominan, konsentrasi top 1 vs top 3, dan implikasi harga.",
   "top_buyers": [
-    {"broker": "YP", "volume_lot": 15000, "value_idr": 1500000000, "avg_price": 1250},
-    {"broker": "CC", "volume_lot": 12000, "value_idr": 1200000000, "avg_price": 1245}
+    {
+      "broker": "YP",
+      "volume_lot": 15000,
+      "value_idr": 1500000000,
+      "avg_price": 1250,
+      "freq": 250,
+      "avg_lot_per_freq": 60
+    }
   ],
   "top_sellers": [
-    {"broker": "AK", "volume_lot": 20000, "value_idr": 2000000000, "avg_price": 1260},
-    {"broker": "ZP", "volume_lot": 10000, "value_idr": 1000000000, "avg_price": 1255}
+    {
+      "broker": "AK",
+      "volume_lot": 20000,
+      "value_idr": 2000000000,
+      "avg_price": 1260,
+      "freq": 85,
+      "avg_lot_per_freq": 235
+    }
   ]
 }
 
-Aturan:
-1. Konversikan angka Milyar (B/M) atau Juta (M/K) ke nilai penuh jika bisa (misal 1.5B = 1500000000). Jika tidak pasti, tulis sesuai string tertera.
-2. Ambil hingga 5-10 broker pembeli dan penjual yang terlihat di screenshot.
-3. Kembalikan HANYA JSON yang valid.
+ATURAN EKSTRAKSI:
+1. Kolom "freq" adalah frekuensi/jumlah transaksi broker (biasanya ada di kolom "Freq" atau "F").
+   Kalau tidak terlihat di screenshot, tulis null.
+2. Kolom "avg_lot_per_freq" = volume_lot / freq (rata-rata lot per transaksi).
+   Kalau freq null, tulis null.
+3. Konversikan angka Milyar (B) / Juta (M/K) ke nilai penuh (contoh: 1.5B = 1500000000).
+4. Ambil hingga 5-10 broker pembeli & penjual yang terlihat di screenshot.
+5. Kembalikan HANYA JSON yang valid, tanpa teks lain.
 """
 
         # ===== CALL GEMINI DENGAN RETRY (Exponential Backoff) =====
@@ -2877,10 +3012,6 @@ Aturan:
 
     except Exception as e:
         return None, f"Error Gemini Vision: {str(e)}"
-
-
-# ==========================================
-
 
 
 # ==========================================
@@ -3038,6 +3169,9 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                     if err:
                         st.session_state[error_key] = err
                     else:
+                        # ▼ Tambah enrich
+                        res_json = enrich_broker_kategori(res_json)
+                        # ▲
                         st.session_state[result_key] = res_json
                         st.session_state[error_key]  = None
                         st.session_state[source_key] = "gemini"
@@ -3048,6 +3182,9 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 if err:
                     st.session_state[error_key] = err
                 else:
+                    # ▼ Tambah enrich
+                    res_json = enrich_broker_kategori(res_json)
+                    # ▲
                     st.session_state[result_key] = res_json
                     st.session_state[error_key]  = None
                     st.session_state[source_key] = "ocr"
@@ -3055,6 +3192,18 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
             res_json = st.session_state.get(result_key)
             err      = st.session_state.get(error_key)
             source   = st.session_state.get(source_key, "")
+
+            # ═══ ENRICH: Klasifikasi Bandar vs Retail ═══
+            if res_json:
+                for side_key in ["top_buyers", "top_sellers"]:
+                    for item in res_json.get(side_key, []):
+                        kode = item.get("broker", "")
+                        vol  = item.get("volume_lot", 0) or 0
+                        frq  = item.get("freq")
+                        kategori, icon = klasifikasi_broker(kode, vol, frq)
+                        item["kategori"] = kategori
+                        item["kategori_icon"] = icon
+            # ═════════════════════════════════════════════
 
             if res_json:
                 st.success(f"✅ **Status:** {res_json.get('bandarmology_status', 'N/A')}")
@@ -3065,11 +3214,102 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 with col_b:
                     st.markdown("**🟢 Top Buyers:**")
                     for b in res_json.get("top_buyers", []):
-                        st.caption(f"- **{b.get('broker')}**: {b.get('volume_lot', 0):,} lot")
+                        icon = b.get('kategori_icon', '')
+                        kat  = b.get('kategori', '')
+                        frq  = b.get('freq')
+                        frq_str = f" · Freq {frq}" if frq else ""
+                        st.caption(
+                            f"- {icon} **{b.get('broker')}**: "
+                            f"{b.get('volume_lot', 0):,} lot{frq_str} — *{kat}*"
+                        )
                 with col_s:
                     st.markdown("**🔴 Top Sellers:**")
                     for s in res_json.get("top_sellers", []):
-                        st.caption(f"- **{s.get('broker')}**: {s.get('volume_lot', 0):,} lot")
+                        icon = s.get('kategori_icon', '')
+                        kat  = s.get('kategori', '')
+                        frq  = s.get('freq')
+                        frq_str = f" · Freq {frq}" if frq else ""
+                        st.caption(
+                            f"- {icon} **{s.get('broker')}**: "
+                            f"{s.get('volume_lot', 0):,} lot{frq_str} — *{kat}*"
+                        )
+                # ═══════════════════════════════════════════════════════
+                # AGREGAT — Bandar vs Retail (dari Top broker)
+                # ═══════════════════════════════════════════════════════
+                st.markdown("---")
+                st.markdown("**📊 Agregat Bandar vs Retail**")
+                st.caption(
+                    "⚠️ Angka di bawah **hanya dari broker yang terlihat di screenshot** "
+                    "(biasanya Top 5-10) — bukan total market. Gunakan untuk melihat "
+                    "*proporsi* bandar vs retail, bukan volume absolut."
+                )
+
+                buyers_list  = res_json.get("top_buyers", []) or []
+                sellers_list = res_json.get("top_sellers", []) or []
+
+                # ── Buy Side ──
+                bandar_buy = sum((b.get('volume_lot') or 0) for b in buyers_list if b.get('kategori') == 'Bandar')
+                retail_buy = sum((b.get('volume_lot') or 0) for b in buyers_list if b.get('kategori') == 'Retail')
+                mixed_buy  = sum((b.get('volume_lot') or 0) for b in buyers_list if b.get('kategori') == 'Mixed')
+
+                # ── Sell Side ──
+                bandar_sell = sum((s.get('volume_lot') or 0) for s in sellers_list if s.get('kategori') == 'Bandar')
+                retail_sell = sum((s.get('volume_lot') or 0) for s in sellers_list if s.get('kategori') == 'Retail')
+                mixed_sell  = sum((s.get('volume_lot') or 0) for s in sellers_list if s.get('kategori') == 'Mixed')
+
+                col_ab, col_as = st.columns(2)
+                with col_ab:
+                    st.markdown("**🟢 Buy Side**")
+                    st.metric("🐋 Bandar (Buy)", f"{bandar_buy:,.0f} lot")
+                    st.metric("🧑 Retail (Buy)", f"{retail_buy:,.0f} lot")
+                    if mixed_buy > 0:
+                        st.caption(f"⚖️ Mixed: {mixed_buy:,.0f} lot")
+
+                with col_as:
+                    st.markdown("**🔴 Sell Side**")
+                    st.metric("🐋 Bandar (Sell)", f"{bandar_sell:,.0f} lot")
+                    st.metric("🧑 Retail (Sell)", f"{retail_sell:,.0f} lot")
+                    if mixed_sell > 0:
+                        st.caption(f"⚖️ Mixed: {mixed_sell:,.0f} lot")
+
+                # ── Net + Insight Narasi ──
+                net_bandar = bandar_buy - bandar_sell
+                net_retail = retail_buy - retail_sell
+
+                if net_bandar > 0 and net_retail < 0:
+                    insight_icon = "🟢"
+                    insight = ("**Bandar akumulasi, retail distribusi** — sinyal bullish. "
+                               "Bandar sedang menyerap supply dari retail.")
+                elif net_bandar < 0 and net_retail > 0:
+                    insight_icon = "🔴"
+                    insight = ("**Bandar distribusi, retail akumulasi** — hati-hati. "
+                               "Bandar sedang melepas barang ke retail (kemungkinan puncak).")
+                elif net_bandar > 0 and net_retail > 0:
+                    insight_icon = "⚖️"
+                    insight = "**Kedua pihak net buy** — minat beli kuat, tapi perlu konfirmasi arah lanjut."
+                elif net_bandar < 0 and net_retail < 0:
+                    insight_icon = "⚠️"
+                    insight = "**Kedua pihak net sell** — tekanan jual kuat, waspadai koreksi lanjut."
+                else:
+                    insight_icon = "⚖️"
+                    insight = "**Net flow seimbang** — pasar belum ada dominasi jelas."
+
+                # Warnai insight berdasarkan net bandar (proxy utama)
+                if net_bandar > 0:
+                    net_color = "#10b981"
+                elif net_bandar < 0:
+                    net_color = "#ef4444"
+                else:
+                    net_color = "#94a3b8"
+
+                st.markdown(f"""
+                <div style="background:{net_color}12; border-left:4px solid {net_color}; border-radius:8px; padding:12px 16px; margin-top:12px; color:#cbd5e1; font-size:13px; line-height:1.6;">
+                    <div style="font-weight:600; color:{net_color}; font-size:14px; margin-bottom:6px;">
+                        {insight_icon} Net Bandar: {net_bandar:+,.0f} lot · Net Retail: {net_retail:+,.0f} lot
+                    </div>
+                    <div>{insight}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
                 # ========== SAVE TO DATABASE ==========
                 st.divider()
