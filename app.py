@@ -5621,7 +5621,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         df_ihsg = load_ihsg_data(period="2y", interval="1d")
         df_daily = df
 
-   if df.empty:
+    if df.empty:
         return None
 
     # ── VALIDASI: pastikan Close terakhir bukan NaN ──
