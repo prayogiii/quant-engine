@@ -1929,34 +1929,50 @@ def hitung_winrate_ticker_actual(ticker_raw, riwayat_actual):
     }
 
 def hapus_riwayat_item(waktu, saham, gaya=None):
+    """
+    Hapus 1 item riwayat dari sheet — AMAN tanpa clear-all.
+    Pakai delete_rows() untuk hapus baris spesifik.
+    """
     try:
         sheet = get_gsheet().worksheet("riwayat")
         records = sheet.get_all_records()
-        valid_records = [r for r in records if any(str(v).strip() for v in r.values())]
+
         waktu_str = str(waktu).strip()
         saham_str = str(saham).strip()
-        gaya_str = str(gaya).strip() if gaya else None
+        gaya_str = str(gaya).strip().upper() if gaya else None
 
-        if gaya_str:
-            filtered = [
-                r for r in valid_records
-                if not (str(r.get('Waktu', '')).strip() == waktu_str and
-                        str(r.get('Saham', '')).strip() == saham_str and
-                        str(r.get('Gaya', '')).strip() == gaya_str)
-            ]
-        else:
-            filtered = [
-                r for r in valid_records
-                if not (str(r.get('Waktu', '')).strip() == waktu_str and
-                        str(r.get('Saham', '')).strip() == saham_str)
-            ]
-        filtered = filtered[:3000]
-        sheet.clear()
-        if filtered:
-            headers = list(filtered[0].keys())
-            rows = [[row.get(h, "") for h in headers] for row in filtered]
-            sheet.update([headers] + rows, value_input_option='RAW')
-        st.session_state.riwayat = filtered
+        # ── Cari baris yang match (index di worksheet, mulai dari 2 karena header) ──
+        rows_to_delete = []
+        for i, r in enumerate(records):
+            r_waktu = str(r.get('Waktu', '')).strip()
+            r_saham = str(r.get('Saham', '')).strip()
+            r_gaya = str(r.get('Gaya', '')).strip().upper()
+
+            match = (r_waktu == waktu_str and r_saham == saham_str)
+            if gaya_str:
+                match = match and (r_gaya == gaya_str)
+
+            if match:
+                rows_to_delete.append(i + 2)  # +2: header di row 1, index mulai 2
+
+        if not rows_to_delete:
+            st.warning("⚠️ Item tidak ditemukan di riwayat.")
+            return
+
+        # ── Hapus dari BAWAH ke ATAS biar index gak shift ──
+        for row_idx in sorted(rows_to_delete, reverse=True):
+            sheet.delete_rows(row_idx)
+
+        # ── Sync session_state ──
+        try:
+            fresh = sheet.get_all_records()
+            valid = [r for r in fresh if any(str(v).strip() for v in r.values())]
+            st.session_state.riwayat = valid
+        except Exception:
+            pass
+
+        st.success(f"✅ {len(rows_to_delete)} item dihapus dari riwayat.")
+
     except Exception as e:
         st.error(f"❌ Gagal menghapus riwayat: {e}")
         
