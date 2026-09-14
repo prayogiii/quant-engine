@@ -1192,7 +1192,10 @@ def get_latest_broksum_for_ticker(ticker):
     
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_idx_all_stock_summary():
-    """Ambil semua data saham dari IDX sekali request (cache 30 menit)."""
+    """Ambil semua data saham dari IDX sekali request (cache 30 menit).
+    
+    PENTING: Kalau gagal, raise exception supaya Streamlit TIDAK cache None.
+    """
     url = "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?length=9999&start=0"
     headers = {
         "accept": "application/json, text/plain, */*",
@@ -1206,6 +1209,7 @@ def _fetch_idx_all_stock_summary():
         ),
         "x-requested-with": "XMLHttpRequest",
     }
+    
     try:
         try:
             from curl_cffi import requests as curl_requests
@@ -1215,15 +1219,26 @@ def _fetch_idx_all_stock_summary():
             r = requests.get(url, headers=headers, timeout=20)
 
         if r.status_code != 200:
-            return None
+            # ▼ Raise, BUKAN return None — biar gak di-cache
+            raise RuntimeError(f"IDX HTTP {r.status_code}")
+        
         payload = r.json()
         if isinstance(payload, dict):
-            return payload.get("data") or payload.get("Data") or []
-        if isinstance(payload, list):
-            return payload
-        return None
-    except Exception:
-        return None
+            data = payload.get("data") or payload.get("Data") or []
+        elif isinstance(payload, list):
+            data = payload
+        else:
+            data = []
+        
+        if not data:
+            raise RuntimeError("IDX response kosong")
+        
+        return data
+    except RuntimeError:
+        raise  # ← propagate ke caller, JANGAN di-cache
+    except Exception as e:
+        # Wrap exception lain, juga jangan di-cache
+        raise RuntimeError(f"IDX fetch error: {e}")
     
 def save_foreign_flow_snapshot(ticker):
     """
