@@ -5018,13 +5018,22 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Data dari Yahoo Finance. Bukan rekomendasi investasi.")
     # ==================== FUNGSI DATA & INDIKATOR ====================
-@st.cache_data(ttl=60)   # sudah Anda ubah
+@st.cache_data(ttl=60)
 def load_stock_data(ticker, period="2y", interval="1d"):
     df = yf.download(ticker, period=period, interval=interval, prepost=True, actions=False)
     if df.empty:
         return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    
+    # ▼▼▼ FIX: Drop baris yang Close-nya NaN ▼▼▼
+    try:
+        if 'Close' in df.columns:
+            df = df.dropna(subset=['Close'])
+    except Exception:
+        pass
+    # ▲▲▲
+    
     return df
 
 @st.cache_data(ttl=60)
@@ -5032,6 +5041,14 @@ def load_ihsg_data(period="2y", interval="1d"):
     df = yf.download("^JKSE", period=period, interval=interval, prepost=True, actions=False)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
+    
+    # ▼ FIX: Drop baris NaN ▼
+    try:
+        if 'Close' in df.columns:
+            df = df.dropna(subset=['Close'])
+    except Exception:
+        pass
+    
     return df
 @st.cache_data(ttl=3600)
 def get_daftar_saham(mode):
@@ -5604,7 +5621,23 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         df_ihsg = load_ihsg_data(period="2y", interval="1d")
         df_daily = df
 
-    if df.empty:
+   if df.empty:
+        return None
+
+    # ── VALIDASI: pastikan Close terakhir bukan NaN ──
+    try:
+        _last_close = float(df['Close'].iloc[-1])
+        if math.isnan(_last_close) or _last_close <= 0:
+            return None
+    except Exception:
+        return None
+
+    # Cek 20 bar terakhir minimal 10 valid
+    try:
+        _valid_count = df['Close'].tail(20).dropna().shape[0]
+        if _valid_count < 10:
+            return None
+    except Exception:
         return None
 
     # ------------------------------------------------------------------
