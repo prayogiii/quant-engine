@@ -1235,7 +1235,17 @@ def save_foreign_flow_snapshot(ticker):
         ticker_clean = str(ticker).upper().replace(".JK", "").strip()
         if not ticker_clean:
             return False
-
+        
+        today_wib = datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d")
+        try:
+            _sheet = get_gsheet().worksheet("foreign_flow_history")
+            _records = _sheet.get_all_records()
+            for r in _records:
+                if (str(r.get("ticker", "")).upper() == ticker_clean
+                        and str(r.get("date", "")) == today_wib):
+                    return True  # sudah ada, skip tanpa fetch IDX
+        except Exception:
+            pass
         items = _fetch_idx_all_stock_summary()
         if not items:
             return False
