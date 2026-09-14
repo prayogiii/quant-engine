@@ -3828,9 +3828,15 @@ def build_foreign_flow_chart(data):
     # ── 1. Baca history dari sheet ──
     df = load_foreign_flow_history(ticker, days=30)
 
-    # ── 2. Kalau kosong, coba fetch IDX 1 hari ──
+    # ── 2. Kalau kosong, coba fetch IDX 1 hari (defensive: wrap try-except) ──
     if df is None or df.empty:
-        items = _fetch_idx_all_stock_summary()
+        items = None
+        try:
+            items = _fetch_idx_all_stock_summary()
+        except Exception:
+            # IDX rate limit / server down → skip fallback, anggap tidak ada data
+            items = None
+
         if items:
             for it in items:
                 if not isinstance(it, dict):
