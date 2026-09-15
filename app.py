@@ -839,37 +839,57 @@ except ImportError:
 
 def compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85):
     """
-    Kompresi gambar untuk menghemat token Gemini Vision.
+    Kompresi gambar untuk hemat token Gemini Vision.
     Resize & reduce quality sambil maintain readable content.
+    
+    Support input:
+    - PIL.Image.Image
+    - str (file path)
+    - Streamlit UploadedFile (auto-convert)
     """
     if not PIL_AVAILABLE:
         return image
-    
+
+    img = None  # ← inisialisasi awal
+
     try:
-        # Jika sudah PIL Image, gunakan langsung; jika file path, buka dulu
+        # ── Step 1: Convert input ke PIL Image ──
         if isinstance(image, str):
             img = Image.open(image)
-        
+        elif hasattr(image, 'read'):
+            # Streamlit UploadedFile / BytesIO
+            img = Image.open(image)
+        else:
+            # Asumsi sudah PIL Image
             img = image
-        
-        # Resize jika lebih besar dari max dimensions
+
+        if img is None:
+            return image
+
+        # ── Step 2: Resize kalau terlalu besar ──
         img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-        
-        # Convert ke RGB jika perlu (untuk JPEG compatibility)
+
+        # ── Step 3: Convert RGBA/P → RGB (untuk JPEG) ──
         if img.mode in ('RGBA', 'LA', 'P'):
             rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-            rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            try:
+                if img.mode == 'RGBA':
+                    rgb_img.paste(img, mask=img.split()[-1])
+                else:
+                    rgb_img.paste(img)
+            except Exception:
+                rgb_img.paste(img.convert('RGB'))
             img = rgb_img
-        
-        # Save compressed ke bytes
+
+        # ── Step 4: Save ke bytes dengan kompresi ──
         compressed_io = io.BytesIO()
         img.save(compressed_io, format='JPEG', quality=quality, optimize=True)
         compressed_io.seek(0)
-        
-        # Return as PIL Image
+
+        # ── Step 5: Return PIL Image ──
         return Image.open(compressed_io)
+
     except Exception as e:
-        # Jika error, return original
         st.warning(f"⚠️ Kompresi gambar gagal: {e}. Menggunakan gambar original.")
         return image
 
