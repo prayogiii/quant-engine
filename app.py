@@ -4909,9 +4909,9 @@ with st.sidebar:
                 st.caption(f"❌ Tidak ada riwayat cocok dengan '{search_query}'.")
             else:
                 st.caption("Belum ada riwayat.")
-        else:
-            # ---------- Tampilan flat — card style compact + AI Summary ----------
-            items_per_page = 10
+    else:
+        # ---------- Tampilan flat — card style compact + AI Summary ----------
+        items_per_page = 10
             total_items = len(riwayat_data)
             total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
     
@@ -5364,7 +5364,7 @@ with st.sidebar:
                 if search_query:
                     st.caption(f"❌ Tidak ada riwayat cocok dengan '{search_query}'.")
                 else:
-                    st.caption("Belum ada riwayat.")
+                    st.caption("Belum ada riwayat.")    
     
     st.markdown("---")
     st.subheader("🧠 AI (Gemini)")
