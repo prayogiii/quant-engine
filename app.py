@@ -1104,7 +1104,7 @@ def fraksi_step(harga):
         elif h < 500: return 2
         elif h < 2000: return 5
         elif h < 5000: return 10
-         return 25
+        return 25
     except (ValueError, TypeError, OverflowError):
         return 1
 
