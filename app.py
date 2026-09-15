@@ -4452,6 +4452,56 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _get_broksum_for_date(ticker, date_str):
+    """
+    Ambil broksum dari sheet broksum_history untuk ticker + tanggal.
+    Match exact dulu, fallback ±2 hari.
+    Return: dict {status, upload_date, narrative} atau None.
+    """
+    try:
+        sheet = get_gsheet().worksheet("broksum_history")
+        records = sheet.get_all_records()
+        ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+
+        def _parse(rec):
+            try:
+                return {
+                    'status': rec.get('bandarmology_status', 'N/A'),
+                    'upload_date': rec.get('upload_date', ''),
+                    'narrative': rec.get('summary_narrative', ''),
+                }
+            except Exception:
+                return None
+
+        # ── Exact match ──
+        for r in records:
+            if str(r.get('ticker', '')).upper() != ticker_clean:
+                continue
+            if str(r.get('upload_date', '')).startswith(date_str):
+                parsed = _parse(r)
+                if parsed:
+                    return parsed
+
+        # ── Fallback: ±2 hari ──
+        try:
+            target = datetime.strptime(date_str, "%Y-%m-%d")
+            for delta in [1, -1, 2, -2]:
+                alt = (target + timedelta(days=delta)).strftime("%Y-%m-%d")
+                for r in records:
+                    if str(r.get('ticker', '')).upper() != ticker_clean:
+                        continue
+                    if str(r.get('upload_date', '')).startswith(alt):
+                        parsed = _parse(r)
+                        if parsed:
+                            parsed['matched_offset'] = delta
+                            return parsed
+        except Exception:
+            pass
+
+        return None
+    except Exception:
+        return None
 # ==================== SIDEBAR ====================
 with st.sidebar:
     st.markdown("## 📊 QuantRisk Pro")
