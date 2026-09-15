@@ -1090,7 +1090,7 @@ def fraksi_bei(harga):
 
 def fraksi_step(harga):
     """Mengembalikan nilai kelipatan 1 fraksi BEI.
-    
+
     Defensive: kalau harga NaN / None / invalid, return 1 (fraksi minimum).
     """
     try:
@@ -1100,11 +1100,16 @@ def fraksi_step(harga):
         if math.isnan(h) or math.isinf(h) or h <= 0:
             return 1
 
-        if h < 200: return 1
-        elif h < 500: return 2
-        elif h < 2000: return 5
-        elif h < 5000: return 10
-        return 25
+        if h < 200:
+            return 1
+        elif h < 500:
+            return 2
+        elif h < 2000:
+            return 5
+        elif h < 5000:
+            return 10
+        else:
+            return 25
     except (ValueError, TypeError, OverflowError):
         return 1
 
