@@ -849,7 +849,7 @@ def compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85)
         # Jika sudah PIL Image, gunakan langsung; jika file path, buka dulu
         if isinstance(image, str):
             img = Image.open(image)
-        else:
+        
             img = image
         
         # Resize jika lebih besar dari max dimensions
@@ -1025,7 +1025,7 @@ def klasifikasi_broker(broker_code, volume_lot, freq=None):
             return "Bandar", "🐋"
         elif avg_per_freq < 50:
             return "Retail", "🧑"
-        else:
+        
             return "Mixed", "⚖️"
 
     return "Mixed", "⚖️"
@@ -1082,7 +1082,7 @@ def fraksi_bei(harga):
             fraksi = 5
         elif h < 5000:
             fraksi = 10
-        else:
+        
             fraksi = 25
         return round(h / fraksi) * fraksi
     except (ValueError, TypeError, OverflowError):
@@ -1104,7 +1104,7 @@ def fraksi_step(harga):
         elif h < 500: return 2
         elif h < 2000: return 5
         elif h < 5000: return 10
-        else: return 25
+         return 25
     except (ValueError, TypeError, OverflowError):
         return 1
 
@@ -4904,138 +4904,358 @@ with st.sidebar:
                 st.caption(f"❌ Tidak ada riwayat cocok dengan '{search_query}'.")
             else:
                 st.caption("Belum ada riwayat.")
-    else:
-        # ---------- Tampilan flat ----------
-        items_per_page = 10
-        total_items = len(riwayat_data)
-        total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
-
-        if total_pages > 1:
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col1:
-                if st.button("◀ Sebelumnya", disabled=(st.session_state.riwayat_page == 0), key="prev_flat"):
-                    st.session_state.riwayat_page = max(0, st.session_state.riwayat_page - 1)
-            with col2:
-                st.markdown(
-                    f"<div style='text-align:center; color:#8892b0; font-size:12px;'>"
-                    f"Hal. {st.session_state.riwayat_page+1} / {total_pages}</div>",
-                    unsafe_allow_html=True
-                )
-            with col3:
-                if st.button("Selanjutnya ▶", disabled=(st.session_state.riwayat_page >= total_pages - 1), key="next_flat"):
-                    st.session_state.riwayat_page = min(total_pages - 1, st.session_state.riwayat_page + 1)
-
-        start_idx = st.session_state.riwayat_page * items_per_page
-        end_idx = start_idx + items_per_page
-        display_riwayat = riwayat_data[start_idx:end_idx]
-
-        if display_riwayat:
-            for idx, r in enumerate(display_riwayat):
-                sig_icon = "🔥" if "STRONG BUY" in r.get('Sinyal','') else (
-                    "⚡" if "BUY" in r.get('Sinyal','') else (
-                        "⏸️" if "HOLD" in r.get('Sinyal','') else "🚨"))
-                conf_str = r.get('Confidence', '0%')
-                try:
-                    conf_val = float(conf_str.replace('%',''))
-                except Exception:
-                    conf_val = 0
-                conf_text = "Tinggi ▲" if conf_val >= 70 else ("Sedang ►" if conf_val >= 50 else "Rendah ▼")
-                gaya = r.get('Gaya','?')
-                gaya_label = "⏱️DT" if gaya == "DT" else ("📆SW" if gaya == "SW" else "")
-                expander_title = (
-                    f"{r.get('Saham','?')} @ Rp {r.get('Harga','?')} "
-                    f"{sig_icon} {r.get('Sinyal','?')} ({gaya_label}) Score: {r.get('Score','?')}"
-                )
-
-                with st.expander(expander_title):
-                    st.markdown(f"**{sig_icon} {r.get('Sinyal','?')}** ({gaya_label})")
-                    st.caption(
-                        f"Score: {r.get('Score','?')} | Confidence: {r.get('Confidence','?')} "
-                        f"({conf_text}) | Risk-Adj: {r.get('RRR','?')}"
+        else:
+            # ---------- Tampilan flat — card style compact + AI Summary ----------
+            items_per_page = 10
+            total_items = len(riwayat_data)
+            total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+    
+            # ── Pagination ──
+            if total_pages > 1:
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col1:
+                    if st.button("◀ Sebelumnya", disabled=(st.session_state.riwayat_page == 0), key="prev_flat"):
+                        st.session_state.riwayat_page = max(0, st.session_state.riwayat_page - 1)
+                with col2:
+                    st.markdown(
+                        f"<div style='text-align:center; color:#8892b0; font-size:12px;'>"
+                        f"Hal. {st.session_state.riwayat_page+1} / {total_pages}</div>",
+                        unsafe_allow_html=True
                     )
-                    waktu_analisis = r.get('Waktu', '?')
-                    if waktu_analisis and waktu_analisis != '?':
-                        st.caption(f"🕒 Waktu Analisis: {waktu_analisis}")
-                    harga_beli_r = r.get('Harga_Beli', '')
-                    if harga_beli_r:
-                        st.caption(f"💰 Harga Beli: Rp {harga_beli_r} | Floating: {r.get('Floating_PL', '')}")
-                    st.divider()
-
-                    st.metric("Coppock", r.get('Coppock','?'))
-
+                with col3:
+                    if st.button("Selanjutnya ▶", disabled=(st.session_state.riwayat_page >= total_pages - 1), key="next_flat"):
+                        st.session_state.riwayat_page = min(total_pages - 1, st.session_state.riwayat_page + 1)
+    
+            start_idx = st.session_state.riwayat_page * items_per_page
+            end_idx = start_idx + items_per_page
+            display_riwayat = riwayat_data[start_idx:end_idx]
+    
+            if display_riwayat:
+                for idx, r in enumerate(display_riwayat):
+                    # ── Tentukan warna signal ──
+                    sinyal = r.get('Sinyal', '?')
+                    if "STRONG BUY" in sinyal:
+                        sig_color, sig_icon, sig_label = "#10b981", "🔥", "STRONG BUY"
+                    elif "BUY" in sinyal:
+                        sig_color, sig_icon, sig_label = "#84cc16", "⚡", "BUY"
+                    elif "HOLD" in sinyal:
+                        sig_color, sig_icon, sig_label = "#3b82f6", "⏸️", "HOLD"
+                    else:
+                        sig_color, sig_icon, sig_label = "#ef4444", "🚨", "AVOID"
+    
+                    gaya = r.get('Gaya', '?')
+                    gaya_label = "DAYTRADE" if gaya == "DT" else ("SWING" if gaya == "SW" else "")
+                    gaya_color = "#06b6d4" if gaya == "DT" else "#a855f7"
+                    gaya_icon = "⏱️" if gaya == "DT" else "📆"
+    
+                    saham_key = r.get('Saham', '?')
+                    harga = r.get('Harga', '?')
+                    waktu = r.get('Waktu', '?')
+                    waktu_short = waktu.split()[1] if len(waktu.split()) > 1 else waktu
+    
+                    # ── Header card ticker ──
+                    st.markdown(f"""
+                    <div style="background:linear-gradient(135deg,#1a1d24 0%,#0f1116 100%);
+                        border-radius:12px; padding:14px 18px; margin-top:14px;
+                        border-left:5px solid {sig_color};
+                        border-top:1px solid #262626; border-right:1px solid #262626;
+                        border-bottom:1px solid #262626;">
+                        <div style="display:flex; justify-content:space-between;
+                            align-items:flex-start; flex-wrap:wrap; gap:10px;">
+                            <div>
+                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                    <span style="color:{gaya_color}; font-size:10px; font-weight:700;
+                                        letter-spacing:1.2px; text-transform:uppercase;">
+                                        {gaya_icon} {gaya_label}
+                                    </span>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                    <span style="color:#f3f4f6; font-size:22px;
+                                        font-weight:700; letter-spacing:0.5px;">{saham_key}</span>
+                                    <span style="color:#94a3b8; font-size:13px;">@ Rp {harga}</span>
+                                </div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="color:{sig_color}; font-size:15px; font-weight:700;">
+                                    {sig_icon} {sig_label}
+                                </div>
+                                <div style="color:#64748b; font-size:10px; margin-top:2px;">
+                                    🕒 {waktu}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ── Score / RRR / Confidence ──
+                    st.markdown(f"""
+                    <div style="background:#1e293b; border-radius:8px; padding:10px 14px;
+                        margin-top:-6px; margin-bottom:10px; border-top:1px solid #262626;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                            <div style="text-align:center;">
+                                <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">Score</div>
+                                <div style="color:#00ffcc; font-size:14px; font-weight:700;
+                                    margin-top:2px;">{r.get('Score','?')}</div>
+                            </div>
+                            <div style="text-align:center; border-left:1px solid #334155;
+                                border-right:1px solid #334155;">
+                                <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">RRR</div>
+                                <div style="color:#e2e8f0; font-size:14px; font-weight:700;
+                                    margin-top:2px;">{r.get('RRR','?')}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">Confidence</div>
+                                <div style="color:#e2e8f0; font-size:14px; font-weight:700;
+                                    margin-top:2px;">{r.get('Confidence','?')}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ═══════════════════════════════════════════════════════
+                    # 📝 AI SUMMARY — dari broksum_history (narrative only)
+                    # ═══════════════════════════════════════════════════════
+                    riwayat_date = waktu[:10] if waktu else ""
+                    _bs = _get_broksum_for_date(saham_key, riwayat_date) if riwayat_date else None
+                    _narrative = (_bs or {}).get('narrative', '').strip()
+                    if _narrative:
+                        st.markdown(f"""
+                        <div style="background:linear-gradient(135deg,#a855f712 0%,#1e293b 100%);
+                            border-left:4px solid #a855f7; border-radius:8px;
+                            padding:10px 14px; margin-bottom:10px;">
+                            <div style="color:#a855f7; font-size:10px; font-weight:700;
+                                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">
+                                📝 AI Summary
+                            </div>
+                            <div style="color:#cbd5e1; font-size:11px; line-height:1.6;
+                                font-style:italic;">
+                                "{_narrative}"
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+    
+                    # ── Coppock + Regime ──
+                    coppock = r.get('Coppock', '?')
+                    if "Turning Up" in coppock:
+                        cop_icon, cop_color = "🔼", "#10b981"
+                    elif "Rising" in coppock:
+                        cop_icon, cop_color = "📈", "#84cc16"
+                    else:
+                        cop_icon, cop_color = "📉", "#ef4444"
+    
+                    regime = r.get('Rezim', '?')
+                    st.markdown(f"""
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;
+                        margin-bottom:10px;">
+                        <div style="background:#1e293b; border-radius:6px; padding:8px 12px;
+                            border-left:2px solid {cop_color};">
+                            <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                letter-spacing:0.5px;">Coppock</div>
+                            <div style="color:{cop_color}; font-size:12px; font-weight:600;
+                                margin-top:2px;">{cop_icon} {coppock}</div>
+                        </div>
+                        <div style="background:#1e293b; border-radius:6px; padding:8px 12px;
+                            border-left:2px solid #a855f7;">
+                            <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                letter-spacing:0.5px;">Regime</div>
+                            <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                margin-top:2px;">{regime}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ── Estimasi ──
                     est_netral = r.get('Estimasi_Netral', '?')
                     est_sinyal = r.get('Estimasi_Sinyal', '?')
                     ret_netral = r.get('Est_Return', '?')
                     ret_sinyal = r.get('Est_Return_Sinyal', '?')
-                    st.caption(f"📊 Netral: {est_netral} ({ret_netral})  |  🎯 Sinyal: {est_sinyal} ({ret_sinyal})")
-
-                    c1, c2 = st.columns(2)
-                    tplabel = "Est. TP Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. TP Besok"
-                    sllabel = "Est. SL Sesi Berikutnya" if r.get('Gaya') == 'DT' else "Est. SL Besok"
+                    st.markdown(f"""
+                    <div style="background:#1e293b; border-radius:8px; padding:10px 14px;
+                        margin-bottom:10px;">
+                        <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                            letter-spacing:0.5px; margin-bottom:8px;">📊 Estimasi Harga</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div style="text-align:center;">
+                                <div style="color:#64748b; font-size:9px; margin-bottom:3px;">Netral</div>
+                                <div style="color:#e2e8f0; font-size:13px; font-weight:600;">{est_netral}</div>
+                                <div style="color:#94a3b8; font-size:10px; margin-top:2px;">{ret_netral}</div>
+                            </div>
+                            <div style="text-align:center; border-left:1px solid #334155;">
+                                <div style="color:#64748b; font-size:9px; margin-bottom:3px;">🎯 Sinyal</div>
+                                <div style="color:#00ffcc; font-size:13px; font-weight:600;">{est_sinyal}</div>
+                                <div style="color:#10b981; font-size:10px; margin-top:2px;">{ret_sinyal}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ── TP & SL ──
                     tp_val = r.get('TP_Harga') or r.get('TP_Range', '?')
-                    tp_display = str(tp_val) if str(tp_val).startswith('Rp') else f"Rp {tp_val}"
                     sl_val = r.get('SL_Harga', '?')
-                    sl_display = str(sl_val) if str(sl_val).startswith('Rp') else f"Rp {sl_val}"
-                    with c1:
-                        st.markdown(
-                            f"""<div style="margin-top: 0px;">
-                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{tplabel}</label>
-                            <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:24px; font-weight:700; line-height:1.2;">{tp_display}</div>
-                            </div>""",
-                            unsafe_allow_html=True
-                        )
-                    with c2:
-                        st.markdown(
-                            f"""<div style="margin-top: 0px;">
-                            <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">{sllabel}</label>
-                            <div data-testid="stMetricValue" style="color:rgb(239, 68, 68); font-size:24px; font-weight:700; line-height:1.2;">{sl_display}</div>
-                            </div>""",
-                            unsafe_allow_html=True
-                        )
-
-                    st.metric("Likuiditas", r.get('Likuiditas','?'), delta="/hari")
-
+                    tp_label = "TP Sesi Berikutnya" if gaya == "DT" else "TP Besok"
+                    sl_label = "SL Sesi Berikutnya" if gaya == "DT" else "SL Besok"
+                    st.markdown(f"""
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;
+                        margin-bottom:10px;">
+                        <div style="background:#1e293b; border-radius:8px; padding:10px 12px;
+                            border-left:3px solid #10b981;">
+                            <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                letter-spacing:0.5px;">📈 {tp_label}</div>
+                            <div style="color:#10b981; font-size:14px; font-weight:700;
+                                margin-top:4px;">{tp_val}</div>
+                        </div>
+                        <div style="background:#1e293b; border-radius:8px; padding:10px 12px;
+                            border-left:3px solid #ef4444;">
+                            <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                letter-spacing:0.5px;">🛑 {sl_label}</div>
+                            <div style="color:#ef4444; font-size:14px; font-weight:700;
+                                margin-top:4px;">Rp {sl_val}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ── Entry & Dip ──
                     entry_zone_val = r.get('Entry_Zone', '?')
                     dip_entry_val = get_dip_entry(r)
                     if (entry_zone_val and entry_zone_val != '?') or dip_entry_val:
-                        ce1, ce2 = st.columns(2)
-                        with ce1:
-                            if entry_zone_val and entry_zone_val != '?':
-                                st.markdown(
-                                    f"""<div style="margin-top: 8px;">
-                                    <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">🎯 Entry Zone</label>
-                                    <div data-testid="stMetricValue" style="color:rgb(0, 255, 204); font-size:22px; font-weight:700; line-height:1.2;">{entry_zone_val}</div>
-                                    </div>""",
-                                    unsafe_allow_html=True
-                                )
-                        with ce2:
-                            if dip_entry_val:
-                                st.markdown(
-                                    f"""<div style="margin-top: 8px;">
-                                    <label data-testid="stMetricLabel" style="color:rgb(255, 255, 255); font-size:14px; margin:0 0 4px 0; display:block;">💡 Dip Entry (Ideal RRR 1:2.0)</label>
-                                    <div data-testid="stMetricValue" style="color:rgb(250, 204, 21); font-size:22px; font-weight:700; line-height:1.2;">{dip_entry_val}</div>
-                                    </div>""",
-                                    unsafe_allow_html=True
-                                )
-
-                    ind1, ind2, ind3, ind4 = st.columns(4)
-                    ind1.metric("RSI-14", r.get('RSI','?'), delta=r.get('RSI_Status',''))
-                    ind2.metric("Vol Surge", r.get('Vol_Surge','?'), delta=r.get('VS_Status',''))
-                    ind3.metric("Z-Score", r.get('ZScore','?'), delta=r.get('ZS_Status',''))
-                    ind4.metric("Trend Cons.", r.get('Trend_Consistency','?'))
-                    b1, b2 = st.columns(2)
-                    b1.metric("Beta", r.get('Beta','?'))
-                    b2.metric("Momentum (5D)", r.get('Momentum','?'))
-                    st.caption(f"Regime: **{r.get('Rezim','?')}**")
-
-                    ai = r.get("AI_Insight", "").strip()
-                    status_pos = r.get('Status_Posisi', '')
-                    if status_pos == 'Sudah Beli':
-                        st.caption("🟢 Saat analisis: **Sudah memiliki posisi**")
-
+                        st.markdown(f"""
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;
+                            margin-bottom:10px;">
+                            <div style="background:#1e293b; border-radius:8px; padding:10px 12px;
+                                border-left:3px solid #00ffcc;">
+                                <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">🎯 Entry Zone</div>
+                                <div style="color:#00ffcc; font-size:12px; font-weight:600;
+                                    margin-top:4px;">{entry_zone_val if entry_zone_val else '-'}</div>
+                            </div>
+                            <div style="background:#1e293b; border-radius:8px; padding:10px 12px;
+                                border-left:3px solid #facc15;">
+                                <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">💡 Dip Entry (RRR 1:2.0)</div>
+                                <div style="color:#facc15; font-size:12px; font-weight:600;
+                                    margin-top:4px;">{dip_entry_val if dip_entry_val else '-'}</div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+    
+                    # ── Indikator teknikal ──
+                    rsi = r.get('RSI', '?')
+                    rsi_status = r.get('RSI_Status', '')
+                    vol_surge = r.get('Vol_Surge', '?')
+                    vs_status = r.get('VS_Status', '')
+                    zscore = r.get('ZScore', '?')
+                    zs_status = r.get('ZS_Status', '')
+                    trend = r.get('Trend_Consistency', '?')
+    
+                    def _ind_color(status):
+                        s = str(status).lower()
+                        if "overbought" in s or "high" in s or "tinggi" in s:
+                            return "#ef4444"
+                        if "oversold" in s or "low" in s or "rendah" in s:
+                            return "#10b981"
+                        return "#94a3b8"
+    
+                    st.markdown(f"""
+                    <div style="background:#1e293b; border-radius:8px; padding:10px 14px;
+                        margin-bottom:10px;">
+                        <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;
+                            letter-spacing:0.5px; margin-bottom:8px;">📊 Indikator Teknikal</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px;">
+                            <div style="text-align:center;">
+                                <div style="color:#64748b; font-size:8px;">RSI-14</div>
+                                <div style="color:#e2e8f0; font-size:12px; font-weight:700;
+                                    margin-top:2px;">{rsi}</div>
+                                <div style="color:{_ind_color(rsi_status)}; font-size:8px;
+                                    margin-top:1px;">{rsi_status}</div>
+                            </div>
+                            <div style="text-align:center; border-left:1px solid #334155;
+                                border-right:1px solid #334155;">
+                                <div style="color:#64748b; font-size:8px;">Vol Surge</div>
+                                <div style="color:#e2e8f0; font-size:12px; font-weight:700;
+                                    margin-top:2px;">{vol_surge}</div>
+                                <div style="color:{_ind_color(vs_status)}; font-size:8px;
+                                    margin-top:1px;">{vs_status}</div>
+                            </div>
+                            <div style="text-align:center;">
+                                <div style="color:#64748b; font-size:8px;">Z-Score</div>
+                                <div style="color:#e2e8f0; font-size:12px; font-weight:700;
+                                    margin-top:2px;">{zscore}</div>
+                                <div style="color:{_ind_color(zs_status)}; font-size:8px;
+                                    margin-top:1px;">{zs_status}</div>
+                            </div>
+                            <div style="text-align:center; border-left:1px solid #334155;">
+                                <div style="color:#64748b; font-size:8px;">Trend</div>
+                                <div style="color:#e2e8f0; font-size:12px; font-weight:700;
+                                    margin-top:2px;">{trend}</div>
+                                <div style="color:#94a3b8; font-size:8px; margin-top:1px;">Cons.</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ── Beta / Momentum / Likuiditas ──
+                    beta = r.get('Beta', '?')
+                    momentum = r.get('Momentum', '?')
+                    likuiditas = r.get('Likuiditas', '?')
+                    st.markdown(f"""
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;
+                        margin-bottom:10px;">
+                        <div style="background:#1e293b; border-radius:6px; padding:8px 10px;">
+                            <div style="color:#94a3b8; font-size:8px; text-transform:uppercase;
+                                letter-spacing:0.5px;">Beta</div>
+                            <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                margin-top:2px;">{beta}</div>
+                        </div>
+                        <div style="background:#1e293b; border-radius:6px; padding:8px 10px;">
+                            <div style="color:#94a3b8; font-size:8px; text-transform:uppercase;
+                                letter-spacing:0.5px;">Momentum 5D</div>
+                            <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                margin-top:2px;">{momentum}</div>
+                        </div>
+                        <div style="background:#1e293b; border-radius:6px; padding:8px 10px;">
+                            <div style="color:#94a3b8; font-size:8px; text-transform:uppercase;
+                                letter-spacing:0.5px;">Likuiditas</div>
+                            <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                margin-top:2px;">{likuiditas}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    
+                    # ── Status Posisi ──
+                    if r.get('Status_Posisi', '') == 'Sudah Beli':
+                        harga_beli_r = r.get('Harga_Beli', '')
+                        floating_pl = r.get('Floating_PL', '')
+                        try:
+                            pl_val = float(str(floating_pl).replace('%', '').replace('+', ''))
+                        except Exception:
+                            pl_val = 0
+                        pl_color = "#10b981" if pl_val > 0 else ("#ef4444" if pl_val < 0 else "#94a3b8")
+                        st.markdown(f"""
+                        <div style="background:#1e293b; border-radius:8px; padding:10px 14px;
+                            margin-bottom:10px; border-left:3px solid {pl_color};">
+                            <div style="display:flex; justify-content:space-between;
+                                align-items:center; flex-wrap:wrap; gap:8px;">
+                                <div>
+                                    <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;">
+                                        💰 Harga Beli</div>
+                                    <div style="color:#e2e8f0; font-size:13px; font-weight:600;
+                                        margin-top:2px;">Rp {harga_beli_r}</div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="color:#94a3b8; font-size:9px; text-transform:uppercase;">
+                                        Floating P/L</div>
+                                    <div style="color:{pl_color}; font-size:15px; font-weight:700;
+                                        margin-top:2px;">{floating_pl}</div>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+    
                     # ── Cek actual data ──
                     waktu_key = r.get('Waktu','')
-                    saham_key = r.get('Saham','')
                     gaya_key = r.get('Gaya', 'SW')
                     mode_actual = "swing" if gaya_key == "SW" else "daytrade"
                     actual_data = (
@@ -5043,54 +5263,103 @@ with st.sidebar:
                         st.session_state.riwayat_actual.get((waktu_key, saham_key, mode_actual)) or
                         st.session_state.riwayat_actual.get((waktu_key, saham_key))
                     )
-
+    
                     has_actual = False
                     if actual_data:
-                        if (actual_data.get('Actual_High') or
-                            actual_data.get('Actual_Low') or
-                            actual_data.get('Actual_Close') or
-                            actual_data.get('Outcome') or
+                        if (actual_data.get('Actual_High') or actual_data.get('Actual_Low') or
+                            actual_data.get('Actual_Close') or actual_data.get('Outcome') or
                             actual_data.get('Entry_Miss') == 'Yes'):
                             has_actual = True
-
+    
                     if has_actual:
-                        st.caption(f"📌 Actual High: {actual_data.get('Actual_High','')} | Low: {actual_data.get('Actual_Low','')}")
-                        if actual_data.get('Entry_Miss') == 'Yes':
-                            st.caption("⚠️ Entry Tidak Tersentuh")
-                        if actual_data.get('Outcome'):
-                            warna_outcome = {
-                                'Win': '🟢', 'Loss': '🔴', 'Not Touched': '⚪'
-                            }.get(actual_data['Outcome'], '')
-                            st.caption(f"🏁 Outcome: {warna_outcome} {actual_data['Outcome']}")
+                        outcome = actual_data.get('Outcome', '')
+                        entry_miss = actual_data.get('Entry_Miss') == 'Yes'
+                        if entry_miss or outcome == 'Not Touched':
+                            oi, oc, ol = "⚪", "#94a3b8", "NOT TOUCHED"
+                        elif outcome == 'Win':
+                            oi, oc, ol = "🏆", "#10b981", "WIN"
+                        elif outcome == 'Loss':
+                            oi, oc, ol = "💔", "#ef4444", "LOSS"
+                        else:
+                            oi, oc, ol = "❓", "#64748b", "PENDING"
+    
+                        hi = actual_data.get('Actual_High', '-') or '-'
+                        lo = actual_data.get('Actual_Low', '-') or '-'
+                        cl = actual_data.get('Actual_Close', '-') or '-'
+    
+                        st.markdown(f"""
+                        <div style="background:{oc}10; border:1px solid {oc}40;
+                            border-radius:8px; padding:10px 14px; margin-bottom:6px;">
+                            <div style="display:flex; align-items:center; gap:8px;
+                                margin-bottom:8px;">
+                                <span style="font-size:16px;">{oi}</span>
+                                <span style="color:{oc}; font-size:11px; font-weight:700;
+                                    letter-spacing:1px;">{ol}</span>
+                            </div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
+                                <div style="text-align:center;">
+                                    <div style="color:#94a3b8; font-size:9px;">High</div>
+                                    <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                        margin-top:2px;">{hi}</div>
+                                </div>
+                                <div style="text-align:center; border-left:1px solid {oc}30;
+                                    border-right:1px solid {oc}30;">
+                                    <div style="color:#94a3b8; font-size:9px;">Low</div>
+                                    <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                        margin-top:2px;">{lo}</div>
+                                </div>
+                                <div style="text-align:center;">
+                                    <div style="color:#94a3b8; font-size:9px;">Close</div>
+                                    <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                        margin-top:2px;">{cl}</div>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
-                        # ── Placeholder + tombol Hapus saja ──
-                        st.markdown(
-                            '<div style="background:#1e293b; border-radius:6px; '
-                            'padding:6px 10px; font-size:10px; color:#94a3b8; '
-                            'text-align:center; border:1px dashed #334155; '
-                            'margin-bottom:6px;">'
-                            '⏳ Outcome belum dicatat · <i>Cek Quick Outcome di atas</i>'
-                            '</div>',
-                            unsafe_allow_html=True
-                        )
-                        hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
-                        if st.button("🗑️ Hapus dari Riwayat", key=hapus_key,
-                                     use_container_width=True):
-                            hapus_riwayat_item(waktu_key, saham_key, gaya=gaya_key)
-                            st.rerun()
-
+                        st.markdown("""
+                        <div style="background:#1e293b; border-radius:6px; padding:8px 12px;
+                            font-size:10px; color:#94a3b8; text-align:center;
+                            border:1px dashed #334155; margin-bottom:6px;">
+                            ⏳ Outcome belum dicatat · <i>Cek Quick Outcome di atas</i>
+                        </div>
+                        """, unsafe_allow_html=True)
+    
+                    # ── Tombol Hapus ──
+                    hapus_key = f"hapus_{idx}_{waktu_key}_{saham_key}_{gaya_key}"
+                    if st.button("🗑️ Hapus dari Riwayat", key=hapus_key,
+                                 use_container_width=True):
+                        hapus_riwayat_item(waktu_key, saham_key, gaya=gaya_key)
+                        st.rerun()
+    
+                    # ── AI Insight ──
+                    ai = r.get("AI_Insight", "").strip()
                     if ai:
-                        st.caption(f"💡 {ai[:150]}")
-
-            st.caption(
-                f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat"
-                + (f" (hasil pencarian '{search_query}')" if search_query else "")
-            )
-        else:
-            if search_query:
-                st.caption(f"❌ Tidak ada riwayat cocok dengan '{search_query}'.")
+                        st.markdown(f"""
+                        <div style="background:linear-gradient(135deg,#8b5cf615 0%,#1e293b 100%);
+                            border-left:3px solid #8b5cf6; border-radius:6px;
+                            padding:8px 12px; margin-bottom:8px; font-size:10px;
+                            color:#cbd5e1; line-height:1.5;">
+                            💡 <b>AI Insight:</b> {ai[:200]}{'...' if len(ai) > 200 else ''}
+                        </div>
+                        """, unsafe_allow_html=True)
+    
+                    # Separator
+                    st.markdown(
+                        '<div style="height:12px; margin-bottom:8px; '
+                        'border-bottom:1px solid #262626;"></div>',
+                        unsafe_allow_html=True
+                    )
+    
+                st.caption(
+                    f"📋 Menampilkan {start_idx+1}-{min(end_idx, total_items)} dari {total_items} riwayat"
+                    + (f" (hasil pencarian '{search_query}')" if search_query else "")
+                )
             else:
-                st.caption("Belum ada riwayat.")
+                if search_query:
+                    st.caption(f"❌ Tidak ada riwayat cocok dengan '{search_query}'.")
+                else:
+                    st.caption("Belum ada riwayat.")
     
     st.markdown("---")
     st.subheader("🧠 AI (Gemini)")
