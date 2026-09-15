@@ -4682,18 +4682,16 @@ with st.sidebar:
             if cells:
                 html = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px;">'
                 for icon, label, value, color in cells:
-                    html += f"""
-                    <div style="background:#1e293b; border-radius:5px; padding:6px 8px; 
-                        border-left:2px solid {color};">
-                        <div style="color:#94a3b8; font-size:8px; text-transform:uppercase;">
-                            {icon} {label}
-                        </div>
-                        <div style="color:{color}; font-size:10px; font-weight:600; 
-                            margin-top:2px; word-break:break-word;">
-                            {value}
-                        </div>
-                    </div>
-                    """
+                    html += (
+                        f'<div style="background:#1e293b; border-radius:5px; padding:6px 8px; '
+                        f'border-left:2px solid {color};">'
+                        f'<div style="color:#94a3b8; font-size:8px; text-transform:uppercase;">'
+                        f'{icon} {label}</div>'
+                        f'<div style="color:{color}; font-size:10px; font-weight:600; '
+                        f'margin-top:2px; word-break:break-word;">'
+                        f'{value}</div>'
+                        f'</div>'
+                    )
                 html += '</div>'
                 st.markdown(html, unsafe_allow_html=True)
     
