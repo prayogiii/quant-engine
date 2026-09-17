@@ -1722,27 +1722,27 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
         old_acc = mem['accuracy'].get(k,0.5)
         mem['accuracy'][k] = old_acc*(1-alpha_acc) + hit*alpha_acc   
     for k in FACTOR_KEYS:
-    acc = mem['accuracy'][k]
-    old_w = mem['weights'].get(k, default_weight(k,'SIDEWAYS'))
-
-    # Drift proporsional terhadap seberapa jauh acc dari 0.5
-    # acc = 0.75 → multiplier 1.10 ; acc = 0.90 → multiplier 1.25
-    if acc >= 0.55:
-        drift = min(0.25, (acc - 0.5) * 0.5)   # cap +25%
-        new_w = min(old_w * (1 + drift), WEIGHT_MAX)
-    elif acc <= 0.45:
-        drift = min(0.25, (0.5 - acc) * 0.5)
-        new_w = max(old_w * (1 - drift), WEIGHT_MIN)
-    else:
-        new_w = old_w
-
-    mem['weights'][k] = new_w
-total_updates = mem.get('total_updates', 0) + 1
-mem['total_updates'] = total_updates
-if total_updates % 100 == 0:
-    for k in FACTOR_KEYS:
-        default_w = default_weight(k, 'SIDEWAYS')
-        mem['weights'][k] = mem['weights'][k] * 0.85 + default_w * 0.15
+        acc = mem['accuracy'][k]
+        old_w = mem['weights'].get(k, default_weight(k,'SIDEWAYS'))
+    
+        # Drift proporsional terhadap seberapa jauh acc dari 0.5
+        # acc = 0.75 → multiplier 1.10 ; acc = 0.90 → multiplier 1.25
+        if acc >= 0.55:
+            drift = min(0.25, (acc - 0.5) * 0.5)   # cap +25%
+            new_w = min(old_w * (1 + drift), WEIGHT_MAX)
+        elif acc <= 0.45:
+            drift = min(0.25, (0.5 - acc) * 0.5)
+            new_w = max(old_w * (1 - drift), WEIGHT_MIN)
+        else:
+            new_w = old_w
+    
+        mem['weights'][k] = new_w
+    total_updates = mem.get('total_updates', 0) + 1
+    mem['total_updates'] = total_updates
+    if total_updates % 100 == 0:
+        for k in FACTOR_KEYS:
+            default_w = default_weight(k, 'SIDEWAYS')
+            mem['weights'][k] = mem['weights'][k] * 0.85 + default_w * 0.15
     st.session_state.v12_memory[ticker] = mem
     save_v12_memory(st.session_state.v12_memory)
 
