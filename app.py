@@ -1226,7 +1226,7 @@ def load_v12_predictions(ticker, mode="swing"):
         for row in records:
             if row.get('ticker') == ticker and row.get('mode') == mode:
                 return row
-        return None
+        
     except Exception as e:
         st.error(f"Gagal memuat prediksi: {e}")
         return None
@@ -6679,7 +6679,7 @@ df_back = df.iloc[-backtest_window:].copy()
 
 if len(df_back) == 0:
     st.warning(f"⚠️ df_back kosong untuk {ticker_raw} (mode: {'DT' if is_daytrade else 'SW'})")
-    return None
+        return None
 
 trades, daily_returns = [], []
 in_position, entry_price = False, 0.0
