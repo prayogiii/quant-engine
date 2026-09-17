@@ -1163,7 +1163,11 @@ def init_sheets():
                 ws.add_cols(9 - ws.col_count)
 
         if "riwayat_actual" not in existing:
-            sheet.add_worksheet("riwayat_actual", rows=100, cols=7)
+            ws = sheet.add_worksheet("riwayat_actual", rows=100, cols=8)
+            ws.update("A1:H1",
+                [["Waktu", "Saham", "Mode", "Actual_High", "Actual_Low",
+                  "Actual_Close", "Outcome", "Entry_Miss"]],
+                value_input_option='RAW')
 
         if "broksum_history" not in existing:
             ws = sheet.add_worksheet("broksum_history", rows=2000, cols=8)
@@ -1699,27 +1703,46 @@ def get_adaptive_weights(ticker, regime, v12_mem=None):
     return {k: v/tot for k,v in final.items()}
 
 def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
+    if abs(actual_return) < 0.003:   
+        return
     if ticker not in st.session_state.v12_memory:
         st.session_state.v12_memory[ticker] = {'weights':{},'accuracy':{},'error_ema':{}}
     mem = st.session_state.v12_memory[ticker]
-    alpha = 0.20 if volatility>0.04 else (0.10 if volatility>0.02 else 0.05)
+    alpha = max(0.08, 0.20 if volatility>0.04 else (0.15 if volatility>0.02 else 0.10))
     ac = max(-1.0, min(1.0, actual_return))
     for k in FACTOR_KEYS:
         sv = max(-1.0, min(1.0, factor_signals.get(k,0.0)))
         err = abs(sv - ac)
         old = mem['error_ema'].get(k,1.0)
         mem['error_ema'][k] = old*(1-alpha) + err*alpha
+    # Adaptive learning rate: cepat saat volatile, lambat saat tenang
+    alpha_acc = 0.20 if volatility > 0.04 else (0.12 if volatility > 0.02 else 0.06)
     for k in FACTOR_KEYS:
         hit = 1.0 if factor_signals.get(k,0.0)*actual_return>0 else 0.0
         old_acc = mem['accuracy'].get(k,0.5)
-        mem['accuracy'][k] = old_acc*0.97 + hit*0.03
+        mem['accuracy'][k] = old_acc*(1-alpha_acc) + hit*alpha_acc   
     for k in FACTOR_KEYS:
-        acc = mem['accuracy'][k]
-        old_w = mem['weights'].get(k, default_weight(k,'SIDEWAYS'))
-        if acc>=0.65: new_w = min(old_w*1.01, WEIGHT_MAX)
-        elif acc<0.35: new_w = max(old_w*0.99, WEIGHT_MIN)
-        else: new_w = old_w
-        mem['weights'][k] = new_w
+    acc = mem['accuracy'][k]
+    old_w = mem['weights'].get(k, default_weight(k,'SIDEWAYS'))
+
+    # Drift proporsional terhadap seberapa jauh acc dari 0.5
+    # acc = 0.75 → multiplier 1.10 ; acc = 0.90 → multiplier 1.25
+    if acc >= 0.55:
+        drift = min(0.25, (acc - 0.5) * 0.5)   # cap +25%
+        new_w = min(old_w * (1 + drift), WEIGHT_MAX)
+    elif acc <= 0.45:
+        drift = min(0.25, (0.5 - acc) * 0.5)
+        new_w = max(old_w * (1 - drift), WEIGHT_MIN)
+    else:
+        new_w = old_w
+
+    mem['weights'][k] = new_w
+total_updates = mem.get('total_updates', 0) + 1
+mem['total_updates'] = total_updates
+if total_updates % 100 == 0:
+    for k in FACTOR_KEYS:
+        default_w = default_weight(k, 'SIDEWAYS')
+        mem['weights'][k] = mem['weights'][k] * 0.85 + default_w * 0.15
     st.session_state.v12_memory[ticker] = mem
     save_v12_memory(st.session_state.v12_memory)
 
@@ -1815,7 +1838,8 @@ def muat_riwayat_actual():
                 'Actual_Close': str(row.get('Actual_Close', '') or '').strip(),
                 'Outcome': str(row.get('Outcome', '') or '').strip(),
                 'Entry_Miss': str(row.get('Entry_Miss', '') or '').strip(),
-                'Mode': gaya if gaya else ''
+                'Mode': gaya if gaya else '',
+                'V12_Consumed': str(row.get('V12_Consumed', 'No') or 'No').strip()
             }
 
             if waktu and saham:
@@ -2042,6 +2066,15 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
         else:
             sheet.append_row(new_row, value_input_option='RAW')
         st.session_state.riwayat_actual = muat_riwayat_actual()
+        if v12_consumed == 'No':
+            integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
+            # Mark sebagai consumed
+            if row_index:
+                sheet.update(f'I{row_index}', [['Yes']], value_input_option='RAW')
+            else:
+                # Row baru = baris terakhir
+                last_row = len(sheet.get_all_values())
+                sheet.update(f'I{last_row}', [['Yes']], value_input_option='RAW')
         integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
@@ -2506,7 +2539,14 @@ def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
                 if last_close > 0:
                     actual_return = (actual_close - last_close) / last_close
                     actual_return = max(-1.0, min(1.0, actual_return))
-                    update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02)
+                    SIGNAL_NOISE_FLOOR = 0.003   # 0.3%
+                    if abs(actual_return) < SIGNAL_NOISE_FLOOR:
+                        # Tidak ada sinyal riil — jangan update memory
+                        pass
+                    else:
+                        # Volatility adaptif dari data
+                        _vol = factor_signals.get('_volatility', 0.02)
+                        update_v12_memory(ticker, factor_signals, actual_return, volatility=_vol)
             except:
                 pass  # gagal parse → arah tidak diupdate
 
@@ -6246,8 +6286,20 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     # 6. THRESHOLD & DISTRIBUSI
     # ------------------------------------------------------------------
     if is_daytrade:
-        n_recent = min(200, len(df))
-        df_thresh = df.iloc[-n_recent:]
+        # Split: gunakan bar LAMA untuk threshold, bar BARU untuk backtest
+        # Window backtest = 100 bar terakhir (test set)
+        # Window threshold = 100 bar SEBELUM test set (train set)
+        backtest_bars = 100
+        if len(df) < 200:
+            # Data kurang, fallback: pakai 60% awal untuk threshold
+            split_point = int(len(df) * 0.6)
+            df_thresh = df.iloc[:split_point]
+            backtest_window = len(df) - split_point
+            df_back = df.iloc[split_point:].copy()
+        else:
+            df_thresh = df.iloc[-(backtest_bars * 2):-backtest_bars]  
+            backtest_window = backtest_bars
+            df_back = df.iloc[-backtest_bars:].copy()                 
     else:
         split_idx = max(126, len(df) - 126)
         df_thresh = df.iloc[:split_idx]
@@ -6416,12 +6468,33 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     }
     norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
     total_score = sum(norm_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
-
-    if total_score > 0.3:
+    
+    historical_scores = []
+    for i in range(max(20, len(df)-60), len(df)):
+        row_signals = {
+            "Momentum": float(np.clip((df['Mom5D'].iloc[i] - mom_median_th) / max(0.1, df['Mom5D'].std()), -1, 1)),
+            "AI_Senti": avg_sentiment,  # konstanta (fine, ini lagging)
+            "MeanRev": float(np.clip(-df['ZScore'].iloc[i] / 3.0, -1, 1)),
+            "Beta_IHSG": 0.0,            # skip, butuh return historis
+            "Coppock": 0.0,              # skip, expensive
+            "OFI": float(np.clip(df['OFI_Enhanced'].iloc[i] / 5.0, -1, 1))
+        }
+        s = sum(row_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
+        historical_scores.append(s)
+    
+    score_std = np.std(historical_scores) if len(historical_scores) > 5 else 0.15
+    score_std = max(0.10, min(0.35, score_std))   # clamp reasonable range
+    
+    # Threshold = ±1.0σ untuk STRONG, ±0.4σ untuk BUY
+    th_strong = score_std * 1.0
+    th_buy    = score_std * 0.4
+    th_hold   = -score_std * 0.4
+    
+    if total_score > th_strong:
         signal = "🔥 STRONG BUY"
-    elif total_score > 0.1:
+    elif total_score > th_buy:
         signal = "⚡ BUY (TACTICAL)"
-    elif total_score > -0.1:
+    elif total_score > th_hold:
         signal = "⏸️ HOLD / WAIT"
     else:
         signal = "🚨 AVOID"
@@ -6612,7 +6685,9 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         backtest_window = min(200, len(df))
     else:
         backtest_window = 126
-    df_back = df.iloc[-backtest_window:].copy()
+    if not is_daytrade:
+        backtest_window = 126
+        df_back = df.iloc[-backtest_window:].copy()
     trades, daily_returns = [], []
     in_position, entry_price = False, 0.0
     for i in range(len(df_back)):
@@ -6935,7 +7010,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     result["entry_low_f"] = entry_low_f
     result["entry_high_f"] = entry_high_f
     result["ticker_raw"] = ticker_raw
-    result["harga_terakhir"] = harga_terakhir
+    result["harga_terakhir_asli"] = harga_terakhir_asli
     result["floating_pl_pct"] = floating_pl_pct
     result["sudah_beli"] = sudah_beli
     result["harga_beli_float"] = harga_beli_float
@@ -7776,17 +7851,18 @@ if run_btn:
     # ----- SIMPAN PREDIKSI V12 UNTUK KEDUA MODE -----
     for res in [res_swing, res_day]:
         try:
+            # GUNAKAN HARGA ASLI, bukan harga manual user
+            close_for_learning = res.get('harga_terakhir_asli') or res['harga_terakhir']
             save_v12_prediction(
                 ticker_raw,
-                res['harga_terakhir'],
-                res['norm_signals'],   # sudah berupa dict norm_signals
+                close_for_learning,          # ✅ FIX
+                res['norm_signals'],
                 entry_low=res['entry_low_f'],
                 entry_high=res['entry_high_f'],
                 mode=res['mode']
             )
         except Exception as e:
             st.warning(f"Gagal menyimpan prediksi {res['mode']}: {e}")
-
     # ----- SIMPAN RIWAYAT UNTUK KEDUA MODE (SWING & DAYTRADE) -----
     simpan_riwayat(
         [res_swing['ringkasan'], res_day['ringkasan']],
