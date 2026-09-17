@@ -3309,6 +3309,120 @@ def analisis_broksum_ocr(image):
     return res_json, None
 
 
+def render_broker_summary_and_aggregate_ui(buyers_list, sellers_list):
+    """Render Top Buyers/Sellers & Agregat Bandar vs Retail section."""
+    if not buyers_list and not sellers_list:
+        return
+
+    # Pastikan setiap broker terisi kategori & icon
+    for b in buyers_list:
+        if isinstance(b, dict) and (not b.get('kategori') or not b.get('kategori_icon')):
+            b['kategori'], b['kategori_icon'] = klasifikasi_broker(b.get('broker'), b.get('volume_lot'), b.get('freq'))
+    for s in sellers_list:
+        if isinstance(s, dict) and (not s.get('kategori') or not s.get('kategori_icon')):
+            s['kategori'], s['kategori_icon'] = klasifikasi_broker(s.get('broker'), s.get('volume_lot'), s.get('freq'))
+
+    col_b, col_s = st.columns(2)
+    with col_b:
+        st.markdown("**🟢 Top Buyers:**")
+        for b in buyers_list:
+            if not isinstance(b, dict): continue
+            kode = b.get('broker', '')
+            vol  = b.get('volume_lot', 0) or 0
+            frq  = b.get('freq')
+            icon = b.get('kategori_icon', '')
+            kat  = b.get('kategori', '')
+            frq_str = f" · Freq {frq}" if frq else ""
+            st.caption(
+                f"- {icon} **{kode}**: "
+                f"{vol:,.0f} lot{frq_str} — *{kat}*"
+            )
+    with col_s:
+        st.markdown("**🔴 Top Sellers:**")
+        for s in sellers_list:
+            if not isinstance(s, dict): continue
+            kode = s.get('broker', '')
+            vol  = s.get('volume_lot', 0) or 0
+            frq  = s.get('freq')
+            icon = s.get('kategori_icon', '')
+            kat  = s.get('kategori', '')
+            frq_str = f" · Freq {frq}" if frq else ""
+            st.caption(
+                f"- {icon} **{kode}**: "
+                f"{vol:,.0f} lot{frq_str} — *{kat}*"
+            )
+
+    # ═══════════════════════════════════════════════════════
+    # AGREGAT — Bandar vs Retail (dari Top broker)
+    # ═══════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("**📊 Agregat Bandar vs Retail**")
+    st.caption(
+        "⚠️ Angka di bawah **hanya dari broker yang terlihat di screenshot** "
+        "(biasanya Top 5-10) — bukan total market. Gunakan untuk melihat "
+        "*proporsi* bandar vs retail, bukan volume absolut."
+    )
+
+    # ── Buy Side ──
+    bandar_buy = sum((b.get('volume_lot') or 0) for b in buyers_list if isinstance(b, dict) and b.get('kategori') == 'Bandar')
+    retail_buy = sum((b.get('volume_lot') or 0) for b in buyers_list if isinstance(b, dict) and b.get('kategori') == 'Retail')
+    mixed_buy  = sum((b.get('volume_lot') or 0) for b in buyers_list if isinstance(b, dict) and b.get('kategori') == 'Mixed')
+
+    # ── Sell Side ──
+    bandar_sell = sum((s.get('volume_lot') or 0) for s in sellers_list if isinstance(s, dict) and s.get('kategori') == 'Bandar')
+    retail_sell = sum((s.get('volume_lot') or 0) for s in sellers_list if isinstance(s, dict) and s.get('kategori') == 'Retail')
+    mixed_sell  = sum((s.get('volume_lot') or 0) for s in sellers_list if isinstance(s, dict) and s.get('kategori') == 'Mixed')
+
+    col_ab, col_as = st.columns(2)
+    with col_ab:
+        st.markdown("**🟢 Buy Side**")
+        st.metric("🐋 Bandar (Buy)", f"{bandar_buy:,.0f} lot")
+        st.metric("🧑 Retail (Buy)", f"{retail_buy:,.0f} lot")
+        if mixed_buy > 0:
+            st.caption(f"⚖️ Mixed: {mixed_buy:,.0f} lot")
+
+    with col_as:
+        st.markdown("**🔴 Sell Side**")
+        st.metric("🐋 Bandar (Sell)", f"{bandar_sell:,.0f} lot")
+        st.metric("🧑 Retail (Sell)", f"{retail_sell:,.0f} lot")
+        if mixed_sell > 0:
+            st.caption(f"⚖️ Mixed: {mixed_sell:,.0f} lot")
+
+    # ── Net + Insight Narasi ──
+    net_bandar = bandar_buy - bandar_sell
+    net_retail = retail_buy - retail_sell
+
+    if net_bandar > 0 and net_retail < 0:
+        insight_icon = "🟢"
+        insight = ("**Bandar akumulasi, retail distribusi** — sinyal bullish. "
+                   "Bandar sedang menyerap supply dari retail.")
+    elif net_bandar < 0 and net_retail > 0:
+        insight_icon = "🔴"
+        insight = ("**Bandar distribusi, retail akumulasi** — hati-hati. "
+                   "Bandar sedang melepas barang ke retail (kemungkinan puncak).")
+    elif net_bandar > 0 and net_retail > 0:
+        insight_icon = "⚖️"
+        insight = "**Kedua pihak net buy** — minat beli kuat, tapi perlu konfirmasi arah lanjut."
+    elif net_bandar < 0 and net_retail < 0:
+        insight_icon = "⚠️"
+        insight = "**Kedua pihak net sell** — tekanan jual kuat, waspadai koreksi lanjut."
+    else:
+        insight_icon = "⚖️"
+        insight = "**Net flow seimbang** — pasar belum ada dominasi jelas."
+
+    if net_bandar > 0:
+        net_color = "#10b981"
+    elif net_bandar < 0:
+        net_color = "#ef4444"
+    else:
+        net_color = "#94a3b8"
+
+    st.markdown(f"""<div style="background:{net_color}12; border-left:4px solid {net_color}; border-radius:8px; padding:12px 16px; margin-top:12px; color:#cbd5e1; font-size:13px; line-height:1.6;">
+<div style="font-weight:600; color:{net_color}; font-size:14px; margin-bottom:6px;">{insight_icon} Net Bandar: {net_bandar:+,.0f} lot · Net Retail: {net_retail:+,.0f} lot</div>
+<div>{insight}</div>
+</div>""", unsafe_allow_html=True)
+
+
 def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
     st.markdown("### 📸 Scan Broker Summary (Broksum)")
     st.caption("Upload screenshot Broksum (Stockbit, IPOT, HOTS, dll) untuk dianalisis & tersimpan ke database.")
@@ -3351,9 +3465,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                     if err:
                         st.session_state[error_key] = err
                     else:
-                        # ▼ Tambah enrich
                         res_json = enrich_broker_kategori(res_json)
-                        # ▲
                         st.session_state[result_key] = res_json
                         st.session_state[error_key]  = None
                         st.session_state[source_key] = "gemini"
@@ -3364,9 +3476,7 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                 if err:
                     st.session_state[error_key] = err
                 else:
-                    # ▼ Tambah enrich
                     res_json = enrich_broker_kategori(res_json)
-                    # ▲
                     st.session_state[result_key] = res_json
                     st.session_state[error_key]  = None
                     st.session_state[source_key] = "ocr"
@@ -3385,113 +3495,11 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                         kategori, icon = klasifikasi_broker(kode, vol, frq)
                         item["kategori"] = kategori
                         item["kategori_icon"] = icon
-            # ═════════════════════════════════════════════
 
             if res_json:
                 st.success(f"✅ **Status:** {res_json.get('bandarmology_status', 'N/A')}")
                 if res_json.get("summary_narrative"):
                     st.info(f"📝 {res_json.get('summary_narrative')}")
-
-                col_b, col_s = st.columns(2)
-                with col_b:
-                    st.markdown("**🟢 Top Buyers:**")
-                    for b in res_json.get("top_buyers", []):
-                        icon = b.get('kategori_icon', '')
-                        kat  = b.get('kategori', '')
-                        frq  = b.get('freq')
-                        frq_str = f" · Freq {frq}" if frq else ""
-                        st.caption(
-                            f"- {icon} **{b.get('broker')}**: "
-                            f"{b.get('volume_lot', 0):,} lot{frq_str} — *{kat}*"
-                        )
-                with col_s:
-                    st.markdown("**🔴 Top Sellers:**")
-                    for s in res_json.get("top_sellers", []):
-                        icon = s.get('kategori_icon', '')
-                        kat  = s.get('kategori', '')
-                        frq  = s.get('freq')
-                        frq_str = f" · Freq {frq}" if frq else ""
-                        st.caption(
-                            f"- {icon} **{s.get('broker')}**: "
-                            f"{s.get('volume_lot', 0):,} lot{frq_str} — *{kat}*"
-                        )
-                # ═══════════════════════════════════════════════════════
-                # AGREGAT — Bandar vs Retail (dari Top broker)
-                # ═══════════════════════════════════════════════════════
-                st.markdown("---")
-                st.markdown("**📊 Agregat Bandar vs Retail**")
-                st.caption(
-                    "⚠️ Angka di bawah **hanya dari broker yang terlihat di screenshot** "
-                    "(biasanya Top 5-10) — bukan total market. Gunakan untuk melihat "
-                    "*proporsi* bandar vs retail, bukan volume absolut."
-                )
-
-                buyers_list  = res_json.get("top_buyers", []) or []
-                sellers_list = res_json.get("top_sellers", []) or []
-
-                # ── Buy Side ──
-                bandar_buy = sum((b.get('volume_lot') or 0) for b in buyers_list if b.get('kategori') == 'Bandar')
-                retail_buy = sum((b.get('volume_lot') or 0) for b in buyers_list if b.get('kategori') == 'Retail')
-                mixed_buy  = sum((b.get('volume_lot') or 0) for b in buyers_list if b.get('kategori') == 'Mixed')
-
-                # ── Sell Side ──
-                bandar_sell = sum((s.get('volume_lot') or 0) for s in sellers_list if s.get('kategori') == 'Bandar')
-                retail_sell = sum((s.get('volume_lot') or 0) for s in sellers_list if s.get('kategori') == 'Retail')
-                mixed_sell  = sum((s.get('volume_lot') or 0) for s in sellers_list if s.get('kategori') == 'Mixed')
-
-                col_ab, col_as = st.columns(2)
-                with col_ab:
-                    st.markdown("**🟢 Buy Side**")
-                    st.metric("🐋 Bandar (Buy)", f"{bandar_buy:,.0f} lot")
-                    st.metric("🧑 Retail (Buy)", f"{retail_buy:,.0f} lot")
-                    if mixed_buy > 0:
-                        st.caption(f"⚖️ Mixed: {mixed_buy:,.0f} lot")
-
-                with col_as:
-                    st.markdown("**🔴 Sell Side**")
-                    st.metric("🐋 Bandar (Sell)", f"{bandar_sell:,.0f} lot")
-                    st.metric("🧑 Retail (Sell)", f"{retail_sell:,.0f} lot")
-                    if mixed_sell > 0:
-                        st.caption(f"⚖️ Mixed: {mixed_sell:,.0f} lot")
-
-                # ── Net + Insight Narasi ──
-                net_bandar = bandar_buy - bandar_sell
-                net_retail = retail_buy - retail_sell
-
-                if net_bandar > 0 and net_retail < 0:
-                    insight_icon = "🟢"
-                    insight = ("**Bandar akumulasi, retail distribusi** — sinyal bullish. "
-                               "Bandar sedang menyerap supply dari retail.")
-                elif net_bandar < 0 and net_retail > 0:
-                    insight_icon = "🔴"
-                    insight = ("**Bandar distribusi, retail akumulasi** — hati-hati. "
-                               "Bandar sedang melepas barang ke retail (kemungkinan puncak).")
-                elif net_bandar > 0 and net_retail > 0:
-                    insight_icon = "⚖️"
-                    insight = "**Kedua pihak net buy** — minat beli kuat, tapi perlu konfirmasi arah lanjut."
-                elif net_bandar < 0 and net_retail < 0:
-                    insight_icon = "⚠️"
-                    insight = "**Kedua pihak net sell** — tekanan jual kuat, waspadai koreksi lanjut."
-                else:
-                    insight_icon = "⚖️"
-                    insight = "**Net flow seimbang** — pasar belum ada dominasi jelas."
-
-                # Warnai insight berdasarkan net bandar (proxy utama)
-                if net_bandar > 0:
-                    net_color = "#10b981"
-                elif net_bandar < 0:
-                    net_color = "#ef4444"
-                else:
-                    net_color = "#94a3b8"
-
-                st.markdown(f"""
-                <div style="background:{net_color}12; border-left:4px solid {net_color}; border-radius:8px; padding:12px 16px; margin-top:12px; color:#cbd5e1; font-size:13px; line-height:1.6;">
-                    <div style="font-weight:600; color:{net_color}; font-size:14px; margin-bottom:6px;">
-                        {insight_icon} Net Bandar: {net_bandar:+,.0f} lot · Net Retail: {net_retail:+,.0f} lot
-                    </div>
-                    <div>{insight}</div>
-                </div>
-                """, unsafe_allow_html=True)
 
                 # ========== SAVE TO DATABASE ==========
                 st.divider()
@@ -3685,11 +3693,20 @@ def load_bandarmology_data(ticker):
             code = str(it.get('broker', '')).strip().upper()
             if not code:
                 continue
+            vol = safe_float(it.get('volume_lot', 0))
+            frq = it.get('freq')
+            kat = it.get('kategori')
+            icon = it.get('kategori_icon')
+            if not kat or not icon:
+                kat, icon = klasifikasi_broker(code, vol, frq)
             out.append({
                 'broker': code,
-                'volume_lot': safe_float(it.get('volume_lot', 0)),
+                'volume_lot': vol,
                 'value_idr': safe_float(it.get('value_idr', 0)),
                 'avg_price': safe_float(it.get('avg_price', 0)),
+                'freq': frq,
+                'kategori': kat,
+                'kategori_icon': icon,
                 'category': BROKER_TYPES.get(code, 'Domestic')
             })
         return out
@@ -4441,6 +4458,10 @@ def display_bandarmology_tab(ticker):
     )
     if data.get('summary_narrative'):
         st.info(f"📝 {data['summary_narrative']}")
+
+    # ═══ TOP BROKERS & AGREGAT BANDAR vs RETAIL ═══
+    render_broker_summary_and_aggregate_ui(data.get('buyers', []), data.get('sellers', []))
+    st.divider()
 
     # ═══════════════════════════════════════════════
     # CHART 1: BROKER FLOW
@@ -7249,57 +7270,37 @@ def display_analysis_result(res):
         langkah_txt = "Amankan modal, hindari entry baru"
 
     # ═══ CARD 1 — SIGNAL BADGE (prominent) ═══
-    st.markdown(textwrap.dedent(f"""
-    <div style="
-        background: linear-gradient(135deg, {sig_color}22 0%, {sig_color}08 100%);
-        border-left: 6px solid {sig_color};
-        border-radius: 12px;
-        padding: 18px 24px;
-        margin-bottom: 16px;
-    ">
-        <div style="display: flex; align-items: center; gap: 16px;">
-            <div style="font-size: 42px; line-height: 1;">{sig_icon}</div>
-            <div style="flex: 1;">
-                <div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">
-                    Rekomendasi
-                </div>
-                <div style="color: {sig_color}; font-size: 24px; font-weight: 700; line-height: 1.1;">
-                    {sig_label}
-                </div>
-                <div style="color: #cbd5e1; font-size: 13px; margin-top: 4px;">
-                    {sig_desc}
-                </div>
-            </div>
-        </div>
-    </div>
-    """), unsafe_allow_html=True)
+    st.markdown(f"""<div style="background: linear-gradient(135deg, {sig_color}22 0%, {sig_color}08 100%); border-left: 6px solid {sig_color}; border-radius: 12px; padding: 18px 24px; margin-bottom: 16px;">
+<div style="display: flex; align-items: center; gap: 16px;">
+<div style="font-size: 42px; line-height: 1;">{sig_icon}</div>
+<div style="flex: 1;">
+<div style="color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Rekomendasi</div>
+<div style="color: {sig_color}; font-size: 24px; font-weight: 700; line-height: 1.1;">{sig_label}</div>
+<div style="color: #cbd5e1; font-size: 13px; margin-top: 4px;">{sig_desc}</div>
+</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
     # ═══ CARD 2 — 3 PILAR: KONDISI | REKOMENDASI | LANGKAH ═══
     col_k, col_r, col_l = st.columns(3)
 
     with col_k:
-        st.markdown(textwrap.dedent(f"""
-        <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #64748b;">
-            <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Kondisi</div>
-            <div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{kondisi_txt}</div>
-        </div>
-        """), unsafe_allow_html=True)
+        st.markdown(f"""<div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #64748b;">
+<div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Kondisi</div>
+<div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{kondisi_txt}</div>
+</div>""", unsafe_allow_html=True)
 
     with col_r:
-        st.markdown(textwrap.dedent(f"""
-        <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid {sig_color};">
-            <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Rekomendasi</div>
-            <div style="color:{sig_color}; font-size:13px; font-weight:600; margin-top:8px; line-height:1.5;">{sig_label}</div>
-        </div>
-        """), unsafe_allow_html=True)
+        st.markdown(f"""<div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid {sig_color};">
+<div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Rekomendasi</div>
+<div style="color:{sig_color}; font-size:13px; font-weight:600; margin-top:8px; line-height:1.5;">{sig_label}</div>
+</div>""", unsafe_allow_html=True)
 
     with col_l:
-        st.markdown(textwrap.dedent(f"""
-        <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #00ffcc;">
-            <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Langkah</div>
-            <div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{langkah_txt}</div>
-        </div>
-        """), unsafe_allow_html=True)
+        st.markdown(f"""<div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #00ffcc;">
+<div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Langkah</div>
+<div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{langkah_txt}</div>
+</div>""", unsafe_allow_html=True)
 
     # ═══ CARD 3 — POSITION STATUS (khusus sudah_beli) ═══
     if sudah_beli:
@@ -7326,41 +7327,34 @@ def display_analysis_result(res):
         pl_bar_pct = max(-20, min(20, pl_val))
         pl_bar_position = (pl_bar_pct + 20) / 40 * 100  # 0..100
 
-        st.markdown(textwrap.dedent(f"""
-        <div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%); border-radius:12px; padding:18px; margin-top:16px; border:1px solid #334155;">
-            <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;">
-                <div style="font-size:36px;">{pl_icon}</div>
-                <div style="flex:1; min-width:150px;">
-                    <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Status Posisi Kamu</div>
-                    <div style="color:{pl_color}; font-size:20px; font-weight:700; margin-top:2px;">{pl_status} {pl_val:+.2f}%</div>
-                </div>
-                <div style="background:{pl_color}22; border:1px solid {pl_color}; border-radius:8px; padding:6px 12px; color:{pl_color}; font-size:11px; font-weight:600;">
-                    {pl_action}
-                </div>
-            </div>
-
-            <div style="background:#0f1116; border-radius:6px; padding:6px; height:24px; position:relative; margin-top:8px;">
-                <div style="position:absolute; left:50%; top:0; bottom:0; width:2px; background:#475569;"></div>
-                <div style="position:absolute; left:{pl_bar_position:.1f}%; top:3px; bottom:3px; width:14px; margin-left:-7px; background:{pl_color}; border-radius:7px; box-shadow:0 0 8px {pl_color};"></div>
-            </div>
-            <div style="display:flex; justify-content:space-between; color:#64748b; font-size:10px; margin-top:6px;">
-                <span>-20%</span>
-                <span>0%</span>
-                <span>+20%</span>
-            </div>
-        </div>
-        """), unsafe_allow_html=True)
+        st.markdown(f"""<div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%); border-radius:12px; padding:18px; margin-top:16px; border:1px solid #334155;">
+<div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;">
+<div style="font-size:36px;">{pl_icon}</div>
+<div style="flex:1; min-width:150px;">
+<div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Status Posisi Kamu</div>
+<div style="color:{pl_color}; font-size:20px; font-weight:700; margin-top:2px;">{pl_status} {pl_val:+.2f}%</div>
+</div>
+<div style="background:{pl_color}22; border:1px solid {pl_color}; border-radius:8px; padding:6px 12px; color:{pl_color}; font-size:11px; font-weight:600;">{pl_action}</div>
+</div>
+<div style="background:#0f1116; border-radius:6px; padding:6px; height:24px; position:relative; margin-top:8px;">
+<div style="position:absolute; left:50%; top:0; bottom:0; width:2px; background:#475569;"></div>
+<div style="position:absolute; left:{pl_bar_position:.1f}%; top:3px; bottom:3px; width:14px; margin-left:-7px; background:{pl_color}; border-radius:7px; box-shadow:0 0 8px {pl_color};"></div>
+</div>
+<div style="display:flex; justify-content:space-between; color:#64748b; font-size:10px; margin-top:6px;">
+<span>-20%</span>
+<span>0%</span>
+<span>+20%</span>
+</div>
+</div>""", unsafe_allow_html=True)
     else:
         # Kalau belum punya posisi, tampilkan hint
-        st.markdown(textwrap.dedent(f"""
-        <div style="background:#1e293b; border-radius:10px; padding:14px 18px; margin-top:16px; border-left:4px solid #64748b; display:flex; align-items:center; gap:12px;">
-            <div style="font-size:28px;">🆓</div>
-            <div>
-                <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Status Posisi</div>
-                <div style="color:#cbd5e1; font-size:13px; margin-top:2px;">Belum punya posisi di saham ini. Siap entry di zona rekomendasi.</div>
-            </div>
-        </div>
-        """), unsafe_allow_html=True)
+        st.markdown(f"""<div style="background:#1e293b; border-radius:10px; padding:14px 18px; margin-top:16px; border-left:4px solid #64748b; display:flex; align-items:center; gap:12px;">
+<div style="font-size:28px;">🆓</div>
+<div>
+<div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Status Posisi</div>
+<div style="color:#cbd5e1; font-size:13px; margin-top:2px;">Belum punya posisi di saham ini. Siap entry di zona rekomendasi.</div>
+</div>
+</div>""", unsafe_allow_html=True)
 
     # ═══ CARD 4 — TIPS & WARNINGS ═══
     tips = []
@@ -7374,18 +7368,14 @@ def display_analysis_result(res):
 
     if tips:
         for icon, color, text in tips:
-            st.markdown(textwrap.dedent(f"""
-            <div style="background:{color}12; border-left:4px solid {color}; border-radius:8px; padding:12px 16px; margin-top:10px; color:#cbd5e1; font-size:13px; line-height:1.5;">
-                <span style="color:{color}; font-weight:bold; font-size:15px;">{icon}</span>&nbsp;&nbsp;{text}
-            </div>
-            """), unsafe_allow_html=True)
+            st.markdown(f"""<div style="background:{color}12; border-left:4px solid {color}; border-radius:8px; padding:12px 16px; margin-top:10px; color:#cbd5e1; font-size:13px; line-height:1.5;">
+<span style="color:{color}; font-weight:bold; font-size:15px;">{icon}</span>&nbsp;&nbsp;{text}
+</div>""", unsafe_allow_html=True)
 
     # ═══ DISCLAIMER ═══
-    st.markdown(textwrap.dedent("""
-    <div style="color:#64748b; font-size:11px; margin-top:20px; text-align:center; font-style:italic;">
-        ⚠️ Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.
-    </div>
-    """), unsafe_allow_html=True)
+    st.markdown("""<div style="color:#64748b; font-size:11px; margin-top:20px; text-align:center; font-style:italic;">
+⚠️ Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.
+</div>""", unsafe_allow_html=True)
 
     # ===== DETAIL EXPANDER =====
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
