@@ -261,6 +261,31 @@ def render_plotly_realtime(fig, height=420, haptic=True):
                         upd['shapes[' + V_IDX + '].opacity'] = 1;
                         Plotly.relayout(gd, upd);
 
+                        function formatKMB(val, name) {{
+                            if (val === null || val === undefined || isNaN(val)) return 'N/A';
+                            var n = name ? name.toLowerCase() : '';
+                            var isPrice = n.indexOf('price') !== -1 || n.indexOf('harga') !== -1;
+                            var absVal = Math.abs(val);
+                            if (isPrice && absVal < 1000000) {{
+                                return val.toLocaleString('id-ID', {{ maximumFractionDigits: 2 }});
+                            }}
+                            var sign = val < 0 ? '-' : '';
+                            var res = '';
+                            if (absVal >= 1e9) {{
+                                res = sign + (absVal / 1e9).toFixed(2).replace(/\.00$/, '') + 'B';
+                            }} else if (absVal >= 1e6) {{
+                                res = sign + (absVal / 1e6).toFixed(2).replace(/\.00$/, '') + 'M';
+                            }} else if (absVal >= 1e3) {{
+                                res = sign + (absVal / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+                            }} else {{
+                                res = sign + absVal.toLocaleString('id-ID', {{ maximumFractionDigits: 2 }});
+                            }}
+                            if (n.indexOf('accum') !== -1 || n.indexOf('dist') !== -1 || n.indexOf('lot') !== -1) {{
+                                res += ' Lot';
+                            }}
+                            return res;
+                        }}
+
                         var lines = ['<b>' + xVal + '</b>'];
                         for (var i = 0; i < yPerTrace.length; i++) {{
                             // Skip trace yang di-hide via legend
@@ -268,7 +293,7 @@ def render_plotly_realtime(fig, height=420, haptic=True):
 
                             var yv = yPerTrace[i][idx];
                             if (typeof yv === 'number' && !isNaN(yv)) {{
-                                var fv = yv.toLocaleString('id-ID', {{ maximumFractionDigits: 0 }});
+                                var fv = formatKMB(yv, namePerTrace[i]);
                                 lines.push(
                                     '<div class="row"><span class="dot" style="background:' +
                                     colorPerTrace[i] + '"></span>' +
@@ -3767,10 +3792,17 @@ def build_broker_flow_chart(data):
         target = b['volume_lot']
         flow_cum = raw_cum / abs(final_raw) * target
         label = get_broker_label(b['broker'])
+        custom_text = [
+            f"{v/1e9:.2f}B Lot" if abs(v) >= 1e9 else
+            f"{v/1e6:.2f}M Lot" if abs(v) >= 1e6 else
+            f"{v/1e3:.1f}K Lot" if abs(v) >= 1e3 else
+            f"{v:,.0f} Lot" for v in flow_cum
+        ]
         fig.add_trace(go.Scatter(
             x=df['time'], y=flow_cum, mode="lines", name=f"Accum {label}",
+            customdata=custom_text,
             line=dict(color=buyer_colors[idx % len(buyer_colors)], width=2),
-            hovertemplate=f"<b>{label}</b>: %{{y:,.0f}} Lot<extra></extra>"
+            hovertemplate=f"<b>{label}</b>: %{{customdata}}<extra></extra>"
         ))
 
     # Seller flows (kumulatif ke bawah)
@@ -3778,10 +3810,17 @@ def build_broker_flow_chart(data):
         target = s['volume_lot']
         flow_cum = -raw_cum / abs(final_raw) * target
         label = get_broker_label(s['broker'])
+        custom_text = [
+            f"{v/1e9:.2f}B Lot" if abs(v) >= 1e9 else
+            f"{v/1e6:.2f}M Lot" if abs(v) >= 1e6 else
+            f"{v/1e3:.1f}K Lot" if abs(v) >= 1e3 else
+            f"{v:,.0f} Lot" for v in flow_cum
+        ]
         fig.add_trace(go.Scatter(
             x=df['time'], y=flow_cum, mode="lines", name=f"Dist {label}",
+            customdata=custom_text,
             line=dict(color=seller_colors[idx % len(seller_colors)], width=2),
-            hovertemplate=f"<b>{label}</b>: %{{y:,.0f}} Lot<extra></extra>"
+            hovertemplate=f"<b>{label}</b>: %{{customdata}}<extra></extra>"
         ))
 
     tick_vals = df['time'].tolist()[::max(1, len(df) // 12)]
@@ -3813,6 +3852,36 @@ def build_broker_flow_chart(data):
     )
     return fig, df
 
+def render_trade_flow_spectrum_bar(stats):
+    """Render Trade Flow Spectrum Bar (Net Dist <---> Net Acc) dengan marker posisi."""
+    if not stats:
+        return
+    
+    marker_pos = stats.get('marker_pos', 50.0)
+    status_lbl = stats.get('status_lbl', 'Netral')
+    status_clr = stats.get('status_clr', '#94a3b8')
+    ratio_pct  = stats.get('net_ratio_pct', 0.0)
+
+    st.markdown(f"""<div style="background:#131722; border:1px solid #262626; border-radius:10px; padding:12px 16px; margin:10px 0 12px 0; font-family:-apple-system, sans-serif;">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+<span style="color:#94a3b8; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px;">Trade Flow Spectrum Bar</span>
+<span style="color:{status_clr}; font-size:12px; font-weight:700;">{status_lbl} ({ratio_pct:+.1f}%)</span>
+</div>
+<div style="position:relative; height:18px; border-radius:9px; background:linear-gradient(90deg, #ef4444 0%, #dc2626 25%, #451a03 50%, #15803d 75%, #10b981 100%); padding:2px; box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);">
+<div style="position:absolute; left:20%; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.4);"></div>
+<div style="position:absolute; left:40%; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.4);"></div>
+<div style="position:absolute; left:50%; top:0; bottom:0; width:2px; background:rgba(255,255,255,0.3);"></div>
+<div style="position:absolute; left:60%; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.4);"></div>
+<div style="position:absolute; left:80%; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.4);"></div>
+<div style="position:absolute; left:{marker_pos:.1f}%; top:-3px; bottom:-3px; width:4px; margin-left:-2px; background:#a855f7; border-radius:2px; box-shadow:0 0 10px #c084fc, 0 0 4px #a855f7; z-index:10;"></div>
+</div>
+<div style="display:flex; justify-content:space-between; color:#64748b; font-size:10px; margin-top:6px; font-weight:600;">
+<span style="color:#f87171;">Net Dist</span>
+<span style="color:#64748b;">Netral (0%)</span>
+<span style="color:#34d399;">Net Acc</span>
+</div>
+</div>""", unsafe_allow_html=True)
+
 # ---------- CHART 2: TRADE FLOW (TIME-SERIES) ----------
 def build_trade_flow_chart(data):
     """
@@ -3822,11 +3891,11 @@ def build_trade_flow_chart(data):
     - Net value = Volume × typical × close_position_signal
     """
     if not data:
-        return None, None
+        return None, None, None
 
     df, interval = _load_intraday_price_data(data['ticker'])
     if df is None or df.empty:
-        return None, None
+        return None, None, None
 
     df = df.copy()
 
@@ -3891,7 +3960,38 @@ def build_trade_flow_chart(data):
             title="Harga", showgrid=False, overlaying="y", side="right"
         )
     )
-    return fig, df
+
+    tot_buy = float(df['net_buy'].sum())
+    tot_sell = abs(float(df['net_sell'].sum()))
+    tot_flow = tot_buy + tot_sell
+    net_val = tot_buy - tot_sell
+
+    net_ratio = (net_val / tot_flow) if tot_flow > 0 else 0.0
+    marker_pos = max(2.0, min(98.0, (net_ratio + 1.0) / 2.0 * 100.0))
+
+    if net_ratio > 0.25:
+        status_lbl, status_clr = "Big Accumulation 🚀", "#10b981"
+    elif net_ratio > 0.05:
+        status_lbl, status_clr = "Accumulation 🟢", "#34d399"
+    elif net_ratio >= -0.05:
+        status_lbl, status_clr = "Netral ⚖️", "#94a3b8"
+    elif net_ratio >= -0.25:
+        status_lbl, status_clr = "Distribution 🔴", "#f87171"
+    else:
+        status_lbl, status_clr = "Big Distribution 🚨", "#ef4444"
+
+    stats = {
+        'tot_buy': tot_buy,
+        'tot_sell': tot_sell,
+        'net_val': net_val,
+        'net_ratio': net_ratio,
+        'net_ratio_pct': net_ratio * 100.0,
+        'marker_pos': marker_pos,
+        'status_lbl': status_lbl,
+        'status_clr': status_clr
+    }
+
+    return fig, df, stats
 
 @st.cache_data(ttl=1800, show_spinner=False)   # cache 30 menit
 def _fetch_idx_foreign_flow(ticker, days=30):
@@ -4479,8 +4579,9 @@ def display_bandarmology_tab(ticker):
     # CHART 2: TRADE FLOW
     # ═══════════════════════════════════════════════
     st.markdown("#### 2. Trade Flow")
-    fig2, df2 = build_trade_flow_chart(data)
+    fig2, df2, stats2 = build_trade_flow_chart(data)
     if fig2 is not None and df2 is not None and len(df2) > 0:
+        render_trade_flow_spectrum_bar(stats2)
         render_plotly_realtime(fig2, height=420)
     else:
         st.caption("(Data harga intraday tidak tersedia dari yfinance)")
