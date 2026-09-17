@@ -17,6 +17,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+import textwrap
 # Google Sheets integration
 import gspread
 from google.oauth2.service_account import Credentials
@@ -7248,7 +7249,7 @@ def display_analysis_result(res):
         langkah_txt = "Amankan modal, hindari entry baru"
 
     # ═══ CARD 1 — SIGNAL BADGE (prominent) ═══
-    st.markdown(f"""
+    st.markdown(textwrap.dedent(f"""
     <div style="
         background: linear-gradient(135deg, {sig_color}22 0%, {sig_color}08 100%);
         border-left: 6px solid {sig_color};
@@ -7271,34 +7272,34 @@ def display_analysis_result(res):
             </div>
         </div>
     </div>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
 
     # ═══ CARD 2 — 3 PILAR: KONDISI | REKOMENDASI | LANGKAH ═══
     col_k, col_r, col_l = st.columns(3)
 
     with col_k:
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #64748b;">
             <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Kondisi</div>
             <div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{kondisi_txt}</div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
     with col_r:
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid {sig_color};">
             <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Rekomendasi</div>
             <div style="color:{sig_color}; font-size:13px; font-weight:600; margin-top:8px; line-height:1.5;">{sig_label}</div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
     with col_l:
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div style="background:#1e293b; border-radius:10px; padding:14px; min-height:100px; border-top:3px solid #00ffcc;">
             <div style="color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:1.2px;">Langkah</div>
             <div style="color:#e2e8f0; font-size:13px; margin-top:8px; line-height:1.5;">{langkah_txt}</div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
     # ═══ CARD 3 — POSITION STATUS (khusus sudah_beli) ═══
     if sudah_beli:
@@ -7325,7 +7326,7 @@ def display_analysis_result(res):
         pl_bar_pct = max(-20, min(20, pl_val))
         pl_bar_position = (pl_bar_pct + 20) / 40 * 100  # 0..100
 
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div style="background:linear-gradient(135deg,#1e293b 0%,#0f172a 100%); border-radius:12px; padding:18px; margin-top:16px; border:1px solid #334155;">
             <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap;">
                 <div style="font-size:36px;">{pl_icon}</div>
@@ -7340,7 +7341,7 @@ def display_analysis_result(res):
 
             <div style="background:#0f1116; border-radius:6px; padding:6px; height:24px; position:relative; margin-top:8px;">
                 <div style="position:absolute; left:50%; top:0; bottom:0; width:2px; background:#475569;"></div>
-                <div style="position:absolute; left:{pl_bar_position}%; top:3px; bottom:3px; width:14px; margin-left:-7px; background:{pl_color}; border-radius:7px; box-shadow:0 0 8px {pl_color};"></div>
+                <div style="position:absolute; left:{pl_bar_position:.1f}%; top:3px; bottom:3px; width:14px; margin-left:-7px; background:{pl_color}; border-radius:7px; box-shadow:0 0 8px {pl_color};"></div>
             </div>
             <div style="display:flex; justify-content:space-between; color:#64748b; font-size:10px; margin-top:6px;">
                 <span>-20%</span>
@@ -7348,10 +7349,10 @@ def display_analysis_result(res):
                 <span>+20%</span>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
     else:
         # Kalau belum punya posisi, tampilkan hint
-        st.markdown(f"""
+        st.markdown(textwrap.dedent(f"""
         <div style="background:#1e293b; border-radius:10px; padding:14px 18px; margin-top:16px; border-left:4px solid #64748b; display:flex; align-items:center; gap:12px;">
             <div style="font-size:28px;">🆓</div>
             <div>
@@ -7359,7 +7360,7 @@ def display_analysis_result(res):
                 <div style="color:#cbd5e1; font-size:13px; margin-top:2px;">Belum punya posisi di saham ini. Siap entry di zona rekomendasi.</div>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """), unsafe_allow_html=True)
 
     # ═══ CARD 4 — TIPS & WARNINGS ═══
     tips = []
@@ -7373,18 +7374,18 @@ def display_analysis_result(res):
 
     if tips:
         for icon, color, text in tips:
-            st.markdown(f"""
+            st.markdown(textwrap.dedent(f"""
             <div style="background:{color}12; border-left:4px solid {color}; border-radius:8px; padding:12px 16px; margin-top:10px; color:#cbd5e1; font-size:13px; line-height:1.5;">
                 <span style="color:{color}; font-weight:bold; font-size:15px;">{icon}</span>&nbsp;&nbsp;{text}
             </div>
-            """, unsafe_allow_html=True)
+            """), unsafe_allow_html=True)
 
     # ═══ DISCLAIMER ═══
-    st.markdown("""
+    st.markdown(textwrap.dedent("""
     <div style="color:#64748b; font-size:11px; margin-top:20px; text-align:center; font-style:italic;">
         ⚠️ Hasil pengujian berbasis permodelan matematika probabilitas kuantitatif historis. Keputusan akhir eksekusi modal tetap merupakan tanggung jawab penuh masing-masing investor.
     </div>
-    """, unsafe_allow_html=True)
+    """), unsafe_allow_html=True)
 
     # ===== DETAIL EXPANDER =====
     with st.expander("🔍 Lihat Detail Analisis (Berita, Fundamental, Backtest, dll)"):
