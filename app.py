@@ -1059,6 +1059,9 @@ def enrich_broker_kategori(res_json):
     Input: res_json hasil analisis_broksum_gemini_vision (atau OCR)
     Output: res_json dengan tambahan field kategori
     """
+    if not isinstance(res_json, dict):
+        return res_json
+
     for side_key in ("top_buyers", "top_sellers"):
         for item in res_json.get(side_key, []) or []:
             if not isinstance(item, dict):
@@ -1069,7 +1072,75 @@ def enrich_broker_kategori(res_json):
             kat, icon = klasifikasi_broker(kode, vol, frq)
             item["kategori"] = kat
             item["kategori_icon"] = icon
+
+    # Hitung ringkasan statistik Bandar vs Retail
+    tot_buyer_vol = sum(float(b.get("volume_lot", 0) or 0) for b in res_json.get("top_buyers", []) if isinstance(b, dict))
+    tot_seller_vol = sum(float(s.get("volume_lot", 0) or 0) for s in res_json.get("top_sellers", []) if isinstance(s, dict))
+    
+    b_buy_vol = sum(float(b.get("volume_lot", 0) or 0) for b in res_json.get("top_buyers", []) if isinstance(b, dict) and b.get("kategori") == "Bandar")
+    r_buy_vol = sum(float(b.get("volume_lot", 0) or 0) for b in res_json.get("top_buyers", []) if isinstance(b, dict) and b.get("kategori") == "Retail")
+    
+    b_sell_vol = sum(float(s.get("volume_lot", 0) or 0) for s in res_json.get("top_sellers", []) if isinstance(s, dict) and s.get("kategori") == "Bandar")
+    r_sell_vol = sum(float(s.get("volume_lot", 0) or 0) for s in res_json.get("top_sellers", []) if isinstance(s, dict) and s.get("kategori") == "Retail")
+
+    b_buy_pct = (b_buy_vol / tot_buyer_vol * 100) if tot_buyer_vol > 0 else 0
+    r_buy_pct = (r_buy_vol / tot_buyer_vol * 100) if tot_buyer_vol > 0 else 0
+    b_sell_pct = (b_sell_vol / tot_seller_vol * 100) if tot_seller_vol > 0 else 0
+    r_sell_pct = (r_sell_vol / tot_seller_vol * 100) if tot_seller_vol > 0 else 0
+
+    res_json["broker_summary_stats"] = {
+        "buyer_bandar_pct": round(b_buy_pct, 1),
+        "buyer_retail_pct": round(r_buy_pct, 1),
+        "seller_bandar_pct": round(b_sell_pct, 1),
+        "seller_retail_pct": round(r_sell_pct, 1),
+    }
+
+    # Jika summary_narrative belum ada info klasifikasi, tambahkan note ringkas di akhir
+    curr_narrative = res_json.get("summary_narrative", "")
+    if curr_narrative and "Bandar" not in curr_narrative and "Retail" not in curr_narrative:
+        kat_note = f" (Komposisi Pembeli: {b_buy_pct:.0f}% Bandar 🐋 / {r_buy_pct:.0f}% Retail 🧑 | Penjual: {b_sell_pct:.0f}% Bandar 🐋 / {r_sell_pct:.0f}% Retail 🧑)"
+        res_json["summary_narrative"] = curr_narrative.rstrip(".") + kat_note + "."
+
     return res_json
+
+def format_broker_list_for_ai(broker_list):
+    """
+    Mengubah list broker (top_buyers / top_sellers) menjadi formatted text
+    dengan klasifikasi kategori (Bandar 🐋, Retail 🧑, Mixed ⚖️) dan statistik persentase.
+    """
+    if not broker_list:
+        return "- (tidak ada data)", "Tidak ada data"
+
+    lines = []
+    tot_vol = 0
+    vol_by_cat = {"Bandar": 0, "Retail": 0, "Mixed": 0}
+
+    for item in broker_list:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("broker", "N/A")).upper().strip()
+        vol = float(item.get("volume_lot", 0) or 0)
+        frq = item.get("freq")
+        kat = item.get("kategori")
+        icon = item.get("kategori_icon")
+        if not kat or not icon:
+            kat, icon = klasifikasi_broker(code, vol, frq)
+        
+        tot_vol += vol
+        vol_by_cat[kat] = vol_by_cat.get(kat, 0) + vol
+        lines.append(f"- {code} ({kat} {icon}): {vol:,.0f} lot")
+
+    cat_summary = []
+    if tot_vol > 0:
+        for cat_name, cat_icon in [("Bandar", "🐋"), ("Retail", "🧑"), ("Mixed", "⚖️")]:
+            v = vol_by_cat.get(cat_name, 0)
+            if v > 0:
+                pct = (v / tot_vol) * 100
+                cat_summary.append(f"{cat_name} {cat_icon}: {pct:.1f}% ({v:,.0f} lot)")
+    
+    summary_str = " | ".join(cat_summary) if cat_summary else "N/A"
+    list_str = "\n".join(lines) if lines else "- (tidak ada data)"
+    return list_str, summary_str
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
@@ -1577,9 +1648,18 @@ def analyze_broksum_insight_with_gemini(ticker, broksum_data, price_data, api_ke
         if not model:
             return None, "Model Gemini tidak tersedia."
         
-        # Format broker flow data
-        buyers_text = "\n".join([f"- {b.get('broker')}: {b.get('volume_lot', 0):,} lot" for b in broksum_data.get('top_buyers', [])])
-        sellers_text = "\n".join([f"- {s.get('broker')}: {s.get('volume_lot', 0):,} lot" for s in broksum_data.get('top_sellers', [])])
+        # Format broker flow data dengan klasifikasi Bandar vs Retail
+        top_buyers = broksum_data.get('top_buyers', [])
+        top_sellers = broksum_data.get('top_sellers', [])
+        if isinstance(top_buyers, str):
+            try: top_buyers = json.loads(top_buyers)
+            except: top_buyers = []
+        if isinstance(top_sellers, str):
+            try: top_sellers = json.loads(top_sellers)
+            except: top_sellers = []
+
+        buyers_text, buyers_cat_sum = format_broker_list_for_ai(top_buyers)
+        sellers_text, sellers_cat_sum = format_broker_list_for_ai(top_sellers)
         
         price_context = ""
         if price_data:
@@ -1592,27 +1672,29 @@ Konteks Harga & Teknikal:
 - Volume: {price_data.get('volume', 'N/A')}
 """
         
-        prompt = f"""Anda adalah analis pasar saham profesional. Analisis data broker flow untuk saham {ticker}:
+        prompt = f"""Anda adalah analis pasar saham & Bandarmology profesional di BEI/IDX. Analisis data broker flow untuk saham {ticker}:
 
 **Status Bandarmologi:** {broksum_data.get('bandarmology_status', 'N/A')}
 
-**Top Buyers (Pembeli Utama):**
-{buyers_text if buyers_text else '- Tidak ada data'}
+**Top Buyers (Pembeli Utama & Klasifikasi Broker):**
+{buyers_text}
+📊 Komposisi Pembeli: {buyers_cat_sum}
 
-**Top Sellers (Penjual Utama):**
-{sellers_text if sellers_text else '- Tidak ada data'}
+**Top Sellers (Penjual Utama & Klasifikasi Broker):**
+{sellers_text}
+📊 Komposisi Penjual: {sellers_cat_sum}
 
-**Summary Narrative:**
+**Summary Narrative Saat Ini:**
 {broksum_data.get('summary_narrative', 'N/A')}
 {price_context}
 
-Berikan analisis yang mencakup:
-1. Konsentrasi buyer/seller - siapa dominant player?
-2. Implikasi untuk pergerakan harga (bullish/bearish/neutral)
-3. Aksi yang bisa dilakukan investor
-4. Risk & opportunity
+Berikan analisis mendalam yang mencakup:
+1. **Analisis Klasifikasi Broker (Bandar 🐋 vs Retail 🧑):** Siapa yang mendominasi pembeli (akumulasi) dan penjual (distribusi)? Apakah Bandar sedang menampung dari Retail atau sebaliknya?
+2. **Implikasi Pergerakan Harga:** Pengaruh konfirmasi broker flow ini terhadap harga ke depan (bullish/bearish/neutral).
+3. **Rekomendasi Aksi Investor:** Aksi praktis yang disarankan (Buy/Hold/Wait/Sell).
+4. **Risk & Opportunity:** Tingkat risiko dan peluang berdasarkan peta kekuatan Bandar vs Retail.
 
-Jadilah singkat tapi actionable (max 300 kata)."""
+Jadilah singkat, profesional, dan actionable (max 300 kata)."""
 
         response = model.generate_content(
             prompt,
@@ -2759,22 +2841,15 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
                     buyers_list = json.loads(h.get('top_buyers', '[]')) if isinstance(h.get('top_buyers'), str) else h.get('top_buyers', [])
                     sellers_list = json.loads(h.get('top_sellers', '[]')) if isinstance(h.get('top_sellers'), str) else h.get('top_sellers', [])
 
-                    buyers_text = ", ".join([
-                        f"{b.get('broker')}({b.get('volume_lot', 0):,.0f})"
-                        for b in buyers_list[:5]
-                    ]) if buyers_list else "(kosong)"
-
-                    sellers_text = ", ".join([
-                        f"{s.get('broker')}({s.get('volume_lot', 0):,.0f})"
-                        for s in sellers_list[:5]
-                    ]) if sellers_list else "(kosong)"
+                    buyers_text, buyers_sum = format_broker_list_for_ai(buyers_list)
+                    sellers_text, sellers_sum = format_broker_list_for_ai(sellers_list)
 
                     broksum_entries.append(
                         f"**Upload {h.get('upload_date', 'N/A')}**\n"
-                        f"  Status: {h.get('bandarmology_status', 'N/A')}\n"
-                        f"  Top Buyers: {buyers_text}\n"
-                        f"  Top Sellers: {sellers_text}\n"
-                        f"  Summary: {h.get('summary_narrative', 'N/A')[:150]}"
+                        f"  Status Bandarmologi: {h.get('bandarmology_status', 'N/A')}\n"
+                        f"  Pembeli (Komposisi: {buyers_sum}):\n{buyers_text}\n"
+                        f"  Penjual (Komposisi: {sellers_sum}):\n{sellers_text}\n"
+                        f"  Summary: {h.get('summary_narrative', 'N/A')[:180]}"
                     )
 
                 broksum_context = (
@@ -2785,14 +2860,14 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
                 if len(history_sorted) > 1:
                     broksum_context += (
                         f"\n\n**⚠️ PENTING:** Ada {len(history_sorted)} snapshot. "
-                        f"Bandingkan perubahan broker (siapa yang akumulasi/distribusi antar waktu) "
-                        f"untuk mendeteksi pola bandarmology yang lebih kuat."
+                        f"Bandingkan perubahan dominasi Bandar 🐋 vs Retail 🧑 antar waktu "
+                        f"untuk mendeteksi pola akumulasi atau distribusi secara presisi."
                     )
         except Exception as e:
             pass
 
     prompt = f"""
-Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan fundamental saham {data_saham['Saham']}:
+Anda adalah asisten analis saham profesional & pakar Bandarmology. Berikut data analisis teknikal, fundamental, dan broker flow saham {data_saham['Saham']}:
 
 - Harga terakhir: Rp {data_saham['Harga']}
 - Sinyal saat ini: {data_saham['Sinyal']}
@@ -2818,9 +2893,9 @@ Anda adalah asisten analis saham profesional. Berikut data analisis teknikal dan
 
 {riwayat_text}
 
-Berdasarkan data di atas{' (khususnya aksi broker)' if broksum_context else ''}, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
-- Makna sinyal dalam konteks saat ini
-{f'- Aksi broker pembeli/penjual utama & implikasinya untuk harga' if broksum_context else ''}
+Berdasarkan data di atas{' (khususnya dominasi Bandar 🐋 vs Retail 🧑 pada broker flow)' if broksum_context else ''}, berikan analisis ringkas (Bahasa Indonesia) yang mencakup:
+- Makna sinyal teknikal dalam konteks pergerakan saat ini
+{f'- Analisis peta akumulasi/distribusi broker (Bandar vs Retail) & implikasinya pada harga' if broksum_context else ''}
 - Kekuatan dan kelemahan saham
 - Risiko utama
 - Rekomendasi langkah selanjutnya (buy/hold/sell) dengan alasan singkat
@@ -3058,7 +3133,7 @@ Ekstrak seluruh informasi tabel dan berikan analisis terstruktur dalam format JS
   "periode": "TANGGAL / PERIODE (contoh: 09 Sep 2026, tulis N/A jika tidak terlihat)",
   "bandarmology_status": "Big Accumulation / Normal Accumulation / Neutral / Normal Distribution / Big Distribution",
   "foreign_flow_status": "Net Buy / Net Sell / Neutral / N/A",
-  "summary_narrative": "Penjelasan 2-3 kalimat: broker mana yang dominan, konsentrasi top 1 vs top 3, dan implikasi harga.",
+  "summary_narrative": "Penjelasan 2-3 kalimat: broker mana yang dominan (sertakan indikasi Bandar vs Retail jika terlihat), konsentrasi top 1 vs top 3, dan implikasi harga.",
   "top_buyers": [
     {
       "broker": "YP",
