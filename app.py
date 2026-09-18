@@ -2465,12 +2465,12 @@ def render_notifikasi_evaluasi_riwayat():
         </style>
     """, unsafe_allow_html=True)
 
-    title_text = "🔔 **Pengingat Evaluasi Outcome Trading**"
+    title_text = "🔔 <b>Pengingat Evaluasi Outcome Trading</b>"
     details = []
     if n_urgent > 0:
-        details.append(f"⚠️ **{n_urgent} sinyal perlu dicatat** (Daytrade atau Swing ≥7 hari bursa)")
+        details.append(f"⚠️ <b>{n_urgent} sinyal perlu dicatat</b> (Daytrade atau Swing ≥7 hari bursa)")
     if n_active > 0:
-        details.append(f"⏳ **{n_active} Swing aktif** (1-6 hari bursa)")
+        details.append(f"⏳ <b>{n_active} Swing aktif</b> (1-6 hari bursa)")
 
     st.markdown(f"""
     <div class="notif-box">
@@ -3429,21 +3429,21 @@ def render_broker_summary_and_aggregate_ui(buyers_list, sellers_list):
 
     if net_bandar > 0 and net_retail < 0:
         insight_icon = "🟢"
-        insight = ("**Bandar akumulasi, retail distribusi** — sinyal bullish. "
+        insight = ("<b>Bandar akumulasi, retail distribusi</b> — sinyal bullish. "
                    "Bandar sedang menyerap supply dari retail.")
     elif net_bandar < 0 and net_retail > 0:
         insight_icon = "🔴"
-        insight = ("**Bandar distribusi, retail akumulasi** — hati-hati. "
+        insight = ("<b>Bandar distribusi, retail akumulasi</b> — hati-hati. "
                    "Bandar sedang melepas barang ke retail (kemungkinan puncak).")
     elif net_bandar > 0 and net_retail > 0:
         insight_icon = "⚖️"
-        insight = "**Kedua pihak net buy** — minat beli kuat, tapi perlu konfirmasi arah lanjut."
+        insight = "<b>Kedua pihak net buy</b> — minat beli kuat, tapi perlu konfirmasi arah lanjut."
     elif net_bandar < 0 and net_retail < 0:
         insight_icon = "⚠️"
-        insight = "**Kedua pihak net sell** — tekanan jual kuat, waspadai koreksi lanjut."
+        insight = "<b>Kedua pihak net sell</b> — tekanan jual kuat, waspadai koreksi lanjut."
     else:
         insight_icon = "⚖️"
-        insight = "**Net flow seimbang** — pasar belum ada dominasi jelas."
+        insight = "<b>Net flow seimbang</b> — pasar belum ada dominasi jelas."
 
     if net_bandar > 0:
         net_color = "#10b981"
