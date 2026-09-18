@@ -2157,11 +2157,13 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
                 records = sheet.get_all_records()
 
         row_index = None
+        v12_consumed = 'No'  # default untuk row baru
         target_mode_norm = norm_gaya(mode)
         for i, row in enumerate(records):
             r_mode = row.get('Mode') or row.get('Gaya') or ''
             if str(row.get('Waktu')) == str(waktu) and str(row.get('Saham')) == str(saham) and norm_gaya(r_mode) == target_mode_norm:
                 row_index = i + 2
+                v12_consumed = str(row.get('V12_Consumed', 'No')).strip()
                 break
         new_row = [waktu, saham, mode,
                    actual_data.get('Actual_High', ''),
@@ -2174,7 +2176,7 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
         else:
             sheet.append_row(new_row, value_input_option='RAW')
         st.session_state.riwayat_actual = muat_riwayat_actual()
-        if v12_consumed == 'No':
+        if v12_consumed != 'Yes':
             integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
             # Mark sebagai consumed
             if row_index:
@@ -2183,7 +2185,6 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
                 # Row baru = baris terakhir
                 last_row = len(sheet.get_all_values())
                 sheet.update(f'I{last_row}', [['Yes']], value_input_option='RAW')
-        integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
     except Exception as e:
         st.error(f"Gagal menyimpan actual: {e}")
 
