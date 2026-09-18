@@ -2143,17 +2143,25 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
     try:
         sheet = get_gsheet().worksheet("riwayat_actual")
         records = sheet.get_all_records()
-        headers = ['Waktu', 'Saham', 'Mode', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome', 'Entry_Miss']
+        headers_8 = ['Waktu', 'Saham', 'Mode', 'Actual_High', 'Actual_Low', 'Actual_Close', 'Outcome', 'Entry_Miss']
+        headers_9 = headers_8 + ['V12_Consumed']
+
+        # Pastikan sheet punya minimal 9 kolom (untuk kolom V12_Consumed di kolom I)
+        if sheet.col_count < 9:
+            sheet.add_cols(9 - sheet.col_count)
 
         # Jika belum ada data sama sekali, tulis header dulu
         if not records:
-            sheet.insert_row(headers, 1)
+            sheet.update('A1:I1', [headers_9], value_input_option='RAW')
+            records = sheet.get_all_records()
         else:
             existing_headers = list(records[0].keys())
             if 'Mode' not in existing_headers:
-                # Update baris 1 saja — JANGAN insert_row agar tidak duplikat header
-                sheet.update('A1:H1', [headers], value_input_option='RAW')
-                # Reload records karena header berubah
+                sheet.update('A1:I1', [headers_9], value_input_option='RAW')
+                records = sheet.get_all_records()
+            elif 'V12_Consumed' not in existing_headers:
+                # Header A-H sudah ada, tinggal tambah I1
+                sheet.update('I1', [['V12_Consumed']], value_input_option='RAW')
                 records = sheet.get_all_records()
 
         row_index = None
@@ -2178,11 +2186,11 @@ def simpan_riwayat_actual(waktu, saham, actual_data, mode="swing"):
         st.session_state.riwayat_actual = muat_riwayat_actual()
         if v12_consumed != 'Yes':
             integrate_actual_to_v12(waktu, saham, actual_data, mode=mode)
-            # Mark sebagai consumed
+            # Mark V12_Consumed = Yes di kolom I
             if row_index:
                 sheet.update(f'I{row_index}', [['Yes']], value_input_option='RAW')
             else:
-                # Row baru = baris terakhir
+                # Row baru = baris terakhir setelah append
                 last_row = len(sheet.get_all_values())
                 sheet.update(f'I{last_row}', [['Yes']], value_input_option='RAW')
     except Exception as e:
