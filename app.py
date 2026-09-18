@@ -8329,6 +8329,16 @@ if st.session_state.get('scan_results'):
                 st.markdown(title_text)
             with col2:
                 st.metric("Harga", f"Rp {r['lastPrice']:,.0f}")
+                
+                # Tampilkan AI Cross-check jika sudah dijalankan
+                ai_results = st.session_state.get('ai_crosscheck_buy', [])
+                ai_match = next((item for item in ai_results if item.get("ticker", "").upper() == tick_clean), None)
+                if ai_match:
+                    sent_score = ai_match.get("sentiment_score", 0.0)
+                    sent_label = f"+{sent_score:.2f}" if sent_score >= 0 else f"{sent_score:.2f}"
+                    status = "☑️ Sejalan" if sent_score > 0 else "⛔ Berlawanan"
+                    note = ai_match.get("note", "")
+                    st.markdown(f"**AI Sentimen: {sent_label}**<br/>{status}<br/>📰 <small>_{note}_</small>", unsafe_allow_html=True)
 
             if active_info:
                 st.caption(f"⏳ **Swing Aktif dari {active_info['waktu']}** (Hari bursa ke-{active_info['b_days']}) — Target belum tersentuh / outcome belum diisi.")
@@ -8375,8 +8385,24 @@ if st.session_state.get('scan_results'):
         with st.container():
             for idx, r in enumerate(top_sells):
                 rank = idx + 1
-                st.markdown(f"#{rank} **{r['ticker']}** — {r['signal']} | Harga: Rp {r['lastPrice']:,.0f}")
-                st.caption(f"Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Regime: {r['regime']}")
+                tick_clean = r['ticker'].replace(".JK", "").strip().upper()
+                
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(f"#{rank} **{r['ticker']}** — {r['signal']}")
+                    st.caption(f"Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Regime: {r['regime']}")
+                with col2:
+                    st.metric("Harga", f"Rp {r['lastPrice']:,.0f}")
+                    
+                    # Tampilkan AI Cross-check jika sudah dijalankan
+                    ai_results = st.session_state.get('ai_crosscheck_sell', [])
+                    ai_match = next((item for item in ai_results if item.get("ticker", "").upper() == tick_clean), None)
+                    if ai_match:
+                        sent_score = ai_match.get("sentiment_score", 0.0)
+                        sent_label = f"+{sent_score:.2f}" if sent_score >= 0 else f"{sent_score:.2f}"
+                        status = "☑️ Sejalan" if sent_score < 0 else "⛔ Berlawanan"
+                        note = ai_match.get("note", "")
+                        st.markdown(f"**AI Sentimen: {sent_label}**<br/>{status}<br/>📰 <small>_{note}_</small>", unsafe_allow_html=True)
                 st.divider()
     else:
         st.caption("(Tidak ada kandidat Jual yang memenuhi threshold)")
@@ -8434,85 +8460,20 @@ if st.session_state.get('scan_results'):
                                     with st.expander("🔎 Debug: Raw Response"):
                                         st.code(raw)
 
-                                # --- Tampilkan hasil cross‑check ---
-                                st.success("✅ Cross‑Check Sentimen AI berhasil!")
-                                st.markdown("### 🧠 AI-Enhanced Cross-Check")
-                                st.caption(
-                                    "Quick Technical Cross-Check (7 faktor) + sentimen berita AI "
-                                    "(berita terbaru dari Google News) "
-                                    "= 8 dari 9 faktor Single Quant. "
-                                    "MASIH bukan Single Quant penuh. Broker Summary tetap perlu input manual per-saham."
-                                )
-
-                                st.markdown("**TOP BELI**")
-                                for item in sentiments:
-                                    ticker = item.get("ticker", "").upper()
-                                    stock = next((r for r in candidates if r['ticker'] == ticker), None)
-                                    if stock is None:
-                                        continue
-                                    est_return = stock['muEst'] * 100
-                                    sent_score = item.get("sentiment_score", 0.0)
-                                    sent_label = f"+{sent_score:.2f}" if sent_score >= 0 else f"{sent_score:.2f}"
-                                    status = "☑️ Sejalan" if sent_score > 0 else "⛔ Berlawanan"
-                                    note = item.get("note", "")
-                                    st.markdown(f"""
-**{ticker}** {status}  
-Scanner: Beli (Est. Return **{est_return:.2f}%**) vs Sentimen AI: **{sent_label}** _(Skala -1 s.d +1)_  
-📰 {note}
-""")
-
-                                # --- TOP JUAL (dengan berita juga) ---
-                                sell_signals_list = sr.get('sell_signals', [])
-                                if top_sell_candidates:
-                                    st.markdown("**TOP JUAL**")
-                                    headlines_sell = {}
-                                    for r in top_sell_candidates:
-                                        headlines_sell[r['ticker']] = get_headlines_for_ticker(r['ticker'])
-
-                                    sell_prompt = (
-                                        "Berikut hasil scan teknikal 3 saham dengan sinyal JUAL. "
-                                        "Verifikasi sentimen berita TERBARU yang saya berikan. "
-                                        "KELUARKAN HANYA JSON array: [{\"ticker\": \"BBRI\", \"sentiment_score\": -0.5..0.5, \"note\": \"singkat\"}]\n\n"
-                                    )
-                                    for r in top_sell_candidates:
-                                        tick = r['ticker']
-                                        headlines = headlines_sell.get(tick, ["(tidak ada berita)"])
-                                        sell_prompt += f"{tick} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Berita: {'; '.join(headlines)}\n"
-
-                                    model_s, err_s = dapatkan_model_gemini(st.session_state.gemini_api_key)
-                                    if model_s and not err_s:
-                                        try:
-                                            resp_s = model_s.generate_content(sell_prompt)
-                                            raw_s = resp_s.text.strip()
-                                            start_s = raw_s.rfind('[')
-                                            sell_ai = []
-                                            if start_s != -1:
-                                                json_s = raw_s[start_s:].strip()
-                                                if json_s.startswith("```json"): json_s = json_s[7:]
-                                                if json_s.endswith("```"): json_s = json_s[:-3]
-                                                try:
-                                                    sell_ai = json.loads(json_s)
-                                                except json.JSONDecodeError:
-                                                    sell_ai = []
-                                        except:
-                                            sell_ai = []
-                                    else:
-                                        sell_ai = []
-
-                                    for item in sell_ai:
-                                        ticker = item.get("ticker", "").upper()
-                                        stock = next((r for r in top_sell_candidates if r['ticker'] == ticker), None)
-                                        if stock is None:
-                                            continue
-                                        est_return = stock['muEst'] * 100
-                                        sent_score = item.get("sentiment_score", 0.0)
-                                        al_enhanced = sent_score * 100
-                                        status = "☑️ Sejalan" if sent_score < 0 else "⛔ Berlawanan"
-                                        note = item.get("note", "")
-                                        st.markdown(f"""
-                                        **{ticker}** {status}  
-                                        Scanner: Jual (Est. Return {est_return:.2f}%) vs AI-Enhanced: {al_enhanced:.2f}% sentimen: {note}
-                                        """)
+                                # --- SIMPAN KE SESSION STATE DAN RE-RUN ---
+                                st.session_state['ai_crosscheck_buy'] = sentiments
+                                st.session_state['ai_crosscheck_sell'] = sell_ai
+                                st.session_state['ai_crosscheck_done'] = True
+                                st.rerun()
+                                
+            if st.session_state.get('ai_crosscheck_done'):
+                st.success("✅ Cross‑Check Sentimen AI berhasil! Hasil analisis (Skor -1 s.d +1) telah disematkan di sebelah kanan pada masing-masing kartu saham di atas.")
+                st.caption(
+                    "Quick Technical Cross-Check (7 faktor) + sentimen berita AI "
+                    "(berita terbaru dari Google News & Ipotnews) "
+                    "= 8 dari 9 faktor Single Quant. "
+                    "MASIH bukan Single Quant penuh. Broker Summary tetap perlu input manual per-saham."
+                )
                                 else:
                                     st.caption("(Tidak ada kandidat Jual)")
                             except Exception as e:
