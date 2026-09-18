@@ -8460,12 +8460,49 @@ if st.session_state.get('scan_results'):
                                     with st.expander("🔎 Debug: Raw Response"):
                                         st.code(raw)
 
+                                # --- TOP JUAL (dengan berita juga) ---
+                                sell_ai = []
+                                if top_sell_candidates:
+                                    headlines_sell = {}
+                                    for r in top_sell_candidates:
+                                        headlines_sell[r['ticker']] = get_headlines_for_ticker(r['ticker'])
+
+                                    sell_prompt = (
+                                        "Berikut hasil scan teknikal saham dengan sinyal JUAL. "
+                                        "Verifikasi sentimen berita TERBARU yang saya berikan. "
+                                        "KELUARKAN HANYA JSON array: [{\"ticker\": \"BBRI\", \"sentiment_score\": -0.5..0.5, \"note\": \"singkat\"}]\n\n"
+                                    )
+                                    for r in top_sell_candidates:
+                                        tick = r['ticker']
+                                        headlines = headlines_sell.get(tick, ["(tidak ada berita)"])
+                                        sell_prompt += f"{tick} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Berita: {'; '.join(headlines)}\n"
+
+                                    try:
+                                        resp_s = model.generate_content(sell_prompt)
+                                        raw_s = resp_s.text.strip()
+                                        start_s = raw_s.rfind('[')
+                                        if start_s != -1:
+                                            json_s = raw_s[start_s:].strip()
+                                            if json_s.startswith("```json"): json_s = json_s[7:]
+                                            if json_s.endswith("```"): json_s = json_s[:-3]
+                                            try:
+                                                sell_ai = json.loads(json_s)
+                                            except json.JSONDecodeError:
+                                                pass
+                                    except Exception:
+                                        pass
+
                                 # --- SIMPAN KE SESSION STATE DAN RE-RUN ---
                                 st.session_state['ai_crosscheck_buy'] = sentiments
                                 st.session_state['ai_crosscheck_sell'] = sell_ai
                                 st.session_state['ai_crosscheck_done'] = True
                                 st.rerun()
-                                
+
+                            except Exception as e:
+                                st.error(f"Gagal memproses respons AI: {e}")
+                        else:
+                            st.error("Gagal mengakses Gemini.")
+
             if st.session_state.get('ai_crosscheck_done'):
                 st.success("✅ Cross‑Check Sentimen AI berhasil! Hasil analisis (Skor -1 s.d +1) telah disematkan di sebelah kanan pada masing-masing kartu saham di atas.")
                 st.caption(
@@ -8474,12 +8511,6 @@ if st.session_state.get('scan_results'):
                     "= 8 dari 9 faktor Single Quant. "
                     "MASIH bukan Single Quant penuh. Broker Summary tetap perlu input manual per-saham."
                 )
-                                else:
-                                    st.caption("(Tidak ada kandidat Jual)")
-                            except Exception as e:
-                                st.error(f"Gagal memproses respons AI: {e}")
-                        else:
-                            st.error("Gagal mengakses Gemini.")
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
     st.title("📊 Quant & Risk Engine Pro")
