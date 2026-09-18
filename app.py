@@ -3874,7 +3874,7 @@ def render_trade_flow_spectrum_bar(stats):
 
     st.markdown(f"""<div style="background:#131722; border:1px solid #262626; border-radius:10px; padding:12px 16px; margin:10px 0 12px 0; font-family:-apple-system, sans-serif;">
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-<span style="color:#94a3b8; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px;">Trade Flow Spectrum Bar</span>
+<span style="color:#94a3b8; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px;"></span>
 <span style="color:{status_clr}; font-size:12px; font-weight:700;">{status_lbl} ({ratio_pct:+.1f}%)</span>
 </div>
 <div style="position:relative; height:18px; border-radius:9px; background:linear-gradient(90deg, #ef4444 0%, #dc2626 25%, #451a03 50%, #15803d 75%, #10b981 100%); padding:2px; box-shadow:inset 0 1px 3px rgba(0,0,0,0.6);">
@@ -4591,8 +4591,8 @@ def display_bandarmology_tab(ticker):
     st.markdown("#### 2. Trade Flow")
     fig2, df2, stats2 = build_trade_flow_chart(data)
     if fig2 is not None and df2 is not None and len(df2) > 0:
-        render_trade_flow_spectrum_bar(stats2)
         render_plotly_realtime(fig2, height=420)
+        render_trade_flow_spectrum_bar(stats2)
     else:
         st.caption("(Data harga intraday tidak tersedia dari yfinance)")
 
