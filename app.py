@@ -10,6 +10,7 @@ import re
 import os
 import json
 from datetime import datetime, timedelta
+import time
 import pytz
 import math
 import google.generativeai as genai
@@ -5955,22 +5956,39 @@ def compute_adx_series(df, period=14):
     dx = (abs(plus_di-minus_di)/(plus_di+minus_di))*100
     return dx.ewm(alpha=1/period, adjust=False).mean()
 
-def get_google_news_rss(query_str, num=5):
+def get_google_news_rss(query_str, num=5, days_back=7):
+    """Ambil berita dari Google News RSS, difilter hanya N hari terakhir dan diurutkan terbaru."""
     if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
     try:
-        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_str)}&hl=id&gl=ID&ceid=ID:id"
+        # Tambah filter after: agar Google hanya return berita terbaru
+        cutoff = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
+        query_with_date = f"{query_str} after:{cutoff}"
+        url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_with_date)}&hl=id&gl=ID&ceid=ID:id"
         feed = feedparser.parse(url)
-        news = [{'title': e.get('title','').strip(),
-                 'summary': re.sub('<[^<]+?>','',e.get('summary','')),
-                 'source':'Google News'} for e in feed.entries[:num]]
-        return news, None
+
+        news = []
+        for e in feed.entries[:num * 2]:  # ambil lebih banyak dulu untuk difilter
+            published = e.get('published', '')
+            published_parsed = e.get('published_parsed')  # struct_time
+            news.append({
+                'title': e.get('title', '').strip(),
+                'summary': re.sub('<[^<]+?>', '', e.get('summary', '')),
+                'source': 'Google News',
+                'published': published,
+                'published_ts': time.mktime(published_parsed) if published_parsed else 0
+            })
+
+        # Sort terbaru di atas
+        news.sort(key=lambda x: x['published_ts'], reverse=True)
+        return news[:num], None
     except Exception as e:
         return [], str(e)
-@st.cache_data(ttl=1800, show_spinner=False)
+
+@st.cache_data(ttl=600, show_spinner=False)  # cache 10 menit (lebih fresh)
 def get_headlines_for_ticker(ticker):
     """Ambil maks 3 judul berita terbaru dari Google News RSS."""
     try:
-        news, _ = get_google_news_rss(f"{ticker} saham", num=3)
+        news, _ = get_google_news_rss(f"{ticker} saham", num=3, days_back=7)
         return [n['title'] for n in news] if news else ["(tidak ada berita terbaru)"]
     except:
         return ["(gagal mengambil berita)"]
@@ -5979,30 +5997,49 @@ def get_ipot_news(query, num=5):
     try:
         import requests
         from bs4 import BeautifulSoup
-        url = f"https://www.ipotnews.com/search?q={urllib.parse.quote(query)}"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        url = f"https://www.ipotnews.com/?q={urllib.parse.quote(query)}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
         soup = BeautifulSoup(r.text, 'html.parser')
         news = []
-        for item in soup.select('.title a')[:num]:   # selector bisa disesuaikan
-            title = item.get_text(strip=True)
-            link = item.get('href', '')
-            news.append({'title': title, 'summary': '', 'source': 'Ipotnews'})
+        
+        # Cari semua elemen <a> dan filter yang textnya cukup panjang (judul berita)
+        for a in soup.find_all('a'):
+            t = a.get_text(strip=True)
+            # Biasanya judul berita panjang, kita ambil yang > 30 karakter
+            if len(t) > 30 and 'berita' not in t.lower() and 'indopremier' not in t.lower():
+                # Pastikan judul unik
+                if not any(n['title'] == t for n in news):
+                    news.append({'title': t, 'summary': '', 'source': 'Ipotnews'})
+                if len(news) >= num:
+                    break
         return news, None
     except Exception as e:
         return [], str(e)
 
-def get_yahoo_search_news(query_str, num=5):
+def get_yahoo_search_news(query_str, num=5, days_back=7):
     try:
         items = yf.Search(query_str).news or []
+        cutoff_ts = time.time() - (days_back * 86400)
         news = []
-        for item in items[:num]:
+        for item in items[:num * 2]:
             inner = item.get('content') or item
             title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
             summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
-            if title:
-                news.append({'title':title,'summary':summary,'source':'Yahoo Search'})
-        return news, None
+            pub_ts = inner.get('providerPublishTime') or 0  # unix timestamp
+            # Filter hanya berita dalam N hari terakhir
+            if title and (pub_ts == 0 or pub_ts >= cutoff_ts):
+                news.append({
+                    'title': title,
+                    'summary': summary,
+                    'source': 'Yahoo Search',
+                    'published': datetime.fromtimestamp(pub_ts).strftime('%d %b %Y') if pub_ts else '',
+                    'published_ts': pub_ts
+                })
+        # Sort terbaru di atas
+        news.sort(key=lambda x: x['published_ts'], reverse=True)
+        return news[:num], None
     except:
         return [], "Yahoo Search gagal"
 
@@ -8415,13 +8452,14 @@ if st.session_state.get('scan_results'):
                                         continue
                                     est_return = stock['muEst'] * 100
                                     sent_score = item.get("sentiment_score", 0.0)
-                                    al_enhanced = sent_score * 100
+                                    sent_label = f"+{sent_score:.2f}" if sent_score >= 0 else f"{sent_score:.2f}"
                                     status = "☑️ Sejalan" if sent_score > 0 else "⛔ Berlawanan"
                                     note = item.get("note", "")
                                     st.markdown(f"""
-                                    **{ticker}** {status}  
-                                    Scanner: Beli (Est. Return {est_return:.2f}%) vs AI-Enhanced: {al_enhanced:.2f}% sentimen: {note}
-                                    """)
+**{ticker}** {status}  
+Scanner: Beli (Est. Return **{est_return:.2f}%**) vs Sentimen AI: **{sent_label}** _(Skala -1 s.d +1)_  
+📰 {note}
+""")
 
                                 # --- TOP JUAL (dengan berita juga) ---
                                 sell_signals_list = sr.get('sell_signals', [])
