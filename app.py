@@ -1171,7 +1171,7 @@ def format_broker_list_for_ai(broker_list):
 # ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
 # ═══════════════════════════════════════════════════════════════
-FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock","OFI"]
+FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock","OFI", "Bandar_Flow", "Foreign_ZScore"]
 WEIGHT_MIN    = 0.08
 WEIGHT_MAX    = 0.40
 SOFTMAX_TEMP  = 2.5
@@ -1736,13 +1736,13 @@ Jadilah singkat, profesional, dan actionable (max 300 kata)."""
 
 def default_weight(factor, regime):
     defaults = {
-        "STABLE BULLISH": {"Momentum":0.25,"AI_Senti":0.18,"MeanRev":0.12,"Beta_IHSG":0.15,"Coppock":0.30,"OFI": 0.12},
-        "VOLATILE UPTREND": {"Momentum":0.28,"AI_Senti":0.14,"MeanRev":0.12,"Beta_IHSG":0.16,"Coppock":0.30,"OFI": 0.10},
-        "HIGH-STRESS PANIC": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.22,"Beta_IHSG":0.15,"Coppock":0.30,"OFI": 0.18},
-        "SIDEWAYS / CONSOLIDATION": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.27,"Beta_IHSG":0.12,"Coppock":0.28,"OFI": 0.14},
-        "BEARISH ACCUMULATION": {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.20,"Beta_IHSG":0.15,"Coppock":0.27,"OFI": 0.13}
+        "STABLE BULLISH": {"Momentum":0.25,"AI_Senti":0.18,"MeanRev":0.12,"Beta_IHSG":0.15,"Coppock":0.30,"OFI": 0.12, "Bandar_Flow":0.20, "Foreign_ZScore":0.15},
+        "VOLATILE UPTREND": {"Momentum":0.28,"AI_Senti":0.14,"MeanRev":0.12,"Beta_IHSG":0.16,"Coppock":0.30,"OFI": 0.10, "Bandar_Flow":0.18, "Foreign_ZScore":0.10},
+        "HIGH-STRESS PANIC": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.22,"Beta_IHSG":0.15,"Coppock":0.30,"OFI": 0.18, "Bandar_Flow":0.22, "Foreign_ZScore":0.15},
+        "SIDEWAYS / CONSOLIDATION": {"Momentum":0.15,"AI_Senti":0.18,"MeanRev":0.27,"Beta_IHSG":0.12,"Coppock":0.28,"OFI": 0.14, "Bandar_Flow":0.20, "Foreign_ZScore":0.12},
+        "BEARISH ACCUMULATION": {"Momentum":0.20,"AI_Senti":0.18,"MeanRev":0.20,"Beta_IHSG":0.15,"Coppock":0.27,"OFI": 0.13, "Bandar_Flow":0.25, "Foreign_ZScore":0.15}
     }
-    return defaults.get(regime, {"Momentum":0.23,"AI_Senti":0.17,"MeanRev":0.15,"Beta_IHSG":0.15,"Coppock":0.30}).get(factor,0.15)
+    return defaults.get(regime, {"Momentum":0.23,"AI_Senti":0.17,"MeanRev":0.15,"Beta_IHSG":0.15,"Coppock":0.30,"OFI":0.10,"Bandar_Flow":0.15,"Foreign_ZScore":0.10}).get(factor,0.15)
 
 # ---------- Coppock Curve ----------
 def coppock_curve(prices, rP1=14, rP2=11, wP=10):
@@ -6048,19 +6048,136 @@ def filter_relevant(news_list, ticker):
     filtered = [n for n in news_list if any(k in (n['title']+n['summary']).lower() for k in keywords)]
     return filtered if filtered else news_list
 
+# ═══════════════════════════════════════════════════════════════
+# IDX FIN-LEXICON — Kamus Pasar Modal Indonesia
+# Menggantikan ketergantungan penuh pada VADER (kamus bahasa Inggris umum)
+# yang tidak mengenali istilah seperti PKPU, suspensi, buyback, UMA, dll.
+# ═══════════════════════════════════════════════════════════════
+IDX_FIN_LEXICON = {
+    # ── Katalis Positif ──
+    "dividen jumbo": +0.85,
+    "dividen spesial": +0.80,
+    "dividen interim": +0.70,
+    "kenaikan dividen": +0.72,
+    "buyback saham": +0.75,
+    "buy back": +0.65,
+    "buyback": +0.65,
+    "tender offer": +0.80,
+    "akuisisi": +0.60,
+    "merger": +0.55,
+    "kontrak baru": +0.72,
+    "proyek baru": +0.65,
+    "lonjakan laba": +0.82,
+    "laba bersih meningkat": +0.78,
+    "laba melonjak": +0.80,
+    "pendapatan meningkat": +0.68,
+    "rights issue standby buyer": +0.62,
+    "standby buyer": +0.60,
+    "ekspansi kapasitas": +0.58,
+    "ekspansi bisnis": +0.55,
+    "kemitraan strategis": +0.60,
+    "pembelian kembali": +0.65,
+    "restrukturisasi berhasil": +0.60,
+    "pelunasan utang": +0.65,
+    "upgrade rating": +0.70,
+    "kenaikan target harga": +0.68,
+    # ── Katalis Negatif ──
+    "suspensi perdagangan": -0.92,
+    "suspensi": -0.85,
+    "dihentikan perdagangannya": -0.88,
+    "penghentian perdagangan": -0.88,
+    "pkpu": -0.92,
+    "penundaan kewajiban pembayaran utang": -0.90,
+    "pailit": -0.95,
+    "kepailitan": -0.95,
+    "bangkrut": -0.95,
+    "default obligasi": -0.92,
+    "gagal bayar": -0.88,
+    "wanprestasi": -0.85,
+    "repo gagal": -0.87,
+    "pengunduran diri direksi mendadak": -0.78,
+    "mundur direksi": -0.72,
+    "pengunduran diri direktur": -0.70,
+    "pengunduran diri": -0.55,
+    "rugi bersih membengkak": -0.82,
+    "rugi bersih meningkat": -0.78,
+    "rugi bersih": -0.72,
+    "kerugian meningkat": -0.70,
+    "pendapatan turun": -0.60,
+    "laba tergerus": -0.65,
+    "uma": -0.72,  # Unusual Market Activity
+    "unusual market activity": -0.72,
+    "reverse stock split": -0.68,
+    "pemecahan saham terbalik": -0.68,
+    "right issue tanpa standby": -0.55,
+    "dilusi saham": -0.58,
+    "penambahan modal tanpa hmetd": -0.65,
+    "pmthmetd": -0.62,
+    "gugatan": -0.62,
+    "gugatan hukum": -0.68,
+    "investigasi otoritas": -0.75,
+    "sanksi ojk": -0.80,
+    "pembekuan": -0.78,
+    "delisting": -0.92,
+    "force majeure": -0.60,
+}
+
+def _score_lexicon_idxfin(text_lower: str) -> tuple[float, bool]:
+    """
+    Cek apakah ada kata dari IDX_FIN_LEXICON dalam teks.
+    Return (skor_rata_rata, ada_match).
+    Jika multiple match → rata-rata tertimbang (kata lebih panjang = bobot lebih tinggi).
+    """
+    matches = []
+    for phrase, score in IDX_FIN_LEXICON.items():
+        if phrase in text_lower:
+            matches.append((len(phrase), score))
+    if not matches:
+        return 0.0, False
+    # Bobot proporsional terhadap panjang frasa (frasa panjang lebih spesifik)
+    total_w = sum(l for l, _ in matches)
+    weighted = sum(l * s for l, s in matches) / total_w
+    return float(np.clip(weighted, -1.0, 1.0)), True
+
 def analyze_sentiment_weighted(news_items, translator):
-    if not SENTIMENT_AVAILABLE or not news_items: return 0.0
+    """
+    Hitung rata-rata sentimen tertimbang dari daftar berita.
+
+    Upgrade dari VADER-only ke IDX Fin-Lexicon blended:
+    - Jika ada kata IDX_FIN_LEXICON dalam teks → 60% lexicon + 40% VADER
+    - Jika tidak ada → VADER saja (backward-compatible)
+    - Bobot per berita = 1/(i+1) (berita terbaru lebih berat)
+    """
+    if not SENTIMENT_AVAILABLE or not news_items:
+        return 0.0
     analyzer = SentimentIntensityAnalyzer()
     total_w, w_sum = 0, 0
     for i, item in enumerate(news_items):
         text = f"{item['title']}. {item['summary']}" if item['summary'] else item['title']
-        if any(ord(c)>127 for c in text) and translator:
-            try: text = translator.translate(text)
-            except: pass
-        score = analyzer.polarity_scores(text)['compound']
-        weight = 1/(i+1)
-        w_sum += score*weight; total_w += weight
-    return w_sum/total_w if total_w>0 else 0.0
+        text_for_lexicon = text.lower()
+
+        # ── IDX Fin-Lexicon check (bahasa Indonesia, sebelum translate) ──
+        lex_score, has_lex = _score_lexicon_idxfin(text_for_lexicon)
+
+        # ── Terjemahkan untuk VADER (bahasa Inggris) ──
+        if any(ord(c) > 127 for c in text) and translator:
+            try:
+                text = translator.translate(text)
+            except Exception:
+                pass
+        vader_score = analyzer.polarity_scores(text)['compound']
+
+        # ── Blend: lexicon override jika ditemukan kata IDX ──
+        if has_lex:
+            # 60% lexicon (sangat spesifik konteks IDX) + 40% VADER
+            final_score = 0.6 * lex_score + 0.4 * vader_score
+        else:
+            final_score = vader_score
+
+        weight = 1 / (i + 1)
+        w_sum += final_score * weight
+        total_w += weight
+    return w_sum / total_w if total_w > 0 else 0.0
 
 def estimate_theta_ou(close_series):
     log_price = np.log(close_series.dropna())
@@ -6402,7 +6519,115 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         if _valid_count < 10:
             return None
     except Exception:
+        pass
+
+    # ------------------------------------------------------------------
+    # 1.5. MULTI-TIMEFRAME (MTF) ANCHOR
+    # ------------------------------------------------------------------
+    is_mtf_bullish = True
+    mtf_status_text = "N/A"
+    
+    try:
+        if is_daytrade:
+            df_anchor = load_stock_data(ticker_input, period="1y", interval="1d")
+            anchor_name = "Daily"
+        else:
+            df_anchor = load_stock_data(ticker_input, period="3y", interval="1wk")
+            anchor_name = "Weekly"
+            
+        if df_anchor is not None and not df_anchor.empty and len(df_anchor) >= 50:
+            df_anchor = df_anchor.copy()
+            df_anchor['EMA20'] = df_anchor['Close'].ewm(span=20, adjust=False).mean()
+            df_anchor['EMA50'] = df_anchor['Close'].ewm(span=50, adjust=False).mean()
+            
+            ema12 = df_anchor['Close'].ewm(span=12, adjust=False).mean()
+            ema26 = df_anchor['Close'].ewm(span=26, adjust=False).mean()
+            df_anchor['MACD'] = ema12 - ema26
+            df_anchor['MACD_Signal'] = df_anchor['MACD'].ewm(span=9, adjust=False).mean()
+            df_anchor['MACD_Hist'] = df_anchor['MACD'] - df_anchor['MACD_Signal']
+            
+            last_close = float(df_anchor['Close'].iloc[-1])
+            last_ema20 = float(df_anchor['EMA20'].iloc[-1])
+            last_ema50 = float(df_anchor['EMA50'].iloc[-1])
+            last_macd_hist = float(df_anchor['MACD_Hist'].iloc[-1])
+            
+            bull_score = 0
+            if last_close > last_ema20: bull_score += 1
+            if last_close > last_ema50: bull_score += 1
+            if last_macd_hist > 0: bull_score += 1
+            
+            is_mtf_bullish = (bull_score >= 2)
+            mtf_status_text = f"Tren {anchor_name}: {'Bullish ✅' if is_mtf_bullish else 'Bearish ⚠️'} (Score {bull_score}/3)"
+    except Exception as e:
+        mtf_status_text = f"Error MTF: {str(e)}"
+    except Exception:
         return None
+
+    # ------------------------------------------------------------------
+    # 1.6. VSA (VOLUME SPREAD ANALYSIS) & MARKING CLOSE DETECTOR
+    # ------------------------------------------------------------------
+    is_marking_close = False
+    is_no_demand = False
+    is_stopping_volume = False
+    vsa_status_text = "VSA: Normal"
+
+    try:
+        # ── a. Marking Close: fetch 5m intraday untuk cek 10 menit terakhir ──
+        try:
+            df_5m_today = load_stock_data(ticker_input, period="1d", interval="5m")
+            if df_5m_today is not None and not df_5m_today.empty and len(df_5m_today) >= 5:
+                # Ambil 2 bar terakhir (≈ 15:50–16:00 WIB)
+                last2 = df_5m_today.tail(2)
+                vol_last2  = last2['Volume'].mean()
+                vol_avg5m  = df_5m_today['Volume'].mean()
+                close_last = float(last2['Close'].iloc[-1])
+                close_ref  = float(df_5m_today.iloc[-3]['Close'])   # harga sebelum 2 bar terakhir
+                if close_ref > 0:
+                    move_pct = (close_last - close_ref) / close_ref * 100
+                    # Marking close: naik > 1.5% dengan volume < 30% rata-rata
+                    if move_pct > 1.5 and vol_avg5m > 0 and vol_last2 < vol_avg5m * 0.30:
+                        is_marking_close = True
+        except Exception:
+            pass
+
+        # ── b. VSA pada bar terakhir data utama (Daily atau Intraday) ──
+        if len(df) >= 21:
+            recent = df.tail(21).copy()
+            spread  = recent['High'] - recent['Low']
+            avg_spread = spread.iloc[:-1].mean()
+            avg_vol    = recent['Volume'].iloc[:-1].mean()
+
+            last_bar   = recent.iloc[-1]
+            last_spread = float(last_bar['High'] - last_bar['Low'])
+            last_vol    = float(last_bar['Volume'])
+            last_close  = float(last_bar['Close'])
+            last_open   = float(last_bar['Open'])
+            last_low    = float(last_bar['Low'])
+            last_high   = float(last_bar['High'])
+            last_rng    = last_high - last_low
+
+            # No Demand Bar: harga naik, spread sempit, volume sepi
+            if (last_close > last_open and
+                avg_spread > 0 and last_spread < avg_spread * 0.70 and
+                avg_vol > 0 and last_vol < avg_vol * 0.80):
+                is_no_demand = True
+
+            # Stopping Volume: harga turun tapi volume meledak, close di atas mid candle
+            mid_candle = last_low + last_rng / 2 if last_rng > 0 else last_close
+            if (last_close < last_open and
+                avg_vol > 0 and last_vol > avg_vol * 1.8 and
+                last_close >= mid_candle):
+                is_stopping_volume = True
+
+        # ── c. Rangkum status VSA ──
+        vsa_tags = []
+        if is_marking_close:    vsa_tags.append("⚠️ Marking Close Detected")
+        if is_no_demand:        vsa_tags.append("🔴 No Demand (False Breakout Risk)")
+        if is_stopping_volume:  vsa_tags.append("🟢 Stopping Volume (Potential Reversal)")
+        vsa_status_text = " | ".join(vsa_tags) if vsa_tags else "✅ VSA: Normal"
+
+    except Exception as e:
+        vsa_status_text = f"VSA Error: {str(e)}"
 
     # ------------------------------------------------------------------
     # 2. PERHITUNGAN DASAR
@@ -6484,6 +6709,54 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     pbv = ticker_info.get('priceToBook')
     roe = ticker_info.get('returnOnEquity')
     de = ticker_info.get('debtToEquity')
+
+    # ------------------------------------------------------------------
+    # 4.5. BANDARMOLOGY & FOREIGN FLOW (V12)
+    # ------------------------------------------------------------------
+    ticker_raw = ticker_input.replace('.JK', '')
+    bandar_flow_val = 0.0
+    foreign_zscore_val = 0.0
+    is_retail_trap = False
+
+    # 1. Bandar Flow (Broksum)
+    broksum = get_latest_broksum_for_ticker(ticker_raw)
+    if broksum:
+        top_buyers = broksum.get('top_buyers', [])
+        top_sellers = broksum.get('top_sellers', [])
+        
+        # Hitung rasio akumulasi Top 3 Net Buy
+        if top_buyers:
+            tot_buyer_vol = sum(float(b.get("volume_lot", 0) or 0) for b in top_buyers if isinstance(b, dict))
+            top3_vol = sum(float(b.get("volume_lot", 0) or 0) for b in top_buyers[:3] if isinstance(b, dict))
+            
+            tot_seller_vol = sum(float(s.get("volume_lot", 0) or 0) for s in top_sellers if isinstance(s, dict))
+            top3_sell_vol = sum(float(s.get("volume_lot", 0) or 0) for s in top_sellers[:3] if isinstance(s, dict))
+            
+            tot_vol_proxy = (tot_buyer_vol + tot_seller_vol) / 2
+            if tot_vol_proxy > 0:
+                accum_ratio = (top3_vol - top3_sell_vol) / tot_vol_proxy
+                bandar_flow_val = float(np.clip(accum_ratio * 5.0, -1.0, 1.0)) # >0.2 -> 1, <-0.2 -> -1
+        
+        # Retail trap: Retail mendominasi Buy, Bandar mendominasi Sell
+        retail_brokers = {"YP", "PD", "XC", "KK", "NI", "CC"}
+        top_3_buyer_codes = {str(b.get("broker", "")).upper() for b in top_buyers[:3] if isinstance(b, dict)}
+        top_3_seller_codes = {str(s.get("broker", "")).upper() for s in top_sellers[:3] if isinstance(s, dict)}
+        
+        bandar_sellers = len(top_3_seller_codes - retail_brokers)
+        if len(top_3_buyer_codes.intersection(retail_brokers)) >= 2 and bandar_sellers >= 2:
+            is_retail_trap = True
+
+    # 2. Foreign Flow Z-Score
+    foreign_df = load_foreign_flow_history(ticker_raw, days=30)
+    if foreign_df is not None and not foreign_df.empty and 'net_foreign' in foreign_df.columns:
+        if len(foreign_df) >= 5:
+            net_f = foreign_df['net_foreign'].values
+            mean_20 = np.mean(net_f[-20:]) if len(net_f) >= 20 else np.mean(net_f)
+            std_20 = np.std(net_f[-20:]) if len(net_f) >= 20 else np.std(net_f)
+            if std_20 > 0:
+                recent_5_mean = np.mean(net_f[-5:])
+                z = (recent_5_mean - mean_20) / std_20
+                foreign_zscore_val = float(np.clip(z / 2.0, -1.0, 1.0)) # z=2 -> 1.0
 
     # ------------------------------------------------------------------
     # 5. BERITA & SENTIMEN
@@ -6703,7 +6976,9 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "MeanRev": -df['ZScore'].iloc[-1] / 3.0,
         "Beta_IHSG": beta_ihsg * (ihsg_ret.iloc[-1] if not ihsg_ret.empty else 0.0),
         "Coppock": coppock_val / 10.0,
-        "OFI": df['OFI_Enhanced'].iloc[-1] / 5.0  # Enhanced OFI dengan shadow-weighted volume
+        "OFI": df['OFI_Enhanced'].iloc[-1] / 5.0,  # Enhanced OFI dengan shadow-weighted volume
+        "Bandar_Flow": bandar_flow_val,
+        "Foreign_ZScore": foreign_zscore_val
     }
     norm_signals = {k: max(-1.0, min(1.0, v)) for k, v in factor_signals.items()}
     total_score = sum(norm_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
@@ -6716,7 +6991,9 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             "MeanRev": float(np.clip(-df['ZScore'].iloc[i] / 3.0, -1, 1)),
             "Beta_IHSG": 0.0,            # skip, butuh return historis
             "Coppock": 0.0,              # skip, expensive
-            "OFI": float(np.clip(df['OFI_Enhanced'].iloc[i] / 5.0, -1, 1))
+            "OFI": float(np.clip(df['OFI_Enhanced'].iloc[i] / 5.0, -1, 1)),
+            "Bandar_Flow": bandar_flow_val,       # gunakan nilai konstan terbaru
+            "Foreign_ZScore": foreign_zscore_val  # gunakan nilai konstan terbaru
         }
         s = sum(row_signals[k] * adaptive_w.get(k, 0.15) for k in FACTOR_KEYS)
         historical_scores.append(s)
@@ -6729,14 +7006,33 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     th_buy    = score_std * 0.4
     th_hold   = -score_std * 0.4
     
-    if total_score > th_strong:
-        signal = "🔥 STRONG BUY"
-    elif total_score > th_buy:
-        signal = "⚡ BUY (TACTICAL)"
+    if total_score > th_buy:
+        if is_retail_trap:
+            signal = "⏸️ HOLD / WAIT (Retail Trap Warning)"
+            total_score = th_hold + 0.01
+        elif is_marking_close or is_no_demand:
+            # VSA Penalty: Sinyal beli tapi structure harga palsu
+            signal = "⏸️ HOLD / WAIT (Fake Breakout / Marking Close)"
+            total_score = th_hold + 0.01
+        elif not is_mtf_bullish:
+            # Counter-Trend Risk Penalty
+            if total_score > th_strong:
+                signal = "⚡ BUY (TACTICAL) [Counter-Trend]"
+            else:
+                signal = "⏸️ HOLD / WAIT (Counter-Trend Risk)"
+                total_score = th_hold + 0.01
+        elif total_score > th_strong:
+            signal = "🔥 STRONG BUY"
+        else:
+            signal = "⚡ BUY (TACTICAL)"
     elif total_score > th_hold:
         signal = "⏸️ HOLD / WAIT"
+        if is_stopping_volume:
+            signal += " 🟢 (Potential Reversal — Absorption Terdeteksi)"
     else:
         signal = "🚨 AVOID"
+        if is_stopping_volume:
+            signal += " 🟢 (Watchlist — Absorption Terdeteksi)"
 
     # ------------------------------------------------------------------
     # 12. ENTRY ZONE
@@ -6901,24 +7197,55 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
     # ------------------------------------------------------------------
-    # 14. BACKTEST
+    # 14. BACKTEST — V12-Synced Engine
+    # Menggunakan factor_signals yang IDENTIK dengan Section 11 (total_score)
+    # agar Win Rate & Profit Factor benar-benar mencerminkan performa model V12.
+    # + Biaya riil: fee beli 0.15%, jual 0.25%, slippage 1 fraksi BEI.
     # ------------------------------------------------------------------
-    def generate_signals_vectorized(dataframe, mom_th):
-        score = pd.Series(0, index=dataframe.index)
-        is_uptrend = (dataframe['Close'] > dataframe['EMA20']) & (dataframe['EMA20'] > dataframe['EMA50'])
-        score += is_uptrend.astype(int) * 2
-        score += (dataframe['Mom5D'] > mom_th).astype(int)
-        if 'Volume' in dataframe.columns:
-            score += (dataframe['Volume'] > dataframe['Vol_MA20']).astype(int)
-        sig = pd.Series("🚨 AVOID", index=dataframe.index)
-        sig[score == 1] = "⏸️ HOLD / WAIT"
-        sig[score >= 2] = "⚡ BUY (TACTICAL)"
-        sig[score >= 3] = "🔥 STRONG BUY"
-        sig[(dataframe['ADX'] < 20) & sig.str.contains("BUY")] = "⏸️ HOLD / WAIT"
-        sig[(dataframe['ZScore'] < -1.5) & (dataframe['Close'] < dataframe['EMA20'])] = "⚡ BUY (TACTICAL)"
-        return sig
+    _fee_beli  = fee_beli_pct  / 100.0   # default 0.0015
+    _fee_jual  = fee_jual_pct  / 100.0   # default 0.0025
 
-    df['Signal'] = generate_signals_vectorized(df, mom_median_th)
+    def _v12_score_series(dataframe, _adaptive_w, _mom_th, _avg_sent):
+        """
+        Hitung V12 total_score per baris menggunakan formula identik section 11.
+        Dikembalikan sebagai pd.Series (float).
+        Beta_IHSG di-skip untuk efisiensi (seperti historical_scores di section 11).
+        """
+        mom_std = max(0.1, dataframe['Mom5D'].std())
+        s_mom  = ((dataframe['Mom5D'] - _mom_th) / mom_std).clip(-1, 1)
+        s_mr   = (-dataframe['ZScore'] / 3.0).clip(-1, 1)
+        s_ofi  = (dataframe['OFI_Enhanced'] / 5.0).clip(-1, 1) if 'OFI_Enhanced' in dataframe.columns else pd.Series(0.0, index=dataframe.index)
+        s_sent = float(np.clip(_avg_sent, -1, 1))
+        # Coppock: skip per-baris karena mahal; gunakan nilai terakhir (konstan)
+        s_copp = float(np.clip(coppock_val / 10.0, -1, 1))
+
+        score = (
+            s_mom  * _adaptive_w.get("Momentum",   0.23) +
+            s_mr   * _adaptive_w.get("MeanRev",    0.15) +
+            s_ofi  * _adaptive_w.get("OFI",        0.12) +
+            s_sent * _adaptive_w.get("AI_Senti",   0.17) +
+            s_copp * _adaptive_w.get("Coppock",    0.18) +
+            bandar_flow_val * _adaptive_w.get("Bandar_Flow", 0.15) +
+            foreign_zscore_val * _adaptive_w.get("Foreign_ZScore", 0.10)
+            # Beta_IHSG skip (butuh return historis per-baris IHSG)
+        )
+        return score
+
+    df['V12_Score'] = _v12_score_series(df, adaptive_w, mom_median_th, avg_sentiment)
+
+    # Threshold dinamis berbasis std historical (identik section 11)
+    bt_score_std = max(0.10, min(0.35, df['V12_Score'].std()))
+    bt_th_strong = bt_score_std * 1.0
+    bt_th_buy    = bt_score_std * 0.4
+    bt_th_hold   = -bt_score_std * 0.4
+
+    def _v12_signal_from_score(sc):
+        if sc > bt_th_strong: return "🔥 STRONG BUY"
+        if sc > bt_th_buy:    return "⚡ BUY (TACTICAL)"
+        if sc > bt_th_hold:   return "⏸️ HOLD / WAIT"
+        return "🚨 AVOID"
+
+    df['Signal'] = df['V12_Score'].apply(_v12_signal_from_score)
     df_back = df.iloc[-backtest_window:].copy()
 
     if len(df_back) == 0:
@@ -6926,20 +7253,29 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         return None
 
     trades, daily_returns = [], []
-    in_position, entry_price = False, 0.0
+    in_position, entry_price_net = False, 0.0
     for i in range(len(df_back)):
-        curr_sig = df_back['Signal'].iloc[i]
+        curr_sig   = df_back['Signal'].iloc[i]
         curr_close = float(df_back['Close'].iloc[i])
-        prev_close = float(df_back['Close'].iloc[i-1]) if i > 0 else curr_close
+        prev_close = float(df_back['Close'].iloc[i - 1]) if i > 0 else curr_close
+
         if in_position:
             daily_returns.append((curr_close - prev_close) / prev_close if prev_close else 0)
             if "AVOID" in curr_sig or i == len(df_back) - 1:
-                trades.append((curr_close - entry_price) / entry_price)
-                in_position = False
+                # Harga jual dikurangi 1 fraksi slippage + fee jual
+                slip_jual    = fraksi_step(curr_close)
+                exit_price   = max(0, curr_close - slip_jual)
+                net_exit     = exit_price * (1 - _fee_jual)
+                net_return   = (net_exit - entry_price_net) / entry_price_net if entry_price_net > 0 else 0
+                trades.append(net_return)
+                in_position  = False
         else:
             daily_returns.append(0.0)
             if "BUY" in curr_sig:
-                in_position, entry_price = True, curr_close
+                # Harga beli ditambah 1 fraksi slippage + fee beli
+                slip_beli        = fraksi_step(curr_close)
+                entry_price_net  = (curr_close + slip_beli) * (1 + _fee_beli)
+                in_position      = True
 
     if trades:
         win_bt = sum(1 for r in trades if r > 0) / len(trades)
@@ -6988,26 +7324,76 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
 
 
     # ------------------------------------------------------------------
-    # 16. MONTE CARLO
+    # 16. MONTE CARLO — Regime-Switching (GBM untuk trending, OU untuk sideways)
+    #
+    # Problem lama: OU murni memaksa proyeksi kembali ke mean 20 hari untuk
+    # SEMUA kondisi, termasuk saham yang baru saja breakout ATH / super-trend.
+    # Akibatnya prob_bull dan estimasi harga besok terlalu pesimistis.
+    #
+    # Solusi:
+    #  • BULLISH / STRONG BUY / Breakout  → GBM drift positif (momentum-based)
+    #  • BEARISH / PANIC / AVOID          → GBM drift negatif
+    #  • SIDEWAYS / CONSOLIDATION / HOLD  → OU mean-reverting (seperti sebelumnya)
     # ------------------------------------------------------------------
     if is_daytrade:
-        n_sim = 2000
+        n_sim   = 2000
         n_steps = max(1, bars_remaining)
     else:
-        n_sim = 2000
+        n_sim   = 2000
         n_steps = 30
 
     latest_vol = np.sqrt(df['Close'].pct_change().ewm(alpha=0.06).var().iloc[-1])
     scale_corrected = latest_vol / np.sqrt(df_est / (df_est - 2)) if df_est > 2 else latest_vol
-    theta_ou = estimate_theta_ou(df['Close'])
-    locked_log_mean20 = np.log(df['Close']).tail(20).mean()
 
-    paths = np.zeros((n_steps, n_sim))
+    # ── Deteksi regime Monte Carlo ──
+    _trending_up_regimes   = {"STABLE BULLISH", "VOLATILE UPTREND"}
+    _trending_down_regimes = {"HIGH-STRESS PANIC"}
+    _sideways_regimes      = {"SIDEWAYS / CONSOLIDATION", "BEARISH ACCUMULATION"}
+
+    _is_mc_bullish = (
+        regime in _trending_up_regimes or
+        "STRONG BUY" in signal or
+        (breakout == "YES (🔥)" and "BUY" in signal)
+    )
+    _is_mc_bearish = (
+        regime in _trending_down_regimes or
+        "AVOID" in signal
+    )
+    # Default: sideways / mean-reverting
+
+    paths       = np.zeros((n_steps, n_sim))
     current_log = np.ones(n_sim) * np.log(harga_terakhir)
-    for step in range(n_steps):
-        inov = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
-        current_log = current_log + theta_ou * (locked_log_mean20 - current_log) + inov
-        paths[step] = np.exp(current_log)
+
+    if _is_mc_bullish:
+        # ── GBM Bullish: drift berbasis momentum 5D harian (annualized → per-step) ──
+        mom5d_raw  = df['Mom5D'].iloc[-1] if 'Mom5D' in df.columns else 0.0
+        # Konversi: Mom5D adalah pct change 5D, bagi 5 → per-hari, lalu clamp +0.1%~+1%
+        drift_daily = float(np.clip(mom5d_raw / 500.0, 0.001, 0.010))
+        mc_regime_label = "GBM Bullish 🚀"
+        for step in range(n_steps):
+            inov        = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
+            current_log = current_log + drift_daily + inov
+            paths[step] = np.exp(current_log)
+
+    elif _is_mc_bearish:
+        # ── GBM Bearish: drift negatif berbasis momentum ──
+        mom5d_raw   = df['Mom5D'].iloc[-1] if 'Mom5D' in df.columns else 0.0
+        drift_daily = float(np.clip(mom5d_raw / 500.0, -0.010, -0.001))
+        mc_regime_label = "GBM Bearish 🔻"
+        for step in range(n_steps):
+            inov        = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
+            current_log = current_log + drift_daily + inov
+            paths[step] = np.exp(current_log)
+
+    else:
+        # ── OU Mean-Reverting: untuk sideways / konsolidasi ──
+        theta_ou           = estimate_theta_ou(df['Close'])
+        locked_log_mean20  = np.log(df['Close']).tail(20).mean()
+        mc_regime_label    = "OU Mean-Reverting ↔️"
+        for step in range(n_steps):
+            inov        = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
+            current_log = current_log + theta_ou * (locked_log_mean20 - current_log) + inov
+            paths[step] = np.exp(current_log)
 
     final_prices = paths[-1, :]
     est_besok = float(np.median(final_prices))
@@ -7022,8 +7408,8 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
 
     low_est, up_est = float(np.percentile(final_prices, 25)), float(np.percentile(final_prices, 75))
     prob_bull = (final_prices > harga_terakhir).mean() * 100
-    hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
-    hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
+    hit_tp    = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
+    hit_sl    = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
 
     if is_daytrade:
         estimasi_label = "Estimasi Sesi Berikutnya"
@@ -7225,7 +7611,16 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "floating_pl_pct": floating_pl_pct,
         "harga_beli_float": harga_beli_float,
         "sudah_beli": sudah_beli,
-        "ticker_raw": ticker_raw
+        "ticker_raw": ticker_raw,
+        "bandar_flow_val": bandar_flow_val,
+        "foreign_zscore_val": foreign_zscore_val,
+        "is_retail_trap": is_retail_trap,
+        "is_mtf_bullish": is_mtf_bullish,
+        "mtf_status_text": mtf_status_text,
+        "is_marking_close": is_marking_close,
+        "is_no_demand": is_no_demand,
+        "is_stopping_volume": is_stopping_volume,
+        "vsa_status_text": vsa_status_text
     }
         # Tambahan untuk UI
     result["ticker_info"] = ticker_info
@@ -7237,6 +7632,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     result["backtest_window"] = backtest_window
     result["ofi_now"] = df['OFI_Enhanced'].iloc[-1]  # Enhanced OFI dengan shadow weighting
     result["adaptive_w"] = adaptive_w
+    result["mc_regime_label"] = mc_regime_label   # label model MC: GBM Bullish/Bearish / OU
     result["returns"] = returns
     result["mom_median_th"] = mom_median_th
     result["coppock_rising"] = coppock_rising
@@ -7692,7 +8088,8 @@ def display_analysis_result(res):
         st.markdown(f"Max DD Historis: `{max_dd:.2f}%` | DD 30 Hari: `{max_dd_30:.2f}%`")
 
         st.divider()
-        st.subheader("🎲 Simulasi Monte Carlo Ornstein-Uhlenbeck")
+        _mc_label = res.get("mc_regime_label", "Monte Carlo")
+        st.subheader(f"🎲 Simulasi Monte Carlo — {_mc_label}")
         pr1, pr2, pr3 = st.columns(3)
         pr1.metric(prob_label, f"{prob_bull:.1f}%")
         pr2.metric("Prob. Sentuh R1 (30H)", f"{hit_tp:.1f}%")
@@ -7742,6 +8139,30 @@ def display_analysis_result(res):
             st.caption(beta_insight)
             st.info("ℹ️ Coppock Curve tidak ditampilkan untuk Day Trade karena kurang relevan dengan timeframe intraday.")
 
+        st.markdown("### ⚓ Multi-Timeframe (MTF) Alignment")
+        st.info(res.get('mtf_status_text', 'N/A'))
+        if not res.get('is_mtf_bullish', True):
+            st.warning("⚠️ Tren timeframe atasan sedang tidak mendukung (Counter-Trend). Sinyal beli diturunkan risikonya.")
+
+        st.markdown("### 🔬 Volume Spread Analysis (VSA)")
+        vsa_text = res.get('vsa_status_text', 'N/A')
+        if res.get('is_marking_close') or res.get('is_no_demand'):
+            st.error(f"**{vsa_text}**")
+        elif res.get('is_stopping_volume'):
+            st.success(f"**{vsa_text}**")
+        else:
+            st.info(vsa_text)
+        # Legenda interpretasi VSA
+        with st.expander("ℹ️ Cara Membaca VSA", expanded=False):
+            st.markdown(
+                "- **⚠️ Marking Close:** Harga ditarik naik di 10 menit terakhir penutupan dengan volume sangat sepi. "
+                "Kemungkinan besar saham akan *gap down* atau tertekan keesokan harinya.\n"
+                "- **🔴 No Demand:** Candle bullish dengan spread sempit & volume di bawah rata-rata. "
+                "Breakout palsu — tidak ada partisipasi buyer besar.\n"
+                "- **🟢 Stopping Volume:** Candle bearish besar dengan volume meledak, tetapi harga menutup di atas tengah candle. "
+                "Sinyal *smart money* sedang menampung barang (*absorption*). Waspadai *reversal*."
+            )
+
         st.markdown("### ⚖️ Bobot Adaptif per Faktor")
         st.caption(
             "Bobot di bawah dihitung otomatis berdasarkan **akurasi historis** masing‑masing faktor. "
@@ -7772,7 +8193,10 @@ def display_analysis_result(res):
                 "AI_Senti": "Sentimen berita paling berpengaruh – pergerakan saham banyak dipicu oleh berita/isu terkini. Pantau terus sentimen.",
                 "MeanRev": "*Reversal* ke rata-rata (Z-Score) paling berpengaruh – saham cenderung kembali ke level wajar setelah jenuh beli/jual.",
                 "Beta_IHSG": "Beta IHSG paling berpengaruh – saham sangat terpengaruh oleh pergerakan pasar secara keseluruhan. Perhatikan arah IHSG.",
-                "Coppock": "Coppock Curve paling berpengaruh – sinyal jangka panjang mendominasi, tren utama sedang kuat. Ikuti sinyal makro."
+                "Coppock": "Coppock Curve paling berpengaruh – sinyal jangka panjang mendominasi, tren utama sedang kuat. Ikuti sinyal makro.",
+                "OFI": "Order Flow Imbalance (OFI) paling berpengaruh – tekanan order book agresif sangat menentukan arah pergerakan.",
+                "Bandar_Flow": "Bandarmology (Top 3 Net Buy) paling berpengaruh – akumulasi/distribusi bandar memegang kendali atas tren saat ini.",
+                "Foreign_ZScore": "Foreign Flow paling berpengaruh – aksi beli/jual investor asing menjadi penggerak utama saham ini."
             }
             weight_insight += interpretations.get(max_factor, "")
             st.info(weight_insight)
