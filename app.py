@@ -1072,10 +1072,8 @@ def klasifikasi_broker(broker_code, volume_lot, freq=None):
             return "Bandar", "🐋"
         elif avg_per_freq < 50:
             return "Retail", "🧑"
-        
+        else:
             return "Mixed", "⚖️"
-
-    return "Mixed", "⚖️"
 
 def enrich_broker_kategori(res_json):
     """
@@ -1200,7 +1198,7 @@ def fraksi_bei(harga):
             fraksi = 5
         elif h < 5000:
             fraksi = 10
-        
+        else:
             fraksi = 25
         return round(h / fraksi) * fraksi
     except (ValueError, TypeError, OverflowError):
@@ -6560,8 +6558,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             mtf_status_text = f"Tren {anchor_name}: {'Bullish ✅' if is_mtf_bullish else 'Bearish ⚠️'} (Score {bull_score}/3)"
     except Exception as e:
         mtf_status_text = f"Error MTF: {str(e)}"
-    except Exception:
-        return None
+        is_mtf_bullish = True
 
     # ------------------------------------------------------------------
     # 1.6. VSA (VOLUME SPREAD ANALYSIS) & MARKING CLOSE DETECTOR
@@ -7205,19 +7202,34 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     _fee_beli  = fee_beli_pct  / 100.0   # default 0.0015
     _fee_jual  = fee_jual_pct  / 100.0   # default 0.0025
 
-    def _v12_score_series(dataframe, _adaptive_w, _mom_th, _avg_sent):
+    def _v12_score_series(dataframe, _adaptive_w, _mom_th, _avg_sent, use_live_factors=False):
         """
-        Hitung V12 total_score per baris menggunakan formula identik section 11.
-        Dikembalikan sebagai pd.Series (float).
-        Beta_IHSG di-skip untuk efisiensi (seperti historical_scores di section 11).
+        use_live_factors=True  → untuk total_score terkini (semua 8 faktor)
+        use_live_factors=False → untuk backtest (hanya 3 faktor bar-by-bar)
         """
         mom_std = max(0.1, dataframe['Mom5D'].std())
         s_mom  = ((dataframe['Mom5D'] - _mom_th) / mom_std).clip(-1, 1)
         s_mr   = (-dataframe['ZScore'] / 3.0).clip(-1, 1)
-        s_ofi  = (dataframe['OFI_Enhanced'] / 5.0).clip(-1, 1) if 'OFI_Enhanced' in dataframe.columns else pd.Series(0.0, index=dataframe.index)
-        s_sent = float(np.clip(_avg_sent, -1, 1))
-        # Coppock: skip per-baris karena mahal; gunakan nilai terakhir (konstan)
-        s_copp = float(np.clip(coppock_val / 10.0, -1, 1))
+        s_ofi  = (dataframe['OFI_Enhanced'] / 5.0).clip(-1, 1) \
+                if 'OFI_Enhanced' in dataframe.columns \
+                else pd.Series(0.0, index=dataframe.index)
+
+        if use_live_factors:
+            s_sent    = float(np.clip(_avg_sent, -1, 1))
+            s_copp    = float(np.clip(coppock_val / 10.0, -1, 1))
+            s_bandar  = bandar_flow_val
+            s_foreign = foreign_zscore_val
+            w_norm    = 1.0
+        else:
+            # Backtest: zero-out faktor yang tidak bisa direkonstruksi per-bar
+            s_sent = s_copp = s_bandar = s_foreign = 0.0
+            # Renormalisasi weight supaya skala tetap konsisten
+            w_active = (
+                _adaptive_w.get("Momentum", 0.23) +
+                _adaptive_w.get("MeanRev",  0.15) +
+                _adaptive_w.get("OFI",      0.12)
+            )
+            w_norm = 1.0 / w_active if w_active > 0 else 1.0
 
         score = (
             s_mom  * _adaptive_w.get("Momentum",   0.23) +
@@ -7225,14 +7237,15 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             s_ofi  * _adaptive_w.get("OFI",        0.12) +
             s_sent * _adaptive_w.get("AI_Senti",   0.17) +
             s_copp * _adaptive_w.get("Coppock",    0.18) +
-            bandar_flow_val * _adaptive_w.get("Bandar_Flow", 0.15) +
-            foreign_zscore_val * _adaptive_w.get("Foreign_ZScore", 0.10)
-            # Beta_IHSG skip (butuh return historis per-baris IHSG)
-        )
+            s_bandar * _adaptive_w.get("Bandar_Flow", 0.15) +
+            s_foreign * _adaptive_w.get("Foreign_ZScore", 0.10)
+        ) * w_norm
         return score
 
-    df['V12_Score'] = _v12_score_series(df, adaptive_w, mom_median_th, avg_sentiment)
-
+    df['V12_Score'] = _v12_score_series(df, adaptive_w, mom_median_th, avg_sentiment,
+                                     use_live_factors=False)
+    df['V12_Score_Live'] = _v12_score_series(df, adaptive_w, mom_median_th, avg_sentiment,
+                                          use_live_factors=True)
     # Threshold dinamis berbasis std historical (identik section 11)
     bt_score_std = max(0.10, min(0.35, df['V12_Score'].std()))
     bt_th_strong = bt_score_std * 1.0
@@ -8078,7 +8091,11 @@ def display_analysis_result(res):
         b4.metric("Max DD Strat", f"{max_dd_bt:.2f}%" if trades_bt else "N/A")
         b5.metric("Sharpe", f"{sharpe_bt:.2f}" if trades_bt else "N/A")
         b6.metric("Total Trades", trades_bt)
-
+        st.caption(
+            "ℹ️ WR & PF dihitung dari 3 faktor bar-by-bar (Momentum, MeanRev, OFI). "
+            "Faktor Bandar/Senti/Foreign/Coppock tidak direkonstruksi historis — "
+            "angka ini *lower bound*, bukan proyeksi."
+        )
         st.divider()
         st.subheader("🛡️ Manajemen Risiko Portofolio (Kelly)")
         rc1, rc2 = st.columns(2)
