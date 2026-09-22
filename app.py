@@ -6180,18 +6180,62 @@ def get_cnbc_rss_news(ticker, num=5, ticker_info=None):
             break
     
     return unique, None
-@st.cache_data(ttl=600, show_spinner=False)  # cache 10 menit (lebih fresh)
+@st.cache_data(ttl=600, show_spinner=False)
 def get_headlines_for_ticker(ticker):
-    """Ambil maks 3 judul berita terbaru dari Google News RSS."""
+    """
+    Ambil maks 3 judul berita terbaru yang RELEVAN dengan ticker.
+    FIX: Pakai multi-query + filter_relevant seperti di analyze_stock.
+    """
     try:
-        # Tambah konteks finansial, ambil lebih banyak dulu untuk difilter
-        news, _ = get_google_news_rss(
-            f'"{ticker}" (saham OR emiten OR dividen OR laba)',
-            num=5,           # ambil 5 dulu
-            days_back=14
-        )
-        return [n['title'] for n in news[:3]] if news else ["(tidak ada berita terbaru)"]
-    except:
+        ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+        if not ticker_clean:
+            return ["(ticker kosong)"]
+
+        # ── Ambil longName dari yfinance (defensive) ──
+        _long_name = ""
+        try:
+            _info = yf.Ticker(f"{ticker_clean}.JK").info or {}
+            _ln = _info.get("longName", "") or _info.get("shortName", "") or ""
+            _ln = re.sub(r'\b(Tbk|PT|Persero|Perseroan|Terbuka)\b', '', _ln, flags=re.IGNORECASE).strip()
+            if len(_ln) > 5:
+                _long_name = _ln
+        except Exception:
+            pass
+
+        # ── Multi-query ──
+        _queries = [f'{ticker_clean} saham']
+        if _long_name:
+            _queries.append(f'"{_long_name}" saham')
+
+        all_news = []
+        for q in _queries:
+            n, _ = get_google_news_rss(q, num=10, days_back=30)
+            if n:
+                all_news.extend(n)
+
+        # ── Dedup by title ──
+        seen = set()
+        unique = []
+        for n in all_news:
+            if n['title'] not in seen:
+                seen.add(n['title'])
+                unique.append(n)
+
+        # ── Filter relevansi (pakai filter_relevant) ──
+        try:
+            _info_for_filter = {"longName": _long_name} if _long_name else {}
+            filtered = filter_relevant(unique, ticker_clean, ticker_info=_info_for_filter)
+        except Exception:
+            filtered = unique
+
+        # ── Return top 3 judul ──
+        if filtered:
+            return [n['title'] for n in filtered[:3]]
+        elif unique:
+            return [n['title'] for n in unique[:3]]
+        else:
+            return ["(tidak ada berita terbaru)"]
+    except Exception:
         return ["(gagal mengambil berita)"]
 def get_ipot_news(query, num=5):
     """Ambil berita dari Ipotnews — WAJIB ada ticker di judul."""
@@ -6292,12 +6336,13 @@ def filter_relevant(news_list, ticker, ticker_info=None):
         return title
 
     def _clean_text_for_match(n):
-        """Bangun teks untuk matching: title (tanpa suffix) + summary."""
+        """
+        FIX FINAL: HANYA pakai title (sudah di-strip suffix) untuk matching.
+        Summary diabaikan karena Google News embed nama media di summary.
+        """
         title = n.get('title', '') or ''
         title_clean = _strip_source_suffix(title)
-        summary = n.get('summary', '') or ''
-        # Summary kadang ada ember "Full Story..." di akhir, cukup dipakai mentah
-        return (title_clean + ' ' + summary).lower()
+        return title_clean.lower()
 
     # ═══════════════════════════════════════════════════════════
     # Bangun 2 tier keyword
@@ -9412,68 +9457,245 @@ if st.session_state.get('scan_results'):
                 )
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
-    st.title("📊 Quant & Risk Engine Pro")
+    # ═══════════════════════════════════════════════════════════
+    # HERO SECTION
+    # ═══════════════════════════════════════════════════════════
     st.markdown("""
-    ## Selamat Datang di Dashboard Analisis Saham IHSG
-    
-    **Fitur Utama:**
-    - 🔍 Analisis teknikal lengkap (EMA, ADX, RSI, Z-Score, Momentum, dll)
-    - 📈 Sinyal trading adaptif (BUY/HOLD/AVOID) berdasarkan kondisi pasar
-    - 🧠 V12 Adaptive Engine dengan self-learning untuk bobot indikator
-    - 📰 Analisis sentimen berita dari berbagai sumber
-    - 📊 Metrik fundamental (Market Cap, PER, PBV, ROE, D/E)
-    - 🎲 Simulasi Monte Carlo untuk probabilitas naik & sentuh level
-    - 🤖 AI Insight otomatis menggunakan Google Gemini (perlu API key)
-    - 💾 Riwayat analisis tersimpan di Google Sheets (persisten)
-    
-    **Cara Memulai:**
-    1. Pilih **Gaya Trading** di sidebar (Swing Trade mingguan / Day Trade harian)
-    2. Masukkan **kode saham** IHSG (contoh: BBRI, TLKM, BMRI) – akhiran `.JK` otomatis ditambahkan
-    3. Klik tombol **🚀 ANALISIS** dan tunggu beberapa detik
-    
-    > **Disclaimer:** Dashboard ini merupakan alat bantu analisis kuantitatif. Keputusan investasi tetap tanggung jawab masing-masing. Data historis tidak menjamin performa masa depan.
-    """)
+    <div style="
+        background: linear-gradient(135deg, #0f1116 0%, #1a1d24 50%, #0f1116 100%);
+        border: 1px solid #262626;
+        border-radius: 20px;
+        padding: 48px 40px 44px 40px;
+        margin: 8px 0 24px 0;
+        position: relative;
+        overflow: hidden;
+    ">
+        <div style="position: absolute; top: -50%; right: -10%;
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, rgba(0,255,204,0.08) 0%, transparent 70%);
+            border-radius: 50%; pointer-events: none;"></div>
+        <div style="position: absolute; bottom: -60%; left: -5%;
+            width: 400px; height: 400px;
+            background: radial-gradient(circle, rgba(168,85,247,0.08) 0%, transparent 70%);
+            border-radius: 50%; pointer-events: none;"></div>
+        <div style="position: relative; z-index: 1;">
+            <div style="display: inline-block;
+                background: rgba(0,255,204,0.10);
+                border: 1px solid rgba(0,255,204,0.30);
+                color: #00ffcc; padding: 6px 14px;
+                border-radius: 20px; font-size: 11px;
+                font-weight: 600; letter-spacing: 1.5px;
+                text-transform: uppercase; margin-bottom: 20px;">
+                Quantitative Trading Intelligence · IDX
+            </div>
+            <h1 style="color: #f3f4f6; font-size: 42px;
+                font-weight: 800; margin: 0 0 12px 0;
+                line-height: 1.15; letter-spacing: -0.02em;">
+                QuantRisk <span style="color: #00ffcc;">Pro</span>
+            </h1>
+            <p style="color: #94a3b8; font-size: 16px;
+                line-height: 1.6; max-width: 720px; margin: 0 0 28px 0;">
+                Platform analisis saham institusional untuk Bursa Efek Indonesia.
+                Kombinasi <b style="color:#cbd5e1;">analisis teknikal kuantitatif</b>,
+                <b style="color:#cbd5e1;">bandarmology</b>, dan
+                <b style="color:#cbd5e1;">AI insight</b> dalam satu dashboard terintegrasi.
+            </p>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <span style="background: #1e293b; color: #cbd5e1;
+                    padding: 6px 12px; border-radius: 6px;
+                    font-size: 11px; font-weight: 500;
+                    border-left: 2px solid #00ffcc;">
+                    🧬 V12 Adaptive Engine</span>
+                <span style="background: #1e293b; color: #cbd5e1;
+                    padding: 6px 12px; border-radius: 6px;
+                    font-size: 11px; font-weight: 500;
+                    border-left: 2px solid #a855f7;">
+                    🤖 Gemini AI Insight</span>
+                <span style="background: #1e293b; color: #cbd5e1;
+                    padding: 6px 12px; border-radius: 6px;
+                    font-size: 11px; font-weight: 500;
+                    border-left: 2px solid #10b981;">
+                    🐋 Bandarmology</span>
+                <span style="background: #1e293b; color: #cbd5e1;
+                    padding: 6px 12px; border-radius: 6px;
+                    font-size: 11px; font-weight: 500;
+                    border-left: 2px solid #f59e0b;">
+                    🎲 Monte Carlo Simulation</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.subheader("🏆 Track Record System (Win Rate Live Engine)")
-    st.caption("Statistik akurasi sinyal berdasarkan evaluasi outcome riil yang tersimpan di `riwayat_actual`.")
+    # ═══════════════════════════════════════════════════════════
+    # CAPABILITIES GRID
+    # ═══════════════════════════════════════════════════════════
+    st.markdown("""
+    <div style="margin: 0 0 16px 0;">
+        <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Capabilities</span>
+        <span style="color:#64748b; font-size:12px; margin-left:10px;">
+            — Everything you need for data-driven trading decisions</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    def _feature_card(icon, title, desc, color):
+        return f"""
+        <div style="background: linear-gradient(135deg, #1a1d24 0%, #0f1116 100%);
+            border: 1px solid #262626; border-radius: 12px;
+            padding: 20px 18px; height: 100%;
+            position: relative; overflow: hidden;">
+            <div style="position: absolute; top: 0; left: 0;
+                width: 3px; height: 100%; background: {color};"></div>
+            <div style="font-size: 24px; margin-bottom: 10px;">{icon}</div>
+            <div style="color: #f3f4f6; font-size: 14px; font-weight: 700;
+                margin-bottom: 6px; letter-spacing: 0.02em;">{title}</div>
+            <div style="color: #94a3b8; font-size: 12px; line-height: 1.5;">{desc}</div>
+        </div>
+        """
+
+    r1c1, r1c2, r1c3 = st.columns(3)
+    with r1c1:
+        st.markdown(_feature_card("📊", "Technical Analysis",
+            "EMA, RSI, ADX, Z-Score, Coppock Curve, and multi-timeframe momentum analysis.",
+            "#00ffcc"), unsafe_allow_html=True)
+    with r1c2:
+        st.markdown(_feature_card("🐋", "Bandarmology",
+            "Broker flow tracking, Bandar vs Retail composition, and foreign net flow monitoring.",
+            "#a855f7"), unsafe_allow_html=True)
+    with r1c3:
+        st.markdown(_feature_card("🤖", "AI-Powered Insight",
+            "Gemini analyzes news sentiment, technicals, and broker flow holistically.",
+            "#8b5cf6"), unsafe_allow_html=True)
+
+    st.markdown('<div style="height: 12px;"></div>', unsafe_allow_html=True)
+
+    r2c1, r2c2, r2c3 = st.columns(3)
+    with r2c1:
+        st.markdown(_feature_card("🎯", "Backtest & Risk",
+            "Win rate, Sharpe ratio, max drawdown, and Kelly criterion position sizing.",
+            "#10b981"), unsafe_allow_html=True)
+    with r2c2:
+        st.markdown(_feature_card("🎲", "Monte Carlo",
+            "Regime-switching simulation for probability-based price forecasting.",
+            "#f59e0b"), unsafe_allow_html=True)
+    with r2c3:
+        st.markdown(_feature_card("📰", "News Sentiment",
+            "IDX Fin-Lexicon + VADER hybrid scoring, filtered for ticker relevance.",
+            "#06b6d4"), unsafe_allow_html=True)
+
+    # ═══════════════════════════════════════════════════════════
+    # PERFORMANCE METRICS
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin: 0 0 16px 0;">
+        <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Performance Metrics</span>
+        <span style="color:#64748b; font-size:12px; margin-left:10px;">
+            — Live engine track record from evaluated signals</span>
+    </div>
+    """, unsafe_allow_html=True)
 
     stats_actual = hitung_statistik_riwayat_actual(st.session_state.get('riwayat_actual', {}))
-    
-    if stats_actual and stats_actual['total_eval'] > 0:
-        c_wr1, c_wr2, c_wr3, c_wr4 = st.columns(4)
-        
-        wr_val = stats_actual['win_rate']
-        c_wr1.metric(
-            "System Win Rate",
-            f"{wr_val:.1f}%",
-            delta=f"{stats_actual['total_eval']} Sinyal Ter-evaluasi",
-            delta_color="normal" if wr_val >= 50 else "inverse"
-        )
-        
-        c_wr2.metric(
-            "Hasil Evaluation",
-            f"🟢 {stats_actual['total_win']} Win / 🔴 {stats_actual['total_loss']} Loss",
-            delta=f"⚪ {stats_actual['total_not_touched']} Not Touched" if stats_actual['total_not_touched'] > 0 else None,
-            delta_color="off"
-        )
-        
-        sw_text = f"{stats_actual['wr_sw']:.1f}% ({stats_actual['eval_sw']} trade)" if stats_actual['wr_sw'] is not None else "Belum ada data"
-        c_wr3.metric(
-            "Swing Trade Win Rate",
-            sw_text
-        )
-        
-        dt_text = f"{stats_actual['wr_dt']:.1f}% ({stats_actual['eval_dt']} trade)" if stats_actual['wr_dt'] is not None else "Belum ada data"
-        c_wr4.metric(
-            "Day Trade Win Rate",
-            dt_text
-        )
-    else:
-        st.info("ℹ️ Belum ada data outcome riil di `riwayat_actual`. Isi **Form Evaluasi Sinyal (Outcome Journal)** setelah sinyal berjalan untuk merekam Win Rate live engine.")
 
-    st.markdown("---")
-    st.subheader("📈 Informasi Pasar Terkini (IHSG)")
+    if stats_actual and stats_actual['total_eval'] > 0:
+        wr_val = stats_actual['win_rate']
+        wr_color = "#10b981" if wr_val >= 50 else "#ef4444"
+        wr_icon = "📈" if wr_val >= 50 else "📉"
+
+        def _stat_card(label, value, sublabel, color, icon=""):
+            return f"""
+            <div style="background: linear-gradient(135deg, #1a1d24 0%, #0f1116 100%);
+                border: 1px solid #262626; border-radius: 12px;
+                padding: 20px 18px; height: 100%;">
+                <div style="color:#64748b; font-size:10px; text-transform:uppercase;
+                    letter-spacing:1.2px; font-weight:600; margin-bottom:8px;">
+                    {icon} {label}</div>
+                <div style="color:{color}; font-size:28px; font-weight:800;
+                    line-height:1; letter-spacing:-0.02em;">{value}</div>
+                <div style="color:#94a3b8; font-size:11px; margin-top:6px;">{sublabel}</div>
+            </div>
+            """
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        with sc1:
+            st.markdown(_stat_card(
+                "System Win Rate", f"{wr_val:.1f}%",
+                f"{stats_actual['total_eval']} evaluated signals",
+                wr_color, wr_icon), unsafe_allow_html=True)
+        with sc2:
+            st.markdown(_stat_card(
+                "Win / Loss", f"{stats_actual['total_win']} / {stats_actual['total_loss']}",
+                f"{stats_actual['total_not_touched']} not touched",
+                "#00ffcc", "🏆"), unsafe_allow_html=True)
+        with sc3:
+            sw_txt = f"{stats_actual['wr_sw']:.1f}%" if stats_actual['wr_sw'] is not None else "—"
+            sw_sub = f"{stats_actual['eval_sw']} trades" if stats_actual['eval_sw'] > 0 else "No data yet"
+            sw_col = "#a855f7" if stats_actual['wr_sw'] is not None else "#64748b"
+            st.markdown(_stat_card("Swing Win Rate", sw_txt, sw_sub, sw_col, "📆"), unsafe_allow_html=True)
+        with sc4:
+            dt_txt = f"{stats_actual['wr_dt']:.1f}%" if stats_actual['wr_dt'] is not None else "—"
+            dt_sub = f"{stats_actual['eval_dt']} trades" if stats_actual['eval_dt'] > 0 else "No data yet"
+            dt_col = "#06b6d4" if stats_actual['wr_dt'] is not None else "#64748b"
+            st.markdown(_stat_card("Day Trade Win Rate", dt_txt, dt_sub, dt_col, "⏱️"), unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background:#1a1d24; border:1px dashed #334155;
+            border-radius:12px; padding:28px 24px; text-align:center;">
+            <div style="font-size:32px; margin-bottom:10px;">📊</div>
+            <div style="color:#cbd5e1; font-size:14px; font-weight:600; margin-bottom:6px;">
+                No evaluation data yet</div>
+            <div style="color:#64748b; font-size:12px; line-height:1.6; max-width:520px; margin:0 auto;">
+                Run your first analysis, then fill in the <b style="color:#94a3b8;">Quick Outcome Journal</b>
+                after the signal plays out to start tracking live engine performance.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ═══════════════════════════════════════════════════════════
+    # QUICK START
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin: 0 0 16px 0;">
+        <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Quick Start</span>
+        <span style="color:#64748b; font-size:12px; margin-left:10px;">
+            — Get your first signal in 3 steps</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    steps = [
+        ("01", "Enter Ticker", "Type the IDX stock code in the sidebar (e.g., BBRI, TLKM, BMRI).", "#00ffcc"),
+        ("02", "Optional Context", "Add current price, fee settings, or mark your position if you already own it.", "#a855f7"),
+        ("03", "Run Analysis", "Click ANALISIS to get signal, RRR, AI insight, and bandarmology data.", "#10b981"),
+    ]
+    step_cols = st.columns(3)
+    for col, (num, title, desc, color) in zip(step_cols, steps):
+        with col:
+            st.markdown(f"""
+            <div style="background: #1a1d24; border: 1px solid #262626;
+                border-radius: 12px; padding: 20px 18px; height: 100%;">
+                <div style="display: inline-block;
+                    background: {color}20; color: {color};
+                    font-size: 11px; font-weight: 700;
+                    padding: 4px 12px; border-radius: 4px;
+                    margin-bottom: 12px; letter-spacing: 1px;">
+                    STEP {num}</div>
+                <div style="color:#f3f4f6; font-size:14px; font-weight:700;
+                    margin-bottom:6px;">{title}</div>
+                <div style="color:#94a3b8; font-size:12px; line-height:1.5;">{desc}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ═══════════════════════════════════════════════════════════
+    # MARKET SNAPSHOT (IHSG) — Keep existing functionality
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin: 0 0 16px 0;">
+        <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Market Snapshot</span>
+        <span style="color:#64748b; font-size:12px; margin-left:10px;">
+            — Live IHSG data</span>
+    </div>
+    """, unsafe_allow_html=True)
 
     periode_pilihan = st.selectbox(
         "Periode data IHSG:",
@@ -9634,6 +9856,22 @@ else:
             st.warning("Data IHSG tidak tersedia untuk periode yang dipilih.")
     except Exception as e:
         st.error(f"Gagal memuat data IHSG: {e}")
+
+    # ═══════════════════════════════════════════════════════════
+    # FOOTER DISCLAIMER
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 24px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="background:#1a1d24; border-left:3px solid #64748b;
+        border-radius:8px; padding:14px 20px; margin-top:8px;">
+        <div style="color:#94a3b8; font-size:11px; line-height:1.7;">
+            <b style="color:#cbd5e1;">⚠️ Disclaimer:</b>
+            QuantRisk Pro merupakan alat bantu analisis kuantitatif berbasis data historis.
+            Hasil analisis bukan rekomendasi investasi. Semua keputusan trading dan investasi
+            sepenuhnya tanggung jawab pengguna. Data historis tidak menjamin performa masa depan.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
         
 # --- ANALISIS RIWAYAT DENGAN AI (TOMBOL SIDEBAR) ---
 if ai_riwayat_btn:
