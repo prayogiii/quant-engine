@@ -1074,7 +1074,7 @@ def klasifikasi_broker(broker_code, volume_lot, freq=None):
             return "Retail", "🧑"
         else:
             return "Mixed", "⚖️"
-
+    return "Mixed", "⚖️"
 def enrich_broker_kategori(res_json):
     """
     Tambahkan field 'kategori' + 'kategori_icon' ke setiap item
@@ -9684,7 +9684,7 @@ else:
                 <div style="color:#94a3b8; font-size:12px; line-height:1.5;">{desc}</div>
             </div>
             """, unsafe_allow_html=True)
-    # ═══════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
     # RECENT SIGNALS — Last 6 analyses
     # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
@@ -9699,7 +9699,6 @@ else:
     """, unsafe_allow_html=True)
 
     riwayat_recent = st.session_state.get('riwayat', []) or []
-    # Ambil 6 terbaru (skip yang mode DT/SW duplikat — ambil unique per waktu+saham)
     seen_keys = set()
     recent_signals = []
     for r in riwayat_recent:
@@ -9712,7 +9711,6 @@ else:
             break
 
     if recent_signals:
-        # Render 3 kolom x 2 baris
         for row_start in range(0, len(recent_signals), 3):
             row_items = recent_signals[row_start:row_start + 3]
             sig_cols = st.columns(3)
@@ -9726,7 +9724,6 @@ else:
                     score = r.get('Score', '?')
                     rrr = r.get('RRR', '?')
 
-                    # Warna berdasarkan sinyal
                     if "STRONG BUY" in sinyal:
                         s_color, s_icon, s_label = "#10b981", "🔥", "STRONG BUY"
                     elif "BUY" in sinyal:
@@ -9740,7 +9737,6 @@ else:
                     gaya_color = "#06b6d4" if gaya == "DT" else "#a855f7"
                     waktu_short = waktu.split()[1] if len(waktu.split()) > 1 else waktu
 
-                    # Cek outcome jika ada
                     actual_data = (
                         st.session_state.riwayat_actual.get((waktu, saham, gaya)) or
                         st.session_state.riwayat_actual.get((waktu, saham, "daytrade" if gaya == "DT" else "swing")) or
@@ -9756,50 +9752,38 @@ else:
                         elif out == 'Loss':
                             outcome_badge = '<span style="background:#ef444420;color:#ef4444;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✗ LOSS</span>'
 
-                    st.markdown(f"""
-                    <div style="background:linear-gradient(135deg,#1a1d24 0%,#0f1116 100%);
-                        border:1px solid #262626; border-radius:12px;
-                        padding:14px 16px; margin-bottom:12px;
-                        border-left:3px solid {s_color};">
-                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <span style="color:#f3f4f6; font-size:16px; font-weight:800;
-                                    letter-spacing:0.02em;">{saham}</span>
-                                <span style="color:{gaya_color}; font-size:9px; font-weight:700;
-                                    padding:2px 6px; background:{gaya_color}15;
-                                    border-radius:4px; letter-spacing:0.5px;">
-                                    {gaya_icon} {gaya}</span>
-                            </div>
-                            <div style="color:#64748b; font-size:9px;">{waktu_short}</div>
-                        </div>
-                        <div style="display:flex; align-items:center; margin-bottom:10px;">
-                            <span style="color:{s_color}; font-size:11px; font-weight:700;">
-                                {s_icon} {s_label}</span>
-                            {outcome_badge}
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;
-                            padding-top:8px; border-top:1px solid #1e293b;">
-                            <div>
-                                <div style="color:#64748b; font-size:8px; text-transform:uppercase;
-                                    letter-spacing:0.5px;">Price</div>
-                                <div style="color:#e2e8f0; font-size:11px; font-weight:600;
-                                    margin-top:2px;">Rp {harga}</div>
-                            </div>
-                            <div>
-                                <div style="color:#64748b; font-size:8px; text-transform:uppercase;
-                                    letter-spacing:0.5px;">RRR</div>
-                                <div style="color:#e2e8f0; font-size:11px; font-weight:600;
-                                    margin-top:2px;">{rrr}</div>
-                            </div>
-                            <div>
-                                <div style="color:#64748b; font-size:8px; text-transform:uppercase;
-                                    letter-spacing:0.5px;">Score</div>
-                                <div style="color:#e2e8f0; font-size:11px; font-weight:600;
-                                    margin-top:2px;">{score}</div>
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    # ═══ PAKAI textwrap.dedent UNTUK HAPUS INDENTASI ═══
+                    import textwrap as _tw
+                    card_html = f"""
+<div style="background:linear-gradient(135deg,#1a1d24 0%,#0f1116 100%);border:1px solid #262626;border-radius:12px;padding:14px 16px;margin-bottom:12px;border-left:3px solid {s_color};">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+<div style="display:flex;align-items:center;gap:6px;">
+<span style="color:#f3f4f6;font-size:16px;font-weight:800;letter-spacing:0.02em;">{saham}</span>
+<span style="color:{gaya_color};font-size:9px;font-weight:700;padding:2px 6px;background:{gaya_color}15;border-radius:4px;letter-spacing:0.5px;">{gaya_icon} {gaya}</span>
+</div>
+<div style="color:#64748b;font-size:9px;">{waktu_short}</div>
+</div>
+<div style="display:flex;align-items:center;margin-bottom:10px;">
+<span style="color:{s_color};font-size:11px;font-weight:700;">{s_icon} {s_label}</span>
+{outcome_badge}
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;padding-top:8px;border-top:1px solid #1e293b;">
+<div>
+<div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;">Price</div>
+<div style="color:#e2e8f0;font-size:11px;font-weight:600;margin-top:2px;">Rp {harga}</div>
+</div>
+<div>
+<div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;">RRR</div>
+<div style="color:#e2e8f0;font-size:11px;font-weight:600;margin-top:2px;">{rrr}</div>
+</div>
+<div>
+<div style="color:#64748b;font-size:8px;text-transform:uppercase;letter-spacing:0.5px;">Score</div>
+<div style="color:#e2e8f0;font-size:11px;font-weight:600;margin-top:2px;">{score}</div>
+</div>
+</div>
+</div>
+"""
+                    st.markdown(card_html, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div style="background:#1a1d24; border:1px dashed #334155;
