@@ -6215,7 +6215,7 @@ _COMPANY_STOPWORDS = {
     "the", "and", "of", "co", "ltd", "inc", "corp", "corporation",
     "group", "holdings", "holding", "international", "investments",
     "investment", "capital", "nusantara", "nasional", "utama", "global",
-    # ── Tambahan: kata generik yang terlalu umum di banyak emiten ──
+    # ── Kata generik yang terlalu umum di banyak emiten ──
     "bank", "finance", "financial", "securities", "sekuritas",
     "energi", "energy", "resources", "mining", "tambang",
     "telekomunikasi", "telecom", "property", "properti",
@@ -6223,6 +6223,10 @@ _COMPANY_STOPWORDS = {
     "multinational", "multi", "sentral", "prima", "jaya",
     "inti", "bumi", "sumber", "karya", "buana", "makmur",
     "graha", "mitra", "sarana", "dharma", "putra", "kencana",
+    # ── BARU: kata umum nama media/penerbit ──
+    "media", "pers", "news", "kabar", "warta", "harian",
+    "koran", "tabloid", "portal", "online", "times", "post",
+    "tribune", "daily", "today",
 }
 
 def _build_ticker_keywords(ticker_raw, ticker_info=None):
@@ -6250,9 +6254,8 @@ def _build_ticker_keywords(ticker_raw, ticker_info=None):
 def filter_relevant(news_list, ticker, ticker_info=None):
     """
     Filter berita relevan — 3 tier bertingkat (strict → medium → fallback).
-    - Tier 1: ticker ATAU kata spesifik (>=5 char, word boundary)
-    - Tier 2: semua keyword (word boundary, anti-partial match)
-    - Fallback: kalau hasil < 2, ambil 2 teratas dari news_list
+    FIX: Strip suffix ' - Nama Media' dari title sebelum matching,
+    supaya nama media tidak salah dianggap sebagai kata kunci saham.
     """
     if not news_list:
         return []
@@ -6261,7 +6264,33 @@ def filter_relevant(news_list, ticker, ticker_info=None):
     if not ticker_clean:
         return news_list
 
-    # ═══ Bangun 2 tier keyword ═══
+    # ═══════════════════════════════════════════════════════════
+    # FIX: Helper untuk strip ' - Nama Media' dari judul
+    # Contoh: "Putri Anwar Menikah - Tempo.co" → "Putri Anwar Menikah"
+    # ═══════════════════════════════════════════════════════════
+    def _strip_source_suffix(title):
+        """Strip suffix ' - Nama Media' dari judul Google News."""
+        # Format umum: "Judul Berita - Nama Media"
+        # Handle juga: "Judul Berita - Nama Media.com"
+        parts = title.rsplit(' - ', 1)
+        if len(parts) == 2:
+            source_candidate = parts[1].strip()
+            # Kalau suffix ≤ 4 kata, anggap itu nama media (bukan bagian judul)
+            if 0 < len(source_candidate.split()) <= 4:
+                return parts[0]
+        return title
+
+    def _clean_text_for_match(n):
+        """Bangun teks untuk matching: title (tanpa suffix) + summary."""
+        title = n.get('title', '') or ''
+        title_clean = _strip_source_suffix(title)
+        summary = n.get('summary', '') or ''
+        # Summary kadang ada ember "Full Story..." di akhir, cukup dipakai mentah
+        return (title_clean + ' ' + summary).lower()
+
+    # ═══════════════════════════════════════════════════════════
+    # Bangun 2 tier keyword
+    # ═══════════════════════════════════════════════════════════
     strong_keywords = {ticker_clean.lower()}
     weak_keywords = {ticker_clean.lower()}
 
@@ -6288,7 +6317,7 @@ def filter_relevant(news_list, ticker, ticker_info=None):
     # ═══ Tier 1 — strict ═══
     tier1 = []
     for n in news_list:
-        text = (n.get('title', '') + ' ' + n.get('summary', '')).lower()
+        text = _clean_text_for_match(n)
         if _match(text, strong_keywords) >= 1:
             tier1.append(n)
 
@@ -6298,7 +6327,7 @@ def filter_relevant(news_list, ticker, ticker_info=None):
     # ═══ Tier 2 — medium ═══
     tier2 = []
     for n in news_list:
-        text = (n.get('title', '') + ' ' + n.get('summary', '')).lower()
+        text = _clean_text_for_match(n)
         if _match(text, weak_keywords) >= 1:
             tier2.append(n)
 
@@ -6309,11 +6338,7 @@ def filter_relevant(news_list, ticker, ticker_info=None):
             seen.add(n['title'])
             combined.append(n)
 
-    if combined:
-        return combined
-
-    # ═══ Fallback — ambil 2 teratas ═══
-    return news_list[:2]
+    return combined
 
 # ═══════════════════════════════════════════════════════════════
 # IDX FIN-LEXICON — Kamus Pasar Modal Indonesia
