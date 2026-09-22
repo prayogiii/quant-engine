@@ -7381,7 +7381,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         # ── GBM Bullish: drift berbasis momentum 5D harian (annualized → per-step) ──
         mom5d_raw  = df['Mom5D'].iloc[-1] if 'Mom5D' in df.columns else 0.0
         # Konversi: Mom5D adalah pct change 5D, bagi 5 → per-hari, lalu clamp +0.1%~+1%
-        drift_daily = float(np.clip(mom5d_raw / 500.0, 0.001, 0.010))
+        drift_daily = float(np.clip(mom5d_raw / 500.0, 0.0005, 0.005)) * 0.6
         mc_regime_label = "GBM Bullish 🚀"
         for step in range(n_steps):
             inov        = student_t.rvs(df_est, loc=0, scale=scale_corrected, size=n_sim)
@@ -7408,28 +7408,74 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             current_log = current_log + theta_ou * (locked_log_mean20 - current_log) + inov
             paths[step] = np.exp(current_log)
 
-    final_prices = paths[-1, :]
-    est_besok = float(np.median(final_prices))
-    if "STRONG BUY" in signal:
-        est_besok_sinyal = float(np.percentile(final_prices, 75))
-    elif "BUY" in signal:
-        est_besok_sinyal = float(np.percentile(final_prices, 65))
-    elif "HOLD" in signal:
-        est_besok_sinyal = float(np.percentile(final_prices, 50))
-    else:
-        est_besok_sinyal = float(np.percentile(final_prices, 35))
-
-    low_est, up_est = float(np.percentile(final_prices, 25)), float(np.percentile(final_prices, 75))
-    prob_bull = (final_prices > harga_terakhir).mean() * 100
-    hit_tp    = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
-    hit_sl    = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
-
     if is_daytrade:
-        estimasi_label = "Estimasi Sesi Berikutnya"
-        prob_label = "Prob Naik Sesi Berikutnya"
+        # ═══ DT: horizon tunggal = sisa sesi ini ═══
+        final_prices = paths[-1, :]
+        est_besok        = float(np.median(final_prices))
+        low_est          = float(np.percentile(final_prices, 25))
+        up_est           = float(np.percentile(final_prices, 75))
+        prob_bull        = (final_prices > harga_terakhir).mean() * 100
+        if "STRONG BUY" in signal:
+            est_besok_sinyal = float(np.percentile(final_prices, 75))
+        elif "BUY" in signal:
+            est_besok_sinyal = float(np.percentile(final_prices, 65))
+        elif "HOLD" in signal:
+            est_besok_sinyal = float(np.percentile(final_prices, 50))
+        else:
+            est_besok_sinyal = float(np.percentile(final_prices, 35))
+
+        # Alias supaya konsisten (DT tidak punya horizon 30d)
+        est_30d          = est_besok
+        low_est_30d      = low_est
+        up_est_30d       = up_est
+        prob_bull_30d    = prob_bull
+        est_30d_sinyal   = est_besok_sinyal
+
+        estimasi_label     = "Estimasi Sesi Berikutnya"
+        prob_label         = "Prob Naik Sesi Berikutnya"
+        estimasi_30d_label = None        # DT: tidak ada outlook 30d
+        prob_30d_label     = None
+
     else:
-        estimasi_label = "Estimasi Besok"
-        prob_label = "Prob Naik Besok"
+        # ═══ SWING: DUAL HORIZON (A + B) ═══
+        # ── Horizon 1: BESOK (paths[0, :]) ──
+        prices_besok = paths[0, :]
+        est_besok        = float(np.median(prices_besok))
+        low_est          = float(np.percentile(prices_besok, 25))
+        up_est           = float(np.percentile(prices_besok, 75))
+        prob_bull        = (prices_besok > harga_terakhir).mean() * 100
+        if "STRONG BUY" in signal:
+            est_besok_sinyal = float(np.percentile(prices_besok, 75))
+        elif "BUY" in signal:
+            est_besok_sinyal = float(np.percentile(prices_besok, 65))
+        elif "HOLD" in signal:
+            est_besok_sinyal = float(np.percentile(prices_besok, 50))
+        else:
+            est_besok_sinyal = float(np.percentile(prices_besok, 35))
+
+        # ── Horizon 2: 30 HARI (paths[-1, :]) ──
+        prices_30d = paths[-1, :]
+        est_30d          = float(np.median(prices_30d))
+        low_est_30d      = float(np.percentile(prices_30d, 25))
+        up_est_30d       = float(np.percentile(prices_30d, 75))
+        prob_bull_30d    = (prices_30d > harga_terakhir).mean() * 100
+        if "STRONG BUY" in signal:
+            est_30d_sinyal = float(np.percentile(prices_30d, 75))
+        elif "BUY" in signal:
+            est_30d_sinyal = float(np.percentile(prices_30d, 65))
+        elif "HOLD" in signal:
+            est_30d_sinyal = float(np.percentile(prices_30d, 50))
+        else:
+            est_30d_sinyal = float(np.percentile(prices_30d, 35))
+
+        estimasi_label     = "Estimasi Besok"
+        prob_label         = "Prob Naik Besok"
+        estimasi_30d_label = "Outlook 30 Hari"
+        prob_30d_label     = "Prob Naik 30 Hari"
+
+    # hit_tp & hit_sl tetap pakai seluruh jalur (valid untuk kedua horizon)
+    hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
+    hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
 
     # ------------------------------------------------------------------
     # 17. METRIK TAMBAHAN
@@ -7513,6 +7559,10 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     tp_low_f = fraksi_bei(tp_low)
     tp_high_f = fraksi_bei(tp_high)
     sl_harga_f = fraksi_bei(sl_harga)
+    est_30d_f        = fraksi_bei(est_30d)
+    est_30d_sinyal_f = fraksi_bei(est_30d_sinyal)
+    low_est_30d_f    = fraksi_bei(low_est_30d)
+    up_est_30d_f     = fraksi_bei(up_est_30d)
 
     # ------------------------------------------------------------------
     # 18. RINGKASAN UNTUK RIWAYAT
@@ -7661,6 +7711,18 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     result["sudah_beli"] = sudah_beli
     result["harga_beli_float"] = harga_beli_float
     result["df_est"] = df_est
+    # ═══ FIX: Simpan versi fraksi-bei untuk UI ═══
+    result["est_30d_f"]        = est_30d_f
+    result["est_30d_sinyal_f"] = est_30d_sinyal_f
+    result["low_est_30d_f"]    = low_est_30d_f
+    result["up_est_30d_f"]     = up_est_30d_f
+    result["est_30d"]          = est_30d
+    result["est_30d_sinyal"]   = est_30d_sinyal
+    result["low_est_30d"]      = low_est_30d
+    result["up_est_30d"]       = up_est_30d
+    result["prob_bull_30d"]    = prob_bull_30d
+    result["estimasi_30d_label"] = estimasi_30d_label
+    result["prob_30d_label"]     = prob_30d_label
     return result
 def display_analysis_result(res):
     # ===== AMBIL SEMUA VARIABEL DARI RES =====
@@ -7771,6 +7833,26 @@ def display_analysis_result(res):
             delta=f"{((est_besok_sinyal_f - harga_terakhir) / harga_terakhir * 100):+.2f}%"
         )
     col3.metric(prob_label, f"{prob_bull:.1f}%")
+    # ═══ OUTLOOK 30 HARI — hanya untuk Swing ═══
+    if not is_daytrade and res.get('estimasi_30d_label'):
+        st.markdown(
+            f"<div style='color:#94a3b8; font-size:11px; text-transform:uppercase; "
+            f"letter-spacing:1px; margin-top:12px; margin-bottom:4px;'>"
+            f"📅 {res['estimasi_30d_label']}</div>",
+            unsafe_allow_html=True
+        )
+        o1, o2, o3 = st.columns(3)
+        o1.metric(
+            f"{res['estimasi_30d_label']} (Netral)",
+            f"Rp {res['est_30d_f']:,.0f}",
+            delta=f"Range: Rp {res['low_est_30d_f']:,.0f} - {res['up_est_30d_f']:,.0f}"
+        )
+        o2.metric(
+            f"{res['estimasi_30d_label']} (Sinyal)",
+            f"Rp {res['est_30d_sinyal_f']:,.0f}",
+            delta=f"{((res['est_30d_sinyal_f'] - harga_terakhir) / harga_terakhir * 100):+.2f}%"
+        )
+        o3.metric(res['prob_30d_label'], f"{res['prob_bull_30d']:.1f}%")
 
     # ===== GRAFIK =====
     if PLOTLY_AVAILABLE:
