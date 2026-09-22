@@ -9684,7 +9684,319 @@ else:
                 <div style="color:#94a3b8; font-size:12px; line-height:1.5;">{desc}</div>
             </div>
             """, unsafe_allow_html=True)
+    # ═══════════════════════════════════════════════════════════
+    # RECENT SIGNALS — Last 6 analyses
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin: 0 0 16px 0; display:flex; justify-content:space-between; align-items:baseline;">
+        <div>
+            <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Recent Signals</span>
+            <span style="color:#64748b; font-size:12px; margin-left:10px;">
+                — Latest 6 analyses</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
+    riwayat_recent = st.session_state.get('riwayat', []) or []
+    # Ambil 6 terbaru (skip yang mode DT/SW duplikat — ambil unique per waktu+saham)
+    seen_keys = set()
+    recent_signals = []
+    for r in riwayat_recent:
+        key = (r.get('Waktu', ''), r.get('Saham', ''))
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        recent_signals.append(r)
+        if len(recent_signals) >= 6:
+            break
+
+    if recent_signals:
+        # Render 3 kolom x 2 baris
+        for row_start in range(0, len(recent_signals), 3):
+            row_items = recent_signals[row_start:row_start + 3]
+            sig_cols = st.columns(3)
+            for col, r in zip(sig_cols, row_items):
+                with col:
+                    saham = r.get('Saham', '?')
+                    sinyal = r.get('Sinyal', '?')
+                    harga = r.get('Harga', '?')
+                    waktu = r.get('Waktu', '?')
+                    gaya = r.get('Gaya', 'SW')
+                    score = r.get('Score', '?')
+                    rrr = r.get('RRR', '?')
+
+                    # Warna berdasarkan sinyal
+                    if "STRONG BUY" in sinyal:
+                        s_color, s_icon, s_label = "#10b981", "🔥", "STRONG BUY"
+                    elif "BUY" in sinyal:
+                        s_color, s_icon, s_label = "#84cc16", "⚡", "BUY"
+                    elif "HOLD" in sinyal:
+                        s_color, s_icon, s_label = "#3b82f6", "⏸️", "HOLD"
+                    else:
+                        s_color, s_icon, s_label = "#ef4444", "🚨", "AVOID"
+
+                    gaya_icon = "⏱️" if gaya == "DT" else "📆"
+                    gaya_color = "#06b6d4" if gaya == "DT" else "#a855f7"
+                    waktu_short = waktu.split()[1] if len(waktu.split()) > 1 else waktu
+
+                    # Cek outcome jika ada
+                    actual_data = (
+                        st.session_state.riwayat_actual.get((waktu, saham, gaya)) or
+                        st.session_state.riwayat_actual.get((waktu, saham, "daytrade" if gaya == "DT" else "swing")) or
+                        st.session_state.riwayat_actual.get((waktu, saham))
+                    )
+                    outcome_badge = ""
+                    if actual_data:
+                        out = actual_data.get('Outcome', '')
+                        if actual_data.get('Entry_Miss') == 'Yes' or out == 'Not Touched':
+                            outcome_badge = '<span style="background:#94a3b820;color:#94a3b8;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">NOT TOUCHED</span>'
+                        elif out == 'Win':
+                            outcome_badge = '<span style="background:#10b98120;color:#10b981;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✓ WIN</span>'
+                        elif out == 'Loss':
+                            outcome_badge = '<span style="background:#ef444420;color:#ef4444;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✗ LOSS</span>'
+
+                    st.markdown(f"""
+                    <div style="background:linear-gradient(135deg,#1a1d24 0%,#0f1116 100%);
+                        border:1px solid #262626; border-radius:12px;
+                        padding:14px 16px; margin-bottom:12px;
+                        border-left:3px solid {s_color};">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span style="color:#f3f4f6; font-size:16px; font-weight:800;
+                                    letter-spacing:0.02em;">{saham}</span>
+                                <span style="color:{gaya_color}; font-size:9px; font-weight:700;
+                                    padding:2px 6px; background:{gaya_color}15;
+                                    border-radius:4px; letter-spacing:0.5px;">
+                                    {gaya_icon} {gaya}</span>
+                            </div>
+                            <div style="color:#64748b; font-size:9px;">{waktu_short}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; margin-bottom:10px;">
+                            <span style="color:{s_color}; font-size:11px; font-weight:700;">
+                                {s_icon} {s_label}</span>
+                            {outcome_badge}
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;
+                            padding-top:8px; border-top:1px solid #1e293b;">
+                            <div>
+                                <div style="color:#64748b; font-size:8px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">Price</div>
+                                <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                    margin-top:2px;">Rp {harga}</div>
+                            </div>
+                            <div>
+                                <div style="color:#64748b; font-size:8px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">RRR</div>
+                                <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                    margin-top:2px;">{rrr}</div>
+                            </div>
+                            <div>
+                                <div style="color:#64748b; font-size:8px; text-transform:uppercase;
+                                    letter-spacing:0.5px;">Score</div>
+                                <div style="color:#e2e8f0; font-size:11px; font-weight:600;
+                                    margin-top:2px;">{score}</div>
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style="background:#1a1d24; border:1px dashed #334155;
+            border-radius:12px; padding:24px; text-align:center;">
+            <div style="font-size:28px; margin-bottom:8px;">📡</div>
+            <div style="color:#cbd5e1; font-size:13px; font-weight:600; margin-bottom:4px;">
+                No signals yet</div>
+            <div style="color:#64748b; font-size:11px;">
+                Run your first analysis to see recent signals here.</div>
+        </div>
+        """, unsafe_allow_html=True)
+    # ═══════════════════════════════════════════════════════════
+    # TOP BROKERS THIS WEEK — Aggregate from broksum_history
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin: 0 0 16px 0;">
+        <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Top Brokers This Week</span>
+        <span style="color:#64748b; font-size:12px; margin-left:10px;">
+            — Most active brokers in the last 7 days</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def _get_top_brokers_week():
+        """Ambil broksum 7 hari terakhir, agregasi top brokers by volume."""
+        try:
+            sheet = get_gsheet().worksheet("broksum_history")
+            records = sheet.get_all_records()
+        except Exception:
+            return None
+
+        from datetime import datetime as _dt, timedelta as _td
+        cutoff = _dt.now() - _td(days=7)
+        cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+        buyer_agg = {}   # {broker: {vol, count, tickers:set}}
+        seller_agg = {}
+
+        for rec in records:
+            up_date = str(rec.get('upload_date', ''))[:10]
+            if not up_date or up_date < cutoff_str:
+                continue
+
+            ticker = str(rec.get('ticker', '')).upper()
+            for side_key, agg in [("top_buyers", buyer_agg), ("top_sellers", seller_agg)]:
+                raw = rec.get(side_key, '[]')
+                try:
+                    items = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                except Exception:
+                    items = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    code = str(it.get('broker', '')).upper().strip()
+                    if not code:
+                        continue
+                    vol = float(it.get('volume_lot', 0) or 0)
+                    if code not in agg:
+                        agg[code] = {'vol': 0, 'count': 0, 'tickers': set()}
+                    agg[code]['vol'] += vol
+                    agg[code]['count'] += 1
+                    agg[code]['tickers'].add(ticker)
+
+        # Sort by volume
+        top_buyers = sorted(buyer_agg.items(), key=lambda x: x[1]['vol'], reverse=True)[:5]
+        top_sellers = sorted(seller_agg.items(), key=lambda x: x[1]['vol'], reverse=True)[:5]
+
+        return {
+            'buyers': top_buyers,
+            'sellers': top_sellers,
+            'n_records': len([r for r in records if str(r.get('upload_date', ''))[:10] >= cutoff_str]),
+        }
+
+    _broker_data = _get_top_brokers_week()
+
+    if _broker_data and (_broker_data['buyers'] or _broker_data['sellers']):
+        st.caption(f"📊 Aggregated from **{_broker_data['n_records']}** broksum uploads in the last 7 days")
+
+        col_buy, col_sell = st.columns(2)
+
+        with col_buy:
+            st.markdown("""
+            <div style="color:#10b981; font-size:12px; font-weight:700;
+                margin-bottom:10px; letter-spacing:0.5px; text-transform:uppercase;">
+                🟢 Top Buyers</div>
+            """, unsafe_allow_html=True)
+
+            if _broker_data['buyers']:
+                max_vol = _broker_data['buyers'][0][1]['vol'] or 1
+                for rank, (code, info) in enumerate(_broker_data['buyers'], 1):
+                    kat, icon = klasifikasi_broker(code, info['vol'])
+                    bar_pct = (info['vol'] / max_vol) * 100
+                    tickers_preview = ", ".join(sorted(info['tickers'])[:3])
+                    if len(info['tickers']) > 3:
+                        tickers_preview += f" +{len(info['tickers']) - 3}"
+
+                    # Warna berdasarkan kategori
+                    if kat == "Bandar":
+                        bar_color = "#a855f7"
+                    elif kat == "Retail":
+                        bar_color = "#f59e0b"
+                    else:
+                        bar_color = "#64748b"
+
+                    st.markdown(f"""
+                    <div style="background:#1a1d24; border:1px solid #262626;
+                        border-radius:8px; padding:10px 14px; margin-bottom:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="color:#64748b; font-size:10px; font-weight:700;
+                                    min-width:20px;">#{rank}</span>
+                                <span style="color:#f3f4f6; font-size:13px; font-weight:700;
+                                    letter-spacing:0.02em;">{code}</span>
+                                <span style="color:{bar_color}; font-size:10px; font-weight:600;">
+                                    {icon} {kat}</span>
+                            </div>
+                            <div style="color:#cbd5e1; font-size:11px; font-weight:600;">
+                                {info['vol']:,.0f} lot</div>
+                        </div>
+                        <div style="background:#0f1116; height:4px; border-radius:2px;
+                            overflow:hidden; margin-bottom:5px;">
+                            <div style="width:{bar_pct:.1f}%; height:100%;
+                                background:linear-gradient(90deg, {bar_color}, {bar_color}aa);
+                                border-radius:2px;"></div>
+                        </div>
+                        <div style="color:#64748b; font-size:9px;">
+                            {info['count']} appearance{'s' if info['count'] > 1 else ''} · {tickers_preview}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.caption("(No buyer data)")
+
+        with col_sell:
+            st.markdown("""
+            <div style="color:#ef4444; font-size:12px; font-weight:700;
+                margin-bottom:10px; letter-spacing:0.5px; text-transform:uppercase;">
+                🔴 Top Sellers</div>
+            """, unsafe_allow_html=True)
+
+            if _broker_data['sellers']:
+                max_vol = _broker_data['sellers'][0][1]['vol'] or 1
+                for rank, (code, info) in enumerate(_broker_data['sellers'], 1):
+                    kat, icon = klasifikasi_broker(code, info['vol'])
+                    bar_pct = (info['vol'] / max_vol) * 100
+                    tickers_preview = ", ".join(sorted(info['tickers'])[:3])
+                    if len(info['tickers']) > 3:
+                        tickers_preview += f" +{len(info['tickers']) - 3}"
+
+                    if kat == "Bandar":
+                        bar_color = "#a855f7"
+                    elif kat == "Retail":
+                        bar_color = "#f59e0b"
+                    else:
+                        bar_color = "#64748b"
+
+                    st.markdown(f"""
+                    <div style="background:#1a1d24; border:1px solid #262626;
+                        border-radius:8px; padding:10px 14px; margin-bottom:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="color:#64748b; font-size:10px; font-weight:700;
+                                    min-width:20px;">#{rank}</span>
+                                <span style="color:#f3f4f6; font-size:13px; font-weight:700;
+                                    letter-spacing:0.02em;">{code}</span>
+                                <span style="color:{bar_color}; font-size:10px; font-weight:600;">
+                                    {icon} {kat}</span>
+                            </div>
+                            <div style="color:#cbd5e1; font-size:11px; font-weight:600;">
+                                {info['vol']:,.0f} lot</div>
+                        </div>
+                        <div style="background:#0f1116; height:4px; border-radius:2px;
+                            overflow:hidden; margin-bottom:5px;">
+                            <div style="width:{bar_pct:.1f}%; height:100%;
+                                background:linear-gradient(90deg, {bar_color}, {bar_color}aa);
+                                border-radius:2px;"></div>
+                        </div>
+                        <div style="color:#64748b; font-size:9px;">
+                            {info['count']} appearance{'s' if info['count'] > 1 else ''} · {tickers_preview}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.caption("(No seller data)")
+
+    else:
+        st.markdown("""
+        <div style="background:#1a1d24; border:1px dashed #334155;
+            border-radius:12px; padding:24px; text-align:center;">
+            <div style="font-size:28px; margin-bottom:8px;">🐋</div>
+            <div style="color:#cbd5e1; font-size:13px; font-weight:600; margin-bottom:4px;">
+                No broker data this week</div>
+            <div style="color:#64748b; font-size:11px; line-height:1.6; max-width:520px; margin:0 auto;">
+                Upload Broksum screenshots via sidebar → <b style="color:#94a3b8;">📸 Scan Broksum</b>
+                to start aggregating broker activity.
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     # ═══════════════════════════════════════════════════════════
     # MARKET SNAPSHOT (IHSG) — Keep existing functionality
     # ═══════════════════════════════════════════════════════════
