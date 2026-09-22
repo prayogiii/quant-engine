@@ -5317,12 +5317,12 @@ with st.sidebar:
                         </div>
                         """, unsafe_allow_html=True)
 
-                        col_sw, col_dt = st.columns(2)
-                        render_mode_card(r_sw, "Swing", "📆", col_sw, f"g_{day}_{s_idx}")
-                        render_mode_card(r_dt, "Daytrade", "⏱️", col_dt, f"g_{day}_{s_idx}")
                         _riwayat_date = waktu[:10] if waktu else ""
                         _bs = _get_broksum_for_date(saham, _riwayat_date) if _riwayat_date else None
                         _render_broksum_net_insight(_bs)
+                        col_sw, col_dt = st.columns(2)
+                        render_mode_card(r_sw, "Swing", "📆", col_sw, f"g_{day}_{s_idx}")
+                        render_mode_card(r_dt, "Daytrade", "⏱️", col_dt, f"g_{day}_{s_idx}")
                         st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 
             st.caption(
