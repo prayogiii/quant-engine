@@ -6159,20 +6159,54 @@ def get_ipot_news(query, num=5):
         return news, None
     except Exception as e:
         return [], str(e)
+# Stopwords yang perlu dibuang dari nama perusahaan
+_COMPANY_STOPWORDS = {
+    "tbk", "pt", "persero", "perseroan", "terbuka", "indonesia",
+    "the", "and", "of", "co", "ltd", "inc", "corp", "corporation",
+    "group", "holdings", "holding", "international", "investments",
+    "investment", "capital", "nusantara", "nasional", "utama", "global",
+}
 
-def filter_relevant(news_list, ticker):
+def _build_ticker_keywords(ticker_raw, ticker_info=None):
     """
-    Filter ketat: WAJIB ada ticker di title atau summary.
-    Tidak ada fallback — kalau tidak ada berita relevan, return list kosong.
+    Bangun keyword list dari ticker + longName/shortName yfinance.
+    Contoh AYLS → ['ayls', 'arkayana', 'lestari', 'sentosa']
     """
-    ticker_low = str(ticker).lower().strip()
-    if not ticker_low:
+    keywords = set()
+    ticker_clean = str(ticker_raw).upper().replace(".JK", "").strip()
+    if not ticker_clean:
+        return []
+    keywords.add(ticker_clean.lower())
+
+    if ticker_info and isinstance(ticker_info, dict):
+        for field in ("longName", "shortName", "displayName"):
+            name = ticker_info.get(field, "") or ""
+            if not name:
+                continue
+            # Split per kata, filter stopwords & kata pendek
+            for word in re.split(r'[\s\-\(\)\,\.]+', name.lower()):
+                word = word.strip()
+                if len(word) >= 4 and word not in _COMPANY_STOPWORDS:
+                    keywords.add(word)
+    return sorted(keywords)
+def filter_relevant(news_list, ticker, ticker_info=None):
+    """
+    Filter berita relevan pakai auto-keyword dari yfinance longName.
+    Fallback ke ticker murni kalau ticker_info tidak tersedia.
+    """
+    ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+    if not ticker_clean:
         return news_list
 
-    strict = [
-        n for n in news_list
-        if ticker_low in (n.get('title', '') + ' ' + n.get('summary', '')).lower()
-    ]
+    keywords = _build_ticker_keywords(ticker_clean, ticker_info)
+    if not keywords:
+        return news_list
+
+    strict = []
+    for n in news_list:
+        text = (n.get('title', '') + ' ' + n.get('summary', '')).lower()
+        if any(kw in text for kw in keywords):
+            strict.append(n)
     return strict
 
 # ═══════════════════════════════════════════════════════════════
@@ -6910,7 +6944,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     if ipot:
         news_pool.extend(ipot)
 
-    news_pool = filter_relevant(news_pool, ticker_raw)
+    news_pool = filter_relevant(news_pool, ticker_raw, ticker_info=ticker_info)
     seen = set()
     unique_news = []
     for n in news_pool:
