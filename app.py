@@ -4732,10 +4732,22 @@ def _get_broksum_for_date(ticker, date_str):
 
         def _parse(rec):
             try:
+                tb_raw = rec.get('top_buyers', '[]')
+                ts_raw = rec.get('top_sellers', '[]')
+                try:
+                    tb = json.loads(tb_raw) if isinstance(tb_raw, str) else (tb_raw or [])
+                except Exception:
+                    tb = []
+                try:
+                    ts = json.loads(ts_raw) if isinstance(ts_raw, str) else (ts_raw or [])
+                except Exception:
+                    ts = []
                 return {
                     'status': rec.get('bandarmology_status', 'N/A'),
                     'upload_date': rec.get('upload_date', ''),
                     'narrative': rec.get('summary_narrative', ''),
+                    'top_buyers': tb,
+                    'top_sellers': ts,
                 }
             except Exception:
                 return None
@@ -4768,6 +4780,100 @@ def _get_broksum_for_date(ticker, date_str):
         return None
     except Exception:
         return None
+def _render_broksum_net_insight(bs_data):
+    """Compact Net Bandar vs Retail + narrative untuk riwayat view."""
+    if not bs_data:
+        return
+    tb = bs_data.get('top_buyers', []) or []
+    ts = bs_data.get('top_sellers', []) or []
+    narrative = (bs_data.get('narrative') or '').strip()
+
+    if not tb and not ts and not narrative:
+        return
+
+    # Enrich kategori (kalau belum ada)
+    for item in tb + ts:
+        if isinstance(item, dict) and not item.get('kategori'):
+            k, ic = klasifikasi_broker(
+                item.get('broker', ''),
+                item.get('volume_lot', 0),
+                item.get('freq')
+            )
+            item['kategori'] = k
+            item['kategori_icon'] = ic
+
+    def _vol(lst, kat):
+        return sum(
+            (x.get('volume_lot') or 0) for x in lst
+            if isinstance(x, dict) and x.get('kategori') == kat
+        )
+
+    bandar_buy  = _vol(tb, 'Bandar')
+    retail_buy  = _vol(tb, 'Retail')
+    bandar_sell = _vol(ts, 'Bandar')
+    retail_sell = _vol(ts, 'Retail')
+
+    net_bandar = bandar_buy - bandar_sell
+    net_retail = retail_buy - retail_sell
+
+    if net_bandar > 0 and net_retail < 0:
+        icon, insight, color = "🟢", "Bandar akumulasi, retail distribusi — sinyal bullish.", "#10b981"
+    elif net_bandar < 0 and net_retail > 0:
+        icon, insight, color = "🔴", "Bandar distribusi, retail akumulasi — hati-hati.", "#ef4444"
+    elif net_bandar > 0 and net_retail > 0:
+        icon, insight, color = "⚖️", "Kedua pihak net buy — minat beli kuat.", "#f59e0b"
+    elif net_bandar < 0 and net_retail < 0:
+        icon, insight, color = "⚠️", "Kedua pihak net sell — tekanan jual kuat.", "#ef4444"
+    else:
+        icon, insight, color = "⚖️", "Net flow seimbang.", "#94a3b8"
+
+    has_brokers = bool(tb or ts)
+
+    brokers_html = ""
+    if has_brokers:
+        brokers_html = (
+            f'<div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">'
+            f'<div style="background:#0f172a; border-radius:6px; padding:6px 10px; border-left:2px solid #10b981;">'
+            f'<div style="color:#10b981; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">🐋 Buy Side</div>'
+            f'<div style="color:#cbd5e1; font-size:11px; margin-top:2px;">Bandar <b style="color:#e2e8f0;">{bandar_buy:,.0f}</b> · Retail <b style="color:#e2e8f0;">{retail_buy:,.0f}</b></div>'
+            f'</div>'
+            f'<div style="background:#0f172a; border-radius:6px; padding:6px 10px; border-left:2px solid #ef4444;">'
+            f'<div style="color:#ef4444; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">🐋 Sell Side</div>'
+            f'<div style="color:#cbd5e1; font-size:11px; margin-top:2px;">Bandar <b style="color:#e2e8f0;">{bandar_sell:,.0f}</b> · Retail <b style="color:#e2e8f0;">{retail_sell:,.0f}</b></div>'
+            f'</div>'
+            f'</div>'
+            f'<div style="display:flex; justify-content:space-between; align-items:center; padding:5px 10px; background:{color}18; border-radius:6px; margin-bottom:4px;">'
+            f'<span style="color:#94a3b8; font-size:10px;">Net Bandar</span>'
+            f'<span style="color:{color}; font-size:12px; font-weight:700;">{net_bandar:+,.0f} lot</span>'
+            f'<span style="color:#94a3b8; font-size:10px;">Net Retail</span>'
+            f'<span style="color:{color}; font-size:12px; font-weight:700;">{net_retail:+,.0f} lot</span>'
+            f'</div>'
+        )
+
+    narrative_html = ""
+    if narrative:
+        narrative_html = (
+            f'<div style="color:#cbd5e1; font-size:11px; line-height:1.6; margin-top:8px; '
+            f'padding-top:8px; border-top:1px solid #334155; font-style:italic;">'
+            f'📝 "{narrative}"</div>'
+        )
+
+    st.markdown(
+        f"""<div style="background:linear-gradient(135deg,{color}12 0%,#1e293b 100%);
+            border-left:4px solid {color}; border-radius:8px;
+            padding:10px 14px; margin-bottom:10px;">
+        <div style="color:{color}; font-size:10px; font-weight:700;
+            letter-spacing:1px; text-transform:uppercase; margin-bottom:8px;">
+            📝 AI Summary + Net Bandar vs Retail
+        </div>
+        {brokers_html}
+        <div style="color:{color}; font-size:11px; font-weight:600; margin-top:6px;">
+            {icon} {insight}
+        </div>
+        {narrative_html}
+        </div>""",
+        unsafe_allow_html=True
+    )
 # ==================== SIDEBAR ====================
 with st.sidebar:
     st.markdown("## 📊 QuantRisk Pro")
@@ -5214,6 +5320,9 @@ with st.sidebar:
                         col_sw, col_dt = st.columns(2)
                         render_mode_card(r_sw, "Swing", "📆", col_sw, f"g_{day}_{s_idx}")
                         render_mode_card(r_dt, "Daytrade", "⏱️", col_dt, f"g_{day}_{s_idx}")
+                        _riwayat_date = waktu[:10] if waktu else ""
+                        _bs = _get_broksum_for_date(saham, _riwayat_date) if _riwayat_date else None
+                        _render_broksum_net_insight(_bs)
                         st.markdown("<div style='height:4px;'></div>", unsafe_allow_html=True)
 
             st.caption(
@@ -5343,26 +5452,10 @@ with st.sidebar:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    # ═══ 📝 AI SUMMARY ═══
+                    # ═══ 🐳 NET + INSIGHT NARASI ═══
                     riwayat_date = waktu[:10] if waktu else ""
                     _bs = _get_broksum_for_date(saham_key, riwayat_date) if riwayat_date else None
-                    _narrative = (_bs or {}).get('narrative', '').strip()
-                    if _narrative:
-                        st.markdown(f"""
-                        <div style="background:linear-gradient(135deg,#a855f712 0%,#1e293b 100%);
-                            border-left:4px solid #a855f7; border-radius:8px;
-                            padding:10px 14px; margin-bottom:10px;">
-                            <div style="color:#a855f7; font-size:10px; font-weight:700;
-                                letter-spacing:1px; text-transform:uppercase; margin-bottom:6px;">
-                                📝 AI Summary
-                            </div>
-                            <div style="color:#cbd5e1; font-size:11px; line-height:1.6;
-                                font-style:italic;">
-                                "{_narrative}"
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-
+                    _render_broksum_net_insight(_bs)
                     # ── Coppock + Regime ──
                     coppock = r.get('Coppock', '?')
                     if "Turning Up" in coppock:
@@ -5981,17 +6074,66 @@ def get_google_news_rss(query_str, num=5, days_back=7):
         return news[:num], None
     except Exception as e:
         return [], str(e)
-
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_rss_news(feed_url, ticker, num=5, days_back=7):
+    if not RSS_AVAILABLE:
+        return []
+    try:
+        cutoff = time.time() - (days_back * 86400)
+        feed = feedparser.parse(feed_url)
+        ticker_low = str(ticker).lower().strip()
+        out = []
+        for e in feed.entries[:num * 4]:
+            title = (e.get('title') or '').strip()
+            summary = re.sub('<[^<]+?>', '', e.get('summary', '') or '')
+            text = (title + ' ' + summary).lower()
+            if ticker_low not in text:
+                continue
+            pub_parsed = e.get('published_parsed')
+            if pub_parsed:
+                pub_ts = time.mktime(pub_parsed)
+                if pub_ts < cutoff:
+                    continue
+            else:
+                pub_ts = 0
+            out.append({
+                'title': title,
+                'summary': summary[:300],
+                'source': 'RSS',
+                'published': e.get('published', ''),
+                'published_ts': pub_ts,
+            })
+            if len(out) >= num:
+                break
+        out.sort(key=lambda x: x['published_ts'], reverse=True)
+        return out
+    except Exception:
+        return []
+def get_kontan_news(ticker, num=5):
+    """Kontan RSS — sumber berita IDX terbaik."""
+    news = _fetch_rss_news("https://www.kontan.co.id/rss", ticker, num=num)
+    for n in news:
+        n['source'] = 'Kontan'
+    return news, None
+def get_cnbc_rss_news(ticker, num=5):
+    """CNBC Indonesia RSS — market news."""
+    news = _fetch_rss_news(
+        "https://www.cnbcindonesia.com/rss",
+        ticker, num=num
+    )
+    for n in news:
+        n['source'] = 'CNBC Indonesia'
+    return news, None
 @st.cache_data(ttl=600, show_spinner=False)  # cache 10 menit (lebih fresh)
 def get_headlines_for_ticker(ticker):
     """Ambil maks 3 judul berita terbaru dari Google News RSS."""
     try:
-        news, _ = get_google_news_rss(f"{ticker} saham", num=3, days_back=7)
+        news, _ = get_google_news_rss(f'"{ticker}" (saham OR emiten OR IHSG)', num=3, days_back=7)
         return [n['title'] for n in news] if news else ["(tidak ada berita terbaru)"]
     except:
         return ["(gagal mengambil berita)"]
 def get_ipot_news(query, num=5):
-    """Ambil berita dari Ipotnews berdasarkan kata kunci."""
+    """Ambil berita dari Ipotnews — WAJIB ada ticker di judul."""
     try:
         import requests
         from bs4 import BeautifulSoup
@@ -6000,51 +6142,38 @@ def get_ipot_news(query, num=5):
         r = requests.get(url, headers=headers, timeout=10)
         r.raise_for_status()
         soup = BeautifulSoup(r.text, 'html.parser')
+
+        query_low = str(query).lower().strip()
         news = []
-        
-        # Cari semua elemen <a> dan filter yang textnya cukup panjang (judul berita)
         for a in soup.find_all('a'):
             t = a.get_text(strip=True)
-            # Biasanya judul berita panjang, kita ambil yang > 30 karakter
-            if len(t) > 30 and 'berita' not in t.lower() and 'indopremier' not in t.lower():
-                # Pastikan judul unik
-                if not any(n['title'] == t for n in news):
-                    news.append({'title': t, 'summary': '', 'source': 'Ipotnews'})
-                if len(news) >= num:
-                    break
+            if len(t) < 30 or 'berita' in t.lower() or 'indopremier' in t.lower():
+                continue
+            # ═══ FIX: WAJIB ada ticker di judul ═══
+            if query_low not in t.lower():
+                continue
+            if not any(n['title'] == t for n in news):
+                news.append({'title': t, 'summary': '', 'source': 'Ipotnews'})
+            if len(news) >= num:
+                break
         return news, None
     except Exception as e:
         return [], str(e)
 
-def get_yahoo_search_news(query_str, num=5, days_back=7):
-    try:
-        items = yf.Search(query_str).news or []
-        cutoff_ts = time.time() - (days_back * 86400)
-        news = []
-        for item in items[:num * 2]:
-            inner = item.get('content') or item
-            title = inner.get('title') or inner.get('shortTitle') or inner.get('headline') or ''
-            summary = inner.get('summary') or inner.get('longSummary') or inner.get('description') or ''
-            pub_ts = inner.get('providerPublishTime') or 0  # unix timestamp
-            # Filter hanya berita dalam N hari terakhir
-            if title and (pub_ts == 0 or pub_ts >= cutoff_ts):
-                news.append({
-                    'title': title,
-                    'summary': summary,
-                    'source': 'Yahoo Search',
-                    'published': datetime.fromtimestamp(pub_ts).strftime('%d %b %Y') if pub_ts else '',
-                    'published_ts': pub_ts
-                })
-        # Sort terbaru di atas
-        news.sort(key=lambda x: x['published_ts'], reverse=True)
-        return news[:num], None
-    except:
-        return [], "Yahoo Search gagal"
-
 def filter_relevant(news_list, ticker):
-    keywords = [ticker.lower(),'saham','ihsg','bei','idx']
-    filtered = [n for n in news_list if any(k in (n['title']+n['summary']).lower() for k in keywords)]
-    return filtered if filtered else news_list
+    """
+    Filter ketat: WAJIB ada ticker di title atau summary.
+    Tidak ada fallback — kalau tidak ada berita relevan, return list kosong.
+    """
+    ticker_low = str(ticker).lower().strip()
+    if not ticker_low:
+        return news_list
+
+    strict = [
+        n for n in news_list
+        if ticker_low in (n.get('title', '') + ' ' + n.get('summary', '')).lower()
+    ]
+    return strict
 
 # ═══════════════════════════════════════════════════════════════
 # IDX FIN-LEXICON — Kamus Pasar Modal Indonesia
@@ -6120,16 +6249,19 @@ IDX_FIN_LEXICON = {
     "force majeure": -0.60,
 }
 
-def _score_lexicon_idxfin(text_lower: str) -> tuple[float, bool]:
-    """
-    Cek apakah ada kata dari IDX_FIN_LEXICON dalam teks.
-    Return (skor_rata_rata, ada_match).
-    Jika multiple match → rata-rata tertimbang (kata lebih panjang = bobot lebih tinggi).
-    """
+import re as _re
+
+def _score_lexicon_idxfin(text_lower: str):
     matches = []
     for phrase, score in IDX_FIN_LEXICON.items():
-        if phrase in text_lower:
-            matches.append((len(phrase), score))
+        if len(phrase) <= 4:
+            # word boundary untuk term pendek
+            pattern = r'\b' + _re.escape(phrase) + r'\b'
+            if _re.search(pattern, text_lower):
+                matches.append((len(phrase), score))
+        else:
+            if phrase in text_lower:
+                matches.append((len(phrase), score))
     if not matches:
         return 0.0, False
     # Bobot proporsional terhadap panjang frasa (frasa panjang lebih spesifik)
@@ -6158,7 +6290,10 @@ def analyze_sentiment_weighted(news_items, translator):
         lex_score, has_lex = _score_lexicon_idxfin(text_for_lexicon)
 
         # ── Terjemahkan untuk VADER (bahasa Inggris) ──
-        if any(ord(c) > 127 for c in text) and translator:
+        import re
+        _ID_WORDS = re.compile(r'\b(yang|dan|di|ke|dari|untuk|dengan|pada|ini|itu|akan|telah|saham|harga|naik|turun)\b', re.IGNORECASE)
+
+        if translator and _ID_WORDS.search(text):
             try:
                 text = translator.translate(text)
             except Exception:
@@ -6762,12 +6897,15 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
     translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
 
-    rss, _ = get_google_news_rss(f"{ticker_raw} saham")
+    rss, _ = get_google_news_rss(f'"{ticker_raw}" (saham OR emiten OR IHSG)')
     if rss:
         news_pool.extend(rss)
-    ysearch, _ = get_yahoo_search_news(f"{ticker_raw} saham")
-    if ysearch:
-        news_pool.extend(ysearch)
+    kontan, _ = get_kontan_news(ticker_raw)
+    if kontan:
+        news_pool.extend(kontan)
+    cnbc, _ = get_cnbc_rss_news(ticker_raw)
+    if cnbc:
+        news_pool.extend(cnbc)
     ipot, _ = get_ipot_news(f"{ticker_raw}")
     if ipot:
         news_pool.extend(ipot)
