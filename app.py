@@ -6075,19 +6075,19 @@ def get_google_news_rss(query_str, num=5, days_back=7):
     except Exception as e:
         return [], str(e)
 @st.cache_data(ttl=600, show_spinner=False)
-def _fetch_rss_news(feed_url, ticker, num=5, days_back=7):
+def _fetch_rss_news(feed_url, ticker, num=5, days_back=7, ticker_info=None):
     if not RSS_AVAILABLE:
         return []
     try:
         cutoff = time.time() - (days_back * 86400)
         feed = feedparser.parse(feed_url)
-        ticker_low = str(ticker).lower().strip()
+        keywords = _build_ticker_keywords(ticker, ticker_info) or [str(ticker).lower().strip()]
         out = []
-        for e in feed.entries[:num * 4]:
+        for e in feed.entries[:num * 6]:
             title = (e.get('title') or '').strip()
             summary = re.sub('<[^<]+?>', '', e.get('summary', '') or '')
             text = (title + ' ' + summary).lower()
-            if ticker_low not in text:
+            if not any(kw in text for kw in keywords):
                 continue
             pub_parsed = e.get('published_parsed')
             if pub_parsed:
@@ -6109,17 +6109,17 @@ def _fetch_rss_news(feed_url, ticker, num=5, days_back=7):
         return out
     except Exception:
         return []
-def get_kontan_news(ticker, num=5):
+def get_kontan_news(ticker, num=5, ticker_info=None):
     """Kontan RSS — sumber berita IDX terbaik."""
-    news = _fetch_rss_news("https://www.kontan.co.id/rss", ticker, num=num)
+    news = _fetch_rss_news("https://www.kontan.co.id/rss", ticker, num=num, ticker_info=ticker_info)
     for n in news:
         n['source'] = 'Kontan'
     return news, None
-def get_cnbc_rss_news(ticker, num=5):
+def get_cnbc_rss_news(ticker, num=5, ticker_info=None):
     """CNBC Indonesia RSS — market news."""
     news = _fetch_rss_news(
         "https://www.cnbcindonesia.com/rss",
-        ticker, num=num
+        ticker, num=num, ticker_info=ticker_info
     )
     for n in news:
         n['source'] = 'CNBC Indonesia'
@@ -6938,26 +6938,49 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     rss, _ = get_google_news_rss(f'"{ticker_raw}" (saham OR emiten OR IHSG)')
     if rss:
         news_pool.extend(rss)
-    kontan, _ = get_kontan_news(ticker_raw)
+    kontan, _ = get_kontan_news(ticker_raw, ticker_info=ticker_info)
     if kontan:
         news_pool.extend(kontan)
-    cnbc, _ = get_cnbc_rss_news(ticker_raw)
+    cnbc, _ = get_cnbc_rss_news(ticker_raw, ticker_info=ticker_info)
     if cnbc:
         news_pool.extend(cnbc)
     ipot, _ = get_ipot_news(f"{ticker_raw}")
     if ipot:
         news_pool.extend(ipot)
 
-    google_specific = [n for n in news_pool if n.get('source') == 'Google News']
-    other_sources   = [n for n in news_pool if n.get('source') != 'Google News']
-    news_pool = google_specific + filter_relevant(other_sources, ticker_raw, ticker_info=ticker_info)
+    # ── Filter per sumber ──
+    google_news = [n for n in news_pool if n.get('source') == 'Google News']
+    other_news  = filter_relevant(
+        [n for n in news_pool if n.get('source') != 'Google News'],
+        ticker_raw, ticker_info=ticker_info
+    )
+
+    TARGET_TOTAL = 5
+    MAX_OTHER    = 2
+
+    # ── Ambil dari sumber lain dulu (max 2) ──
+    other_take = other_news[:MAX_OTHER]
+
+    # ── Google isi SISA slot (dynamic) ──
+    google_quota = TARGET_TOTAL - len(other_take)
+    google_take  = google_news[:google_quota]
+
+    # ── Interleave: berselang-seling biar variatif ──
+    final_news = []
+    for i in range(max(len(google_take), len(other_take))):
+        if i < len(other_take):
+            final_news.append(other_take[i])
+        if i < len(google_take):
+            final_news.append(google_take[i])
+
+    # ── Dedup + batasi 5 ──
     seen = set()
     unique_news = []
-    for n in news_pool:
+    for n in final_news:
         if n['title'] not in seen:
             seen.add(n['title'])
             unique_news.append(n)
-        if len(unique_news) >= 5:
+        if len(unique_news) >= TARGET_TOTAL:
             break
 
     avg_sentiment = analyze_sentiment_weighted(unique_news, translator_en)
