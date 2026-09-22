@@ -6048,28 +6048,39 @@ def compute_adx_series(df, period=14):
     return dx.ewm(alpha=1/period, adjust=False).mean()
 
 def get_google_news_rss(query_str, num=5, days_back=7):
-    """Ambil berita dari Google News RSS, difilter hanya N hari terakhir dan diurutkan terbaru."""
-    if not RSS_AVAILABLE: return [], "RSS tidak tersedia"
+    """Ambil berita dari Google News RSS, FILTER TANGGAL MANUAL."""
+    if not RSS_AVAILABLE: 
+        return [], "RSS tidak tersedia"
     try:
-        # Tambah filter after: agar Google hanya return berita terbaru
-        cutoff = (datetime.now() - timedelta(days=days_back)).strftime('%Y-%m-%d')
-        query_with_date = f"{query_str} after:{cutoff}"
+        cutoff_date = datetime.now() - timedelta(days=days_back)
+        cutoff_str = cutoff_date.strftime('%Y-%m-%d')
+        cutoff_ts = cutoff_date.timestamp()
+        
+        query_with_date = f"{query_str} after:{cutoff_str}"
         url = f"https://news.google.com/rss/search?q={urllib.parse.quote(query_with_date)}&hl=id&gl=ID&ceid=ID:id"
         feed = feedparser.parse(url)
 
         news = []
-        for e in feed.entries[:num * 2]:  # ambil lebih banyak dulu untuk difilter
-            published = e.get('published', '')
-            published_parsed = e.get('published_parsed')  # struct_time
+        # Ambil 3x lipat untuk kompensasi yang di-skip
+        for e in feed.entries[:num * 3]:
+            published_parsed = e.get('published_parsed')
+            if published_parsed:
+                pub_ts = time.mktime(published_parsed)
+                if pub_ts < cutoff_ts:
+                    continue  # ═══ FILTER TANGGAL MANUAL ═══
+            else:
+                pub_ts = 0
+            
             news.append({
                 'title': e.get('title', '').strip(),
                 'summary': re.sub('<[^<]+?>', '', e.get('summary', '')),
                 'source': 'Google News',
-                'published': published,
-                'published_ts': time.mktime(published_parsed) if published_parsed else 0
+                'published': e.get('published', ''),
+                'published_ts': pub_ts
             })
+            if len(news) >= num:
+                break
 
-        # Sort terbaru di atas
         news.sort(key=lambda x: x['published_ts'], reverse=True)
         return news[:num], None
     except Exception as e:
@@ -7066,11 +7077,37 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
     translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
 
-    rss, _ = get_google_news_rss(
-        f'"{ticker_raw}" (saham OR emiten OR dividen OR laba)',
-        num=8,           # ambil lebih banyak untuk difilter
-        days_back=14
-    )
+    _ticker = ticker_raw
+    _long_name = ""
+    if isinstance(ticker_info, dict):
+        _ln = ticker_info.get("longName", "") or ticker_info.get("shortName", "") or ""
+        # Buang suffix Tbk, PT, Persero, Perseroan
+        _ln = re.sub(r'\b(Tbk|PT|Persero|Perseroan|Terbuka)\b', '', _ln, flags=re.IGNORECASE).strip()
+        if len(_ln) > 5:
+            _long_name = _ln
+
+    _queries = [
+        f'{_ticker} saham',                # query 1: ticker + konteks
+    ]
+    if _long_name:
+        _queries.append(f'"{_long_name}" saham')  # query 2: nama panjang + konteks
+
+    rss_all = []
+    for _q in _queries:
+        _r, _ = get_google_news_rss(_q, num=10, days_back=30)
+        if _r:
+            rss_all.extend(_r)
+
+    # Dedup by title
+    _seen = set()
+    rss = []
+    for n in rss_all:
+        if n['title'] not in _seen:
+            _seen.add(n['title'])
+            rss.append(n)
+    # Batasi max 15 sebelum difilter
+    rss = rss[:15]
+
     if rss:
         news_pool.extend(rss)
     kontan, _ = get_kontan_news(ticker_raw, ticker_info=ticker_info)
