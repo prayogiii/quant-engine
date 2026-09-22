@@ -9693,68 +9693,87 @@ else:
         <div>
             <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Recent Signals</span>
             <span style="color:#64748b; font-size:12px; margin-left:10px;">
-                — Latest 6 analyses</span>
+                — Top 3 by score</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     riwayat_recent = st.session_state.get('riwayat', []) or []
-    seen_keys = set()
-    recent_signals = []
+    by_ticker = {}   # {saham: {'SW': r, 'DT': r}}
     for r in riwayat_recent:
-        key = (r.get('Waktu', ''), r.get('Saham', ''))
-        if key in seen_keys:
+        saham = r.get('Saham', '')
+        gaya = r.get('Gaya', 'SW')
+        if not saham:
             continue
-        seen_keys.add(key)
-        recent_signals.append(r)
-        if len(recent_signals) >= 6:
-            break
+        if saham not in by_ticker:
+            by_ticker[saham] = {}
+        if gaya not in by_ticker[saham]:    # first = latest
+            by_ticker[saham][gaya] = r
 
-    if recent_signals:
-        for row_start in range(0, len(recent_signals), 3):
-            row_items = recent_signals[row_start:row_start + 3]
-            sig_cols = st.columns(3)
-            for col, r in zip(sig_cols, row_items):
-                with col:
-                    saham = r.get('Saham', '?')
-                    sinyal = r.get('Sinyal', '?')
-                    harga = r.get('Harga', '?')
-                    waktu = r.get('Waktu', '?')
-                    gaya = r.get('Gaya', 'SW')
-                    score = r.get('Score', '?')
-                    rrr = r.get('RRR', '?')
+    # ── Step 2: Per ticker, pilih mode dengan Score tertinggi ──
+    def _parse_score(r):
+        if not r:
+            return -1.0
+        try:
+            return float(r.get('Score', 0))
+        except (ValueError, TypeError):
+            return -1.0
 
-                    if "STRONG BUY" in sinyal:
-                        s_color, s_icon, s_label = "#10b981", "🔥", "STRONG BUY"
-                    elif "BUY" in sinyal:
-                        s_color, s_icon, s_label = "#84cc16", "⚡", "BUY"
-                    elif "HOLD" in sinyal:
-                        s_color, s_icon, s_label = "#3b82f6", "⏸️", "HOLD"
-                    else:
-                        s_color, s_icon, s_label = "#ef4444", "🚨", "AVOID"
+    picks = []
+    for saham, modes in by_ticker.items():
+        r_sw = modes.get('SW')
+        r_dt = modes.get('DT')
+        best = r_sw if _parse_score(r_sw) >= _parse_score(r_dt) else r_dt
+        if best:
+            picks.append(best)
 
-                    gaya_icon = "⏱️" if gaya == "DT" else "📆"
-                    gaya_color = "#06b6d4" if gaya == "DT" else "#a855f7"
-                    waktu_short = waktu.split()[1] if len(waktu.split()) > 1 else waktu
+    # ── Step 3: Sort by Score, ambil top 3 ──
+    picks.sort(key=_parse_score, reverse=True)
+    top3 = picks[:3]
 
-                    actual_data = (
-                        st.session_state.riwayat_actual.get((waktu, saham, gaya)) or
-                        st.session_state.riwayat_actual.get((waktu, saham, "daytrade" if gaya == "DT" else "swing")) or
-                        st.session_state.riwayat_actual.get((waktu, saham))
-                    )
-                    outcome_badge = ""
-                    if actual_data:
-                        out = actual_data.get('Outcome', '')
-                        if actual_data.get('Entry_Miss') == 'Yes' or out == 'Not Touched':
-                            outcome_badge = '<span style="background:#94a3b820;color:#94a3b8;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">NOT TOUCHED</span>'
-                        elif out == 'Win':
-                            outcome_badge = '<span style="background:#10b98120;color:#10b981;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✓ WIN</span>'
-                        elif out == 'Loss':
-                            outcome_badge = '<span style="background:#ef444420;color:#ef4444;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✗ LOSS</span>'
+    # ── Step 4: Render ──
+    def _sig_style(sig):
+        if not sig: return "#64748b", "—", "—"
+        if "STRONG BUY" in sig: return "#10b981", "🔥", "STRONG BUY"
+        if "BUY" in sig:        return "#84cc16", "⚡", "BUY"
+        if "HOLD" in sig:       return "#3b82f6", "⏸️", "HOLD"
+        return "#ef4444", "🚨", "AVOID"
 
-                    # ═══ PAKAI textwrap.dedent UNTUK HAPUS INDENTASI ═══
-                    import textwrap as _tw
-                    card_html = f"""
+    if top3:
+        sig_cols = st.columns(3)
+        for col, r in zip(sig_cols, top3):
+            with col:
+                saham = r.get('Saham', '?')
+                sinyal = r.get('Sinyal', '?')
+                harga = r.get('Harga', '?')
+                waktu = r.get('Waktu', '?')
+                gaya = r.get('Gaya', 'SW')
+                score = r.get('Score', '?')
+                rrr = r.get('RRR', '?')
+
+                s_color, s_icon, s_label = _sig_style(sinyal)
+                gaya_icon = "⏱️" if gaya == "DT" else "📆"
+                gaya_color = "#06b6d4" if gaya == "DT" else "#a855f7"
+                waktu_short = waktu.split()[1] if len(waktu.split()) > 1 else waktu
+
+                # Outcome badge
+                actual = (
+                    st.session_state.riwayat_actual.get((waktu, saham, gaya)) or
+                    st.session_state.riwayat_actual.get((waktu, saham,
+                        "daytrade" if gaya == "DT" else "swing")) or
+                    st.session_state.riwayat_actual.get((waktu, saham))
+                )
+                outcome_badge = ""
+                if actual:
+                    out = actual.get('Outcome', '')
+                    if actual.get('Entry_Miss') == 'Yes' or out == 'Not Touched':
+                        outcome_badge = '<span style="background:#94a3b820;color:#94a3b8;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">NOT TOUCHED</span>'
+                    elif out == 'Win':
+                        outcome_badge = '<span style="background:#10b98120;color:#10b981;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✓ WIN</span>'
+                    elif out == 'Loss':
+                        outcome_badge = '<span style="background:#ef444420;color:#ef4444;font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;">✗ LOSS</span>'
+
+                card_html = f"""
 <div style="background:linear-gradient(135deg,#1a1d24 0%,#0f1116 100%);border:1px solid #262626;border-radius:12px;padding:14px 16px;margin-bottom:12px;border-left:3px solid {s_color};">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
 <div style="display:flex;align-items:center;gap:6px;">
@@ -9783,7 +9802,7 @@ else:
 </div>
 </div>
 """
-                    st.markdown(card_html, unsafe_allow_html=True)
+                st.markdown(card_html, unsafe_allow_html=True)
     else:
         st.markdown("""
         <div style="background:#1a1d24; border:1px dashed #334155;
