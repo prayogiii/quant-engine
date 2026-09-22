@@ -6132,7 +6132,8 @@ def _fetch_rss_news(feed_url, ticker, num=5, days_back=7, ticker_info=None):
 def get_kontan_news(ticker, num=5, ticker_info=None):
     """Kontan RSS sudah tidak accessible (403). Fallback ke Google News."""
     try:
-        query = f'"{ticker}" (saham OR emiten) site:kontan.co.id'
+        # Tambah konteks finansial supaya Google News return berita saham
+        query = f'"{ticker}" (saham OR emiten OR dividen OR laba) site:kontan.co.id'
         news, err = get_google_news_rss(query, num=num, days_back=14)
         for n in news:
             n['source'] = 'Kontan (Google News)'
@@ -6172,8 +6173,13 @@ def get_cnbc_rss_news(ticker, num=5, ticker_info=None):
 def get_headlines_for_ticker(ticker):
     """Ambil maks 3 judul berita terbaru dari Google News RSS."""
     try:
-        news, _ = get_google_news_rss(f'"{ticker}" (saham OR emiten OR IHSG)', num=3, days_back=7)
-        return [n['title'] for n in news] if news else ["(tidak ada berita terbaru)"]
+        # Tambah konteks finansial, ambil lebih banyak dulu untuk difilter
+        news, _ = get_google_news_rss(
+            f'"{ticker}" (saham OR emiten OR dividen OR laba)',
+            num=5,           # ambil 5 dulu
+            days_back=14
+        )
+        return [n['title'] for n in news[:3]] if news else ["(tidak ada berita terbaru)"]
     except:
         return ["(gagal mengambil berita)"]
 def get_ipot_news(query, num=5):
@@ -6209,6 +6215,14 @@ _COMPANY_STOPWORDS = {
     "the", "and", "of", "co", "ltd", "inc", "corp", "corporation",
     "group", "holdings", "holding", "international", "investments",
     "investment", "capital", "nusantara", "nasional", "utama", "global",
+    # ── Tambahan: kata generik yang terlalu umum di banyak emiten ──
+    "bank", "finance", "financial", "securities", "sekuritas",
+    "energi", "energy", "resources", "mining", "tambang",
+    "telekomunikasi", "telecom", "property", "properti",
+    "agro", "agri", "industri", "industry", "trading",
+    "multinational", "multi", "sentral", "prima", "jaya",
+    "inti", "bumi", "sumber", "karya", "buana", "makmur",
+    "graha", "mitra", "sarana", "dharma", "putra", "kencana",
 }
 
 def _build_ticker_keywords(ticker_raw, ticker_info=None):
@@ -6235,23 +6249,71 @@ def _build_ticker_keywords(ticker_raw, ticker_info=None):
     return sorted(keywords)
 def filter_relevant(news_list, ticker, ticker_info=None):
     """
-    Filter berita relevan pakai auto-keyword dari yfinance longName.
-    Fallback ke ticker murni kalau ticker_info tidak tersedia.
+    Filter berita relevan — 3 tier bertingkat (strict → medium → fallback).
+    - Tier 1: ticker ATAU kata spesifik (>=5 char, word boundary)
+    - Tier 2: semua keyword (word boundary, anti-partial match)
+    - Fallback: kalau hasil < 2, ambil 2 teratas dari news_list
     """
+    if not news_list:
+        return []
+
     ticker_clean = str(ticker).upper().replace(".JK", "").strip()
     if not ticker_clean:
         return news_list
 
-    keywords = _build_ticker_keywords(ticker_clean, ticker_info)
-    if not keywords:
-        return news_list
+    # ═══ Bangun 2 tier keyword ═══
+    strong_keywords = {ticker_clean.lower()}
+    weak_keywords = {ticker_clean.lower()}
 
-    strict = []
+    if ticker_info and isinstance(ticker_info, dict):
+        for field in ("longName", "shortName"):
+            name = ticker_info.get(field, "") or ""
+            if not name:
+                continue
+            for word in re.split(r'[\s\-\(\)\,\.]+', name.lower()):
+                word = word.strip()
+                if len(word) < 4 or word in _COMPANY_STOPWORDS:
+                    continue
+                weak_keywords.add(word)
+                if len(word) >= 5:
+                    strong_keywords.add(word)
+
+    def _match(text, keywords):
+        hits = 0
+        for kw in keywords:
+            if re.search(r'\b' + re.escape(kw) + r'\b', text):
+                hits += 1
+        return hits
+
+    # ═══ Tier 1 — strict ═══
+    tier1 = []
     for n in news_list:
         text = (n.get('title', '') + ' ' + n.get('summary', '')).lower()
-        if any(kw in text for kw in keywords):
-            strict.append(n)
-    return strict
+        if _match(text, strong_keywords) >= 1:
+            tier1.append(n)
+
+    if len(tier1) >= 2:
+        return tier1
+
+    # ═══ Tier 2 — medium ═══
+    tier2 = []
+    for n in news_list:
+        text = (n.get('title', '') + ' ' + n.get('summary', '')).lower()
+        if _match(text, weak_keywords) >= 1:
+            tier2.append(n)
+
+    seen = set()
+    combined = []
+    for n in tier1 + tier2:
+        if n['title'] not in seen:
+            seen.add(n['title'])
+            combined.append(n)
+
+    if combined:
+        return combined
+
+    # ═══ Fallback — ambil 2 teratas ═══
+    return news_list[:2]
 
 # ═══════════════════════════════════════════════════════════════
 # IDX FIN-LEXICON — Kamus Pasar Modal Indonesia
@@ -6979,7 +7041,11 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
     translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
 
-    rss, _ = get_google_news_rss(f'"{ticker_raw}" (saham OR emiten OR IHSG)')
+    rss, _ = get_google_news_rss(
+        f'"{ticker_raw}" (saham OR emiten OR dividen OR laba)',
+        num=8,           # ambil lebih banyak untuk difilter
+        days_back=14
+    )
     if rss:
         news_pool.extend(rss)
     kontan, _ = get_kontan_news(ticker_raw, ticker_info=ticker_info)
@@ -6992,9 +7058,12 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     if ipot:
         news_pool.extend(ipot)
 
-    # ── Filter per sumber ──
-    google_news = [n for n in news_pool if n.get('source') == 'Google News']
-    other_news  = filter_relevant(
+    # ── Filter per sumber — GOOGLE NEWS JUGA DIFILTER! ──
+    google_news = filter_relevant(
+        [n for n in news_pool if n.get('source') == 'Google News'],
+        ticker_raw, ticker_info=ticker_info
+    )
+    other_news = filter_relevant(
         [n for n in news_pool if n.get('source') != 'Google News'],
         ticker_raw, ticker_info=ticker_info
     )
