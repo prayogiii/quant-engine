@@ -2642,7 +2642,7 @@ def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
         for k in FACTOR_KEYS:
             key = f'sig_{k}'
             if key in last_pred:
-                factor_signals[k] = float(last_pred[key])
+                factor_signals[k] = safe_float(last_pred[key], 0.0)
             else:
                 factor_signals[k] = 0.0
 
