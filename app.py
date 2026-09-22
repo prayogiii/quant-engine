@@ -6079,8 +6079,28 @@ def _fetch_rss_news(feed_url, ticker, num=5, days_back=7, ticker_info=None):
     if not RSS_AVAILABLE:
         return []
     try:
+        import requests
+        r = requests.get(
+            feed_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/rss+xml, application/xml, text/xml, */*",
+            },
+            timeout=12,
+        )
+        if r.status_code != 200:
+            return []   # 403/404/dll → skip tanpa error
+        
+        head = r.text.lstrip()[:200].lower()
+        if not (head.startswith("<?xml") or "<rss" in head or "<feed" in head):
+            return []   # bukan XML (halaman HTML info) → skip
+        
+        feed = feedparser.parse(r.text)
         cutoff = time.time() - (days_back * 86400)
-        feed = feedparser.parse(feed_url)
         keywords = _build_ticker_keywords(ticker, ticker_info) or [str(ticker).lower().strip()]
         out = []
         for e in feed.entries[:num * 6]:
@@ -6110,20 +6130,44 @@ def _fetch_rss_news(feed_url, ticker, num=5, days_back=7, ticker_info=None):
     except Exception:
         return []
 def get_kontan_news(ticker, num=5, ticker_info=None):
-    """Kontan RSS — sumber berita IDX terbaik."""
-    news = _fetch_rss_news("https://www.kontan.co.id/rss", ticker, num=num, ticker_info=ticker_info)
-    for n in news:
-        n['source'] = 'Kontan'
-    return news, None
+    """Kontan RSS sudah tidak accessible (403). Fallback ke Google News."""
+    try:
+        query = f'"{ticker}" (saham OR emiten) site:kontan.co.id'
+        news, err = get_google_news_rss(query, num=num, days_back=14)
+        for n in news:
+            n['source'] = 'Kontan (Google News)'
+        return news, None
+    except Exception:
+        return [], None
 def get_cnbc_rss_news(ticker, num=5, ticker_info=None):
-    """CNBC Indonesia RSS — market news."""
-    news = _fetch_rss_news(
+    """
+    CNBC Indonesia RSS — pakai 2 feed untuk coverage lebih luas:
+      • /market/rss → berita market & saham (prioritas)
+      • /rss        → berita ekonomi umum (backup)
+    """
+    FEEDS = [
+        "https://www.cnbcindonesia.com/market/rss",
         "https://www.cnbcindonesia.com/rss",
-        ticker, num=num, ticker_info=ticker_info
-    )
-    for n in news:
-        n['source'] = 'CNBC Indonesia'
-    return news, None
+    ]
+    
+    all_news = []
+    for url in FEEDS:
+        news = _fetch_rss_news(url, ticker, num=num, ticker_info=ticker_info)
+        for n in news:
+            n['source'] = 'CNBC Indonesia'
+        all_news.extend(news)
+    
+    # ── Dedup by title ──
+    seen = set()
+    unique = []
+    for n in all_news:
+        if n['title'] not in seen:
+            seen.add(n['title'])
+            unique.append(n)
+        if len(unique) >= num:
+            break
+    
+    return unique, None
 @st.cache_data(ttl=600, show_spinner=False)  # cache 10 menit (lebih fresh)
 def get_headlines_for_ticker(ticker):
     """Ambil maks 3 judul berita terbaru dari Google News RSS."""
