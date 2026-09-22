@@ -6866,10 +6866,14 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     # ------------------------------------------------------------------
     # 4. FUNDAMENTAL
     # ------------------------------------------------------------------
-    try:
-        ticker_info = yf.Ticker(ticker_input).info
-    except:
-        ticker_info = {}
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def _safe_ticker_info(ticker):
+        try:
+            return yf.Ticker(ticker).info or {}
+        except Exception:
+            return {}
+
+    ticker_info = _safe_ticker_info(ticker_input)
     mc = ticker_info.get('marketCap')
     per = ticker_info.get('trailingPE') or ticker_info.get('forwardPE')
     pbv = ticker_info.get('priceToBook')
@@ -6944,7 +6948,9 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     if ipot:
         news_pool.extend(ipot)
 
-    news_pool = filter_relevant(news_pool, ticker_raw, ticker_info=ticker_info)
+    google_specific = [n for n in news_pool if n.get('source') == 'Google News']
+    other_sources   = [n for n in news_pool if n.get('source') != 'Google News']
+    news_pool = google_specific + filter_relevant(other_sources, ticker_raw, ticker_info=ticker_info)
     seen = set()
     unique_news = []
     for n in news_pool:
