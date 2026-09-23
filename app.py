@@ -1449,7 +1449,181 @@ def get_latest_broksum_for_ticker(ticker):
     except Exception as e:
         st.error(f"❌ Error get latest broksum: {e}")
         return None
-    
+# ═══════════════════════════════════════════════════════════════
+# MULTI-DAY BANDAR SCORE — pakai history broksum, bukan cuma latest
+# ═══════════════════════════════════════════════════════════════
+def compute_multi_day_bandar_score(ticker, days=10):
+    """
+    Hitung skor akumulasi/distribusi bandar dari N snapshot broksum terakhir.
+
+    Methodology:
+    ─────────────
+    1. Ambil N snapshot terbaru dari broksum_history
+    2. Per snapshot: hitung net_ratio = (top3_buy - top3_sell) / total_proxy
+    3. Weighted sum dengan exponential decay (recency bias, DECAY=0.75)
+    4. Bonus konsistensi: broker yang muncul ≥60% snapshot di top buyer/seller
+       → indikasi akumulasi/distribusi sistematis (bukan noise 1 hari)
+    5. Retail panic detection: retail mendominasi seller 3+ hari
+       → contrarian bullish (retail sudah cutloss, potensi bottom)
+
+    Return dict:
+        score                 : float -1..+1 (siap pakai sebagai bandar_flow_val)
+        raw_weighted          : float -1..+1 (weighted average murni tanpa bonus)
+        consistency_bonus     : float (bonus dari konsistensi broker)
+        panic_bonus           : float (bonus dari retail panic)
+        n_snapshots           : int (jumlah snapshot yang berhasil diparse)
+        consistent_buyers     : list[str] (broker akumulator konsisten)
+        consistent_sellers    : list[str] (broker distributor konsisten)
+        retail_panic_detected : bool
+        freshness_hours       : float | None (umur snapshot terbaru)
+        trend                 : str (accumulating|distributing|mixed|no_data)
+        latest_date           : str | None (YYYY-MM-DD)
+    """
+    _empty = {
+        'score': 0.0, 'raw_weighted': 0.0,
+        'consistency_bonus': 0.0, 'panic_bonus': 0.0,
+        'n_snapshots': 0, 'consistent_buyers': [], 'consistent_sellers': [],
+        'retail_panic_detected': False, 'freshness_hours': None,
+        'trend': 'no_data', 'latest_date': None,
+    }
+
+    try:
+        ticker_clean = str(ticker).upper().replace(".JK", "").strip()
+        if not ticker_clean:
+            return _empty
+
+        history = load_broksum_history(ticker_clean)
+        if not history:
+            return _empty
+
+        # Sort terbaru dulu
+        history_sorted = sorted(
+            history,
+            key=lambda r: str(r.get('upload_date', '')),
+            reverse=True
+        )
+        recent = history_sorted[:days]
+
+        # ── Parse tiap snapshot ──
+        snapshots = []
+        for h in recent:
+            try:
+                raw_b = h.get('top_buyers', '[]')
+                raw_s = h.get('top_sellers', '[]')
+                buyers = json.loads(raw_b) if isinstance(raw_b, str) else (raw_b or [])
+                sellers = json.loads(raw_s) if isinstance(raw_s, str) else (raw_s or [])
+
+                if not buyers and not sellers:
+                    continue
+
+                top3_buy = sum(float(b.get('volume_lot', 0) or 0)
+                               for b in buyers[:3] if isinstance(b, dict))
+                top3_sell = sum(float(s.get('volume_lot', 0) or 0)
+                                for s in sellers[:3] if isinstance(s, dict))
+                tot_buy = sum(float(b.get('volume_lot', 0) or 0)
+                              for b in buyers if isinstance(b, dict))
+                tot_sell = sum(float(s.get('volume_lot', 0) or 0)
+                               for s in sellers if isinstance(s, dict))
+
+                proxy = max(tot_buy, tot_sell, 1.0)
+                net_ratio = (top3_buy - top3_sell) / proxy
+                net_ratio = float(np.clip(net_ratio, -1.0, 1.0))
+
+                buyer_codes = [str(b.get('broker', '')).upper().strip()
+                               for b in buyers[:5] if isinstance(b, dict)]
+                seller_codes = [str(s.get('broker', '')).upper().strip()
+                                for s in sellers[:5] if isinstance(s, dict)]
+
+                snapshots.append({
+                    'date': str(h.get('upload_date', ''))[:10],
+                    'net_ratio': net_ratio,
+                    'buyer_codes': [c for c in buyer_codes if c],
+                    'seller_codes': [c for c in seller_codes if c],
+                })
+            except Exception:
+                continue
+
+        if not snapshots:
+            return _empty
+
+        # ── Weighted average dengan exponential decay ──
+        DECAY = 0.75
+        weights = [DECAY ** i for i in range(len(snapshots))]
+        total_w = sum(weights)
+        weighted_score = sum(s['net_ratio'] * w
+                             for s, w in zip(snapshots, weights)) / total_w
+
+        # ── Konsistensi broker ──
+        from collections import Counter
+        buyer_counter = Counter()
+        seller_counter = Counter()
+        for s in snapshots:
+            for code in s['buyer_codes']:
+                buyer_counter[code] += 1
+            for code in s['seller_codes']:
+                seller_counter[code] += 1
+
+        # Muncul di ≥60% snapshot (minimal 3 hari kalau ada cukup data)
+        threshold = max(3, int(len(snapshots) * 0.6))
+        consistent_buyers = [c for c, n in buyer_counter.items() if n >= threshold]
+        consistent_sellers = [c for c, n in seller_counter.items() if n >= threshold]
+
+        consistency_bonus = 0.0
+        if consistent_buyers:
+            consistency_bonus += min(0.15 * len(consistent_buyers), 0.30)
+        if consistent_sellers:
+            consistency_bonus -= min(0.15 * len(consistent_sellers), 0.30)
+
+        # ── Retail panic detection ──
+        retail_brokers = {"YP", "PD", "XC", "KK", "NI", "CC", "XL", "AZ"}
+        retail_seller_days = 0
+        for s in snapshots:
+            if len(set(s['seller_codes'][:3]) & retail_brokers) >= 2:
+                retail_seller_days += 1
+
+        retail_panic = retail_seller_days >= max(3, int(len(snapshots) * 0.6))
+        panic_bonus = 0.15 if retail_panic else 0.0
+
+        # ── Final score ──
+        final_score = float(np.clip(
+            weighted_score * 0.7 + consistency_bonus + panic_bonus,
+            -1.0, 1.0
+        ))
+
+        # ── Freshness ──
+        try:
+            latest_date = snapshots[0]['date']
+            dt_latest = datetime.strptime(latest_date, "%Y-%m-%d")
+            now_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).replace(tzinfo=None)
+            freshness_hours = (now_jkt - dt_latest).total_seconds() / 3600
+        except Exception:
+            freshness_hours = None
+            latest_date = snapshots[0].get('date')
+
+        # ── Trend label ──
+        if final_score > 0.30:
+            trend = 'accumulating'
+        elif final_score < -0.30:
+            trend = 'distributing'
+        else:
+            trend = 'mixed'
+
+        return {
+            'score': final_score,
+            'raw_weighted': float(weighted_score),
+            'consistency_bonus': float(consistency_bonus),
+            'panic_bonus': float(panic_bonus),
+            'n_snapshots': len(snapshots),
+            'consistent_buyers': consistent_buyers,
+            'consistent_sellers': consistent_sellers,
+            'retail_panic_detected': retail_panic,
+            'freshness_hours': freshness_hours,
+            'trend': trend,
+            'latest_date': latest_date,
+        }
+
+    except Exception as e:
+        return {**_empty, 'error': str(e)}    
 @st.cache_data(ttl=1800, show_spinner=False)
 def _fetch_idx_all_stock_summary():
     """Ambil semua data saham dari IDX sekali request (cache 30 menit).
@@ -7383,33 +7557,31 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     foreign_zscore_val = 0.0
     is_retail_trap = False
 
-    # 1. Bandar Flow (Broksum)
-    broksum = get_latest_broksum_for_ticker(ticker_raw)
-    if broksum:
-        top_buyers = broksum.get('top_buyers', [])
-        top_sellers = broksum.get('top_sellers', [])
-        
-        # Hitung rasio akumulasi Top 3 Net Buy
-        if top_buyers:
-            tot_buyer_vol = sum(float(b.get("volume_lot", 0) or 0) for b in top_buyers if isinstance(b, dict))
-            top3_vol = sum(float(b.get("volume_lot", 0) or 0) for b in top_buyers[:3] if isinstance(b, dict))
-            
-            tot_seller_vol = sum(float(s.get("volume_lot", 0) or 0) for s in top_sellers if isinstance(s, dict))
-            top3_sell_vol = sum(float(s.get("volume_lot", 0) or 0) for s in top_sellers[:3] if isinstance(s, dict))
-            
-            tot_vol_proxy = (tot_buyer_vol + tot_seller_vol) / 2
-            if tot_vol_proxy > 0:
-                accum_ratio = (top3_vol - top3_sell_vol) / tot_vol_proxy
-                bandar_flow_val = float(np.clip(accum_ratio * 5.0, -1.0, 1.0)) # >0.2 -> 1, <-0.2 -> -1
-        
-        # Retail trap: Retail mendominasi Buy, Bandar mendominasi Sell
-        retail_brokers = {"YP", "PD", "XC", "KK", "NI", "CC"}
-        top_3_buyer_codes = {str(b.get("broker", "")).upper() for b in top_buyers[:3] if isinstance(b, dict)}
-        top_3_seller_codes = {str(s.get("broker", "")).upper() for s in top_sellers[:3] if isinstance(s, dict)}
-        
-        bandar_sellers = len(top_3_seller_codes - retail_brokers)
-        if len(top_3_buyer_codes.intersection(retail_brokers)) >= 2 and bandar_sellers >= 2:
-            is_retail_trap = True
+    # 1. Bandar Flow (Broksum) — MULTI-DAY weighted
+    bandar_metadata = {}
+    bandar_multi = compute_multi_day_bandar_score(ticker_raw, days=10)
+
+    if bandar_multi.get('n_snapshots', 0) > 0:
+        bandar_flow_val = bandar_multi['score']
+        bandar_metadata = bandar_multi
+
+        # Retail trap: broker retail dominan di BUY sementara bandar dominan di SELL
+        # Cek dari snapshot TERBARU (bukan multi-day)
+        latest_bs = get_latest_broksum_for_ticker(ticker_raw)
+        if latest_bs:
+            top_buyers_latest = latest_bs.get('top_buyers', [])
+            top_sellers_latest = latest_bs.get('top_sellers', [])
+
+            retail_brokers = {"YP", "PD", "XC", "KK", "NI", "CC"}
+            top_3_buyer_codes = {str(b.get("broker", "")).upper()
+                                for b in top_buyers_latest[:3] if isinstance(b, dict)}
+            top_3_seller_codes = {str(s.get("broker", "")).upper()
+                                for s in top_sellers_latest[:3] if isinstance(s, dict)}
+
+            bandar_sellers = len(top_3_seller_codes - retail_brokers)
+            if (len(top_3_buyer_codes.intersection(retail_brokers)) >= 2
+                    and bandar_sellers >= 2):
+                is_retail_trap = True
 
     # 2. Foreign Flow Z-Score
     foreign_df = load_foreign_flow_history(ticker_raw, days=30)
@@ -8407,6 +8579,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "bandar_flow_val": bandar_flow_val,
         "foreign_zscore_val": foreign_zscore_val,
         "is_retail_trap": is_retail_trap,
+        "bandar_metadata": bandar_metadata,
         "is_mtf_bullish": is_mtf_bullish,
         "mtf_status_text": mtf_status_text,
         "is_marking_close": is_marking_close,
@@ -9028,7 +9201,124 @@ def display_analysis_result(res):
             }
             weight_insight += interpretations.get(max_factor, "")
             st.info(weight_insight)
+        st.markdown("### 🐋 Bandar Flow (Multi-Day)")
+        bm = res.get('bandar_metadata', {})
 
+        if bm.get('n_snapshots', 0) > 0:
+            score = bm['score']
+            trend = bm['trend']
+            n_snap = bm['n_snapshots']
+            fresh = bm.get('freshness_hours')
+            latest_date = bm.get('latest_date', 'N/A')
+
+            # Tentukan warna & label
+            if trend == 'accumulating':
+                trend_icon, trend_color, trend_label = "🟢", "#10b981", "AKUMULASI"
+            elif trend == 'distributing':
+                trend_icon, trend_color, trend_label = "🔴", "#ef4444", "DISTRIBUSI"
+            else:
+                trend_icon, trend_color, trend_label = "⚖️", "#94a3b8", "MIXED"
+
+            # Freshness label
+            if fresh is not None:
+                if fresh < 24:
+                    fresh_str = f"{fresh:.0f} jam lalu"
+                else:
+                    fresh_str = f"{fresh/24:.1f} hari lalu"
+            else:
+                fresh_str = "unknown"
+
+            # ── Header card ──
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,{trend_color}18 0%,#1e293b 100%);
+                border-left:4px solid {trend_color}; border-radius:10px;
+                padding:12px 16px; margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                    <div>
+                        <div style="color:{trend_color};font-size:10px;font-weight:700;
+                            letter-spacing:1.2px;text-transform:uppercase;">
+                            {trend_icon} {trend_label}
+                        </div>
+                        <div style="color:#f3f4f6;font-size:22px;font-weight:800;
+                            margin-top:4px;letter-spacing:-0.01em;">
+                            {score:+.3f}
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="color:#94a3b8;font-size:10px;">
+                            {n_snap} snapshot · EOD {latest_date}
+                        </div>
+                        <div style="color:#64748b;font-size:10px;margin-top:2px;">
+                            🕒 {fresh_str}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── Breakdown komponen skor ──
+            comp1, comp2, comp3 = st.columns(3)
+            comp1.metric(
+                "Weighted Net",
+                f"{bm['raw_weighted']:+.3f}",
+                help="Weighted average net flow dari N snapshot (decay 0.75)"
+            )
+            comp2.metric(
+                "Consistency Bonus",
+                f"{bm['consistency_bonus']:+.2f}",
+                help="Bonus dari broker yang muncul konsisten di top buyer/seller"
+            )
+            comp3.metric(
+                "Panic Bonus",
+                f"{bm['panic_bonus']:+.2f}",
+                help="Retail panic → contrarian bullish signal"
+            )
+
+            # ── Konsistensi broker ──
+            cb = bm.get('consistent_buyers', [])
+            cs = bm.get('consistent_sellers', [])
+
+            if cb or cs:
+                st.markdown("**🔁 Broker Konsisten (≥60% snapshot):**")
+                cols = st.columns(2)
+                with cols[0]:
+                    if cb:
+                        st.markdown(
+                            f"<div style='background:#10b98115;border-left:3px solid #10b981;"
+                            f"border-radius:6px;padding:8px 12px;'>"
+                            f"<div style='color:#10b981;font-size:10px;font-weight:700;'>"
+                            f"🐋 AKUMULATOR KONSISTEN</div>"
+                            f"<div style='color:#cbd5e1;font-size:12px;margin-top:4px;'>"
+                            f"{', '.join(cb)}</div></div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.caption("_Tidak ada akumulator konsisten_")
+                with cols[1]:
+                    if cs:
+                        st.markdown(
+                            f"<div style='background:#ef444415;border-left:3px solid #ef4444;"
+                            f"border-radius:6px;padding:8px 12px;'>"
+                            f"<div style='color:#ef4444;font-size:10px;font-weight:700;'>"
+                            f"🔻 DISTRIBUTOR KONSISTEN</div>"
+                            f"<div style='color:#cbd5e1;font-size:12px;margin-top:4px;'>"
+                            f"{', '.join(cs)}</div></div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        st.caption("_Tidak ada distributor konsisten_")
+
+            # ── Retail panic warning ──
+            if bm.get('retail_panic_detected'):
+                st.warning(
+                    "🟢 **Retail Panic Detected** — retail konsisten jual 3+ hari. "
+                    "Secara contrarian, ini sering jadi sinyal bottom (retail sudah cutloss)."
+                )
+        else:
+            st.info(
+                "ℹ️ Belum cukup snapshot broksum untuk multi-day analysis. "
+                "Upload broksum minimal 3-5 hari untuk mengaktifkan fitur ini."
+            )
         st.markdown("### 🧠 Status Memori Adaptif")
         st.caption(
             "**Accuracy** = seberapa sering sinyal faktor sesuai arah harga. **Error EMA** = rata‑rata kesalahan prediksi (makin kecil makin baik)."
