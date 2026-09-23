@@ -9308,12 +9308,30 @@ def display_analysis_result(res):
                     else:
                         st.caption("_Tidak ada distributor konsisten_")
 
-            # ── Retail panic warning ──
+            # ── Retail panic warning — soft green card (bukan st.warning kuning) ──
             if bm.get('retail_panic_detected'):
-                st.warning(
-                    "🟢 **Retail Panic Detected** — retail konsisten jual 3+ hari. "
-                    "Secara contrarian, ini sering jadi sinyal bottom (retail sudah cutloss)."
-                )
+                st.markdown("""
+                    <div style="background:linear-gradient(135deg,#10b98112 0%,#10b98105 100%);
+                        border-left:4px solid #10b981;
+                        border-radius:8px;
+                        padding:10px 14px;
+                        margin-top:10px;">
+                        <div style="display:flex;align-items:flex-start;gap:10px;">
+                            <span style="font-size:16px;line-height:1.2;">🟢</span>
+                            <div>
+                                <div style="color:#10b981;font-size:11px;font-weight:700;
+                                    letter-spacing:0.8px;text-transform:uppercase;margin-bottom:3px;">
+                                    Retail Panic Detected
+                                </div>
+                                <div style="color:#cbd5e1;font-size:11.5px;line-height:1.55;">
+                                    Retail konsisten jual <b style="color:#e2e8f0;">3+ hari</b>.
+                                    Secara contrarian, ini sering jadi sinyal <b style="color:#34d399;">bottom</b> —
+                                    retail sudah cutloss.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
         else:
             st.info(
                 "ℹ️ Belum cukup snapshot broksum untuk multi-day analysis. "
