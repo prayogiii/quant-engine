@@ -4910,168 +4910,178 @@ with st.sidebar:
     # ═══════════════════════════════════════════════════════════
     st.markdown("""
         <style>
-        /* ═══════════════════════════════════════════════════════
-        📱 MOBILE INPUT VISIBILITY FIX
-        Bikin input field KELIHATAN sebagai input, bukan text biasa
-        ═══════════════════════════════════════════════════════ */
+        /* Sidebar container */
+        section[data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #0f1116 0%, #131720 100%);
+            border-right: 1px solid #1e293b;
+        }
+        section[data-testid="stSidebar"] > div {
+            padding-top: 10px;
+        }
 
-        /* ─── Text Input, Number Input, Text Area ─── */
+        /* Section header */
+        .sb-section {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 14px 0 6px 0;
+            margin: 6px 0 4px 0;
+            border-top: 1px solid #1e293b;
+        }
+        .sb-section.first { border-top: none; margin-top: 0; padding-top: 4px; }
+        .sb-section-icon { font-size: 15px; line-height: 1; }
+        .sb-section-title {
+            color: #f3f4f6;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.3px;
+            text-transform: uppercase;
+        }
+        .sb-section-caption {
+            color: #64748b;
+            font-size: 10px;
+            margin-left: 2px;
+            font-weight: 500;
+            letter-spacing: 0.2px;
+            text-transform: none;
+        }
+
+        /* Brand header */
+        .sb-brand {
+            background: linear-gradient(135deg, #00ffcc0a 0%, #a855f70a 100%);
+            border: 1px solid #1e293b;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin: 4px 0 6px 0;
+            position: relative;
+            overflow: hidden;
+        }
+        .sb-brand::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #00ffcc, #a855f7, #00ffcc);
+        }
+        .sb-brand-title {
+            color: #f3f4f6;
+            font-size: 19px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            margin: 0;
+            line-height: 1.1;
+        }
+        .sb-brand-title span { color: #00ffcc; }
+        .sb-brand-sub {
+            color: #64748b;
+            font-size: 9px;
+            margin-top: 5px;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        /* Active swing alert */
+        .sb-alert-swing {
+            background: linear-gradient(135deg, #a855f718 0%, #a855f705 100%);
+            border-left: 3px solid #a855f7;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin: 10px 0;
+        }
+        .sb-alert-swing-title {
+            color: #c084fc;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+        .sb-alert-swing-body {
+            color: #cbd5e1;
+            font-size: 11px;
+            line-height: 1.55;
+        }
+        .sb-alert-swing-body b { color: #e9d5ff; }
+
+        /* API status pill */
+        .sb-api-ok {
+            background: #10b98115;
+            border: 1px solid #10b98140;
+            color: #10b981;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 7px 10px;
+            border-radius: 7px;
+            text-align: center;
+            letter-spacing: 0.4px;
+        }
+        .sb-api-off {
+            background: #f59e0b15;
+            border: 1px solid #f59e0b40;
+            color: #f59e0b;
+            font-size: 10px;
+            font-weight: 700;
+            padding: 7px 10px;
+            border-radius: 7px;
+            text-align: center;
+            letter-spacing: 0.4px;
+        }
+
+        /* Buttons */
+        section[data-testid="stSidebar"] .stButton > button {
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 12px;
+            padding: 8px 12px;
+            transition: all 0.15s ease;
+        }
+        section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+            background: linear-gradient(135deg, #00ffcc 0%, #10b981 100%);
+            color: #0f1116;
+            border: none;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+        }
+        section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+            box-shadow: 0 4px 14px rgba(0, 255, 204, 0.35);
+            transform: translateY(-1px);
+        }
+
+        /* Inputs */
         section[data-testid="stSidebar"] .stTextInput > div > div > input,
         section[data-testid="stSidebar"] .stNumberInput > div > div > input,
-        section[data-testid="stSidebar"] .stTextArea > div > div > textarea {
-            background-color: #1a1d24 !important;
-            border: 1.5px solid #334155 !important;
-            border-radius: 10px !important;
-            color: #f3f4f6 !important;
-            font-size: 14px !important;
-            padding: 12px 14px !important;
-            transition: all 0.15s ease !important;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) inset !important;
+        section[data-testid="stSidebar"] .stSelectbox > div > div > div {
+            border-radius: 8px;
+            font-size: 12px;
         }
 
-        /* Focus state — glow teal */
-        section[data-testid="stSidebar"] .stTextInput > div > div > input:focus,
-        section[data-testid="stSidebar"] .stNumberInput > div > div > input:focus,
-        section[data-testid="stSidebar"] .stTextArea > div > div > textarea:focus {
-            border-color: #00ffcc !important;
-            box-shadow: 0 0 0 3px rgba(0, 255, 204, 0.15),
-                        0 1px 3px rgba(0, 0, 0, 0.3) inset !important;
-            background-color: #1e232e !important;
-            outline: none !important;
-        }
-
-        /* Placeholder lebih terang */
-        section[data-testid="stSidebar"] .stTextInput > div > div > input::placeholder,
-        section[data-testid="stSidebar"] .stNumberInput > div > div > input::placeholder,
-        section[data-testid="stSidebar"] .stTextArea > div > div > textarea::placeholder {
-            color: #64748b !important;
-            opacity: 1 !important;
-        }
-
-        /* ─── Selectbox ─── */
-        section[data-testid="stSidebar"] .stSelectbox > div > div > div,
-        section[data-testid="stSidebar"] .stMultiSelect > div > div > div {
-            background-color: #1a1d24 !important;
-            border: 1.5px solid #334155 !important;
-            border-radius: 10px !important;
-            font-size: 14px !important;
-            padding: 4px 8px !important;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) inset !important;
-        }
-
-        section[data-testid="stSidebar"] .stSelectbox > div > div > div:hover,
-        section[data-testid="stSidebar"] .stMultiSelect > div > div > div:hover {
-            border-color: #475569 !important;
-        }
-
-        /* ─── Label di atas input — biar jelas mana label mana input ─── */
-        section[data-testid="stSidebar"] .stTextInput > label,
-        section[data-testid="stSidebar"] .stNumberInput > label,
-        section[data-testid="stSidebar"] .stSelectbox > label,
-        section[data-testid="stSidebar"] .stMultiSelect > label,
-        section[data-testid="stSidebar"] .stTextArea > label,
-        section[data-testid="stSidebar"] .stCheckbox > label {
-            color: #cbd5e1 !important;
-            font-size: 12.5px !important;
-            font-weight: 600 !important;
-            letter-spacing: 0.02em !important;
-            margin-bottom: 6px !important;
-        }
-
-        /* ─── Checkbox — bikin lebih besar & keliatan ─── */
-        section[data-testid="stSidebar"] .stCheckbox {
-            background-color: #131720 !important;
-            border: 1.5px solid #1e293b !important;
-            border-radius: 10px !important;
-            padding: 10px 12px !important;
-            transition: all 0.15s ease !important;
-        }
-        section[data-testid="stSidebar"] .stCheckbox:hover {
-            border-color: #334155 !important;
-            background-color: #1a1d24 !important;
-        }
-
-        /* ─── Radio — sama treatment ─── */
-        section[data-testid="stSidebar"] div[role="radiogroup"] {
-            background-color: #131720 !important;
-            border: 1.5px solid #1e293b !important;
-            border-radius: 10px !important;
-            padding: 10px 12px !important;
-            gap: 4px !important;
-        }
-        section[data-testid="stSidebar"] div[role="radiogroup"] label {
-            padding: 6px 4px !important;
-            border-radius: 6px !important;
-            transition: background 0.15s ease !important;
-        }
-        section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-            background-color: #1e293b !important;
-        }
-
-        /* ─── Expander header — bikin lebih kontras ─── */
+        /* Expander polish */
         section[data-testid="stSidebar"] details {
-            background: #131720 !important;
-            border: 1.5px solid #1e293b !important;
+            border: 1px solid #1e293b !important;
+            border-radius: 10px;
+            background: #0d1017;
+            overflow: hidden;
+            margin-top: 6px;
         }
         section[data-testid="stSidebar"] details > summary {
-            padding: 12px 14px !important;
-            font-size: 13px !important;
-            color: #cbd5e1 !important;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 10px 12px;
+            color: #cbd5e1;
         }
-        section[data-testid="stSidebar"] details > summary:hover {
-            background: #1a1d24 !important;
+        section[data-testid="stSidebar"] details[open] > summary {
+            border-bottom: 1px solid #1e293b;
+            background: #131720;
         }
-
-        /* ─── Spacing antar widget — biar gak dempet ─── */
-        section[data-testid="stSidebar"] .stTextInput,
-        section[data-testid="stSidebar"] .stNumberInput,
-        section[data-testid="stSidebar"] .stSelectbox,
-        section[data-testid="stSidebar"] .stMultiSelect,
-        section[data-testid="stSidebar"] .stTextArea,
-        section[data-testid="stSidebar"] .stCheckbox {
-            margin-bottom: 6px !important;
+        section[data-testid="stSidebar"] details > div {
+            padding: 12px;
         }
 
-        /* ═══════════════════════════════════════════════════════
-        📱 MOBILE-SPECIFIC (lebar layar < 768px)
-        ═══════════════════════════════════════════════════════ */
-        @media (max-width: 768px) {
-
-            /* Input lebih tinggi untuk touch target */
-            section[data-testid="stSidebar"] .stTextInput > div > div > input,
-            section[data-testid="stSidebar"] .stNumberInput > div > div > input,
-            section[data-testid="stSidebar"] .stSelectbox > div > div > div {
-                min-height: 46px !important;
-                font-size: 15px !important;
-                padding: 12px 16px !important;
-            }
-
-            /* Border lebih tebal di HP biar keliatan */
-            section[data-testid="stSidebar"] .stTextInput > div > div > input,
-            section[data-testid="stSidebar"] .stNumberInput > div > div > input,
-            section[data-testid="stSidebar"] .stSelectbox > div > div > div {
-                border-width: 2px !important;
-                border-color: #3b4757 !important;
-            }
-
-            /* Label lebih besar di HP */
-            section[data-testid="stSidebar"] .stTextInput > label,
-            section[data-testid="stSidebar"] .stNumberInput > label,
-            section[data-testid="stSidebar"] .stSelectbox > label,
-            section[data-testid="stSidebar"] .stCheckbox > label {
-                font-size: 13.5px !important;
-            }
-
-            /* Checkbox container lebih lega */
-            section[data-testid="stSidebar"] .stCheckbox {
-                padding: 14px 14px !important;
-            }
-
-            /* Button lebih tinggi biar gampang di-tap */
-            section[data-testid="stSidebar"] .stButton > button {
-                min-height: 46px !important;
-                font-size: 14px !important;
-            }
+        /* Dividers */
+        section[data-testid="stSidebar"] hr {
+            margin: 12px 0;
+            border-color: #1e293b;
         }
         </style>
     """, unsafe_allow_html=True)
