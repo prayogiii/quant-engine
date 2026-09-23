@@ -4672,7 +4672,34 @@ def display_bandarmology_tab(ticker):
 # KONFIGURASI HALAMAN & STYLING
 # ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
-
+# ═══════════════════════════════════════════════════════════
+# 🔒 FORCE DARK MODE + HIDE THEME SWITCHER
+# ═══════════════════════════════════════════════════════════
+st.markdown("""
+    <style>
+    /* Kunci color-scheme browser */
+    html, body, [data-testid="stAppViewContainer"] {
+        color-scheme: dark !important;
+    }
+    /* Sembunyikan hamburger menu (⋮) yang isinya theme switcher */
+    #MainMenu { visibility: hidden !important; }
+    /* Sembunyikan footer default */
+    footer { visibility: hidden !important; }
+    /* Sembunyikan tombol Deploy */
+    .stDeployButton { display: none !important; }
+    /* Paksa background gelap di semua container utama */
+    [data-testid="stAppViewContainer"],
+    [data-testid="stHeader"],
+    [data-testid="stSidebar"],
+    [data-testid="stBottom"] {
+        background-color: #0f1116 !important;
+    }
+    /* Paksa teks tetap terang */
+    [data-testid="stAppViewContainer"] * {
+        color-scheme: dark;
+    }
+    </style>
+""", unsafe_allow_html=True)
 if "sheets_initialized" not in st.session_state:
     init_sheets()
     st.session_state.sheets_initialized = True
