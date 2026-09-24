@@ -6360,7 +6360,6 @@ with st.sidebar:
                 st.caption(f"❌ Tidak ada hasil untuk '{search_query}'.")
             else:
                 st.caption("Belum ada riwayat.")
-
     # ═══════════════════════════════════════════════════════════
     # SECTION 8: AI GEMINI
     # ═══════════════════════════════════════════════════════════
@@ -8043,7 +8042,10 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     th_hold   = -score_std * 0.4
     
     if total_score > th_buy:
-        if is_retail_trap:
+        if regime == "Sideways Bias Turun ↘️":
+            signal = "⏸️ HOLD / WAIT (Sideways Downtrend — Low WR Regime)"
+            total_score = th_hold + 0.01
+        elif is_retail_trap:
             signal = "⏸️ HOLD / WAIT (Retail Trap Warning)"
             total_score = th_hold + 0.01
         elif is_marking_close or is_no_demand:
@@ -8071,52 +8073,45 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             signal += " 🟢 (Watchlist — Absorption Terdeteksi)"
 
     # ------------------------------------------------------------------
-    # 12. ENTRY ZONE
+    # 12. ENTRY ZONE (v2 — anti-NT, more accommodating)
     # ------------------------------------------------------------------
     if s1 >= harga_terakhir * 0.98:
         entry_low = s1
     else:
         entry_low = harga_terakhir * (1 - atr_pct / 100)
 
-    if "STRONG BUY" in signal:
-        entry_high = harga_terakhir
+    if "STRONG BUY" in signal or "BUY" in signal:
+        gap_catch_bonus = min(0.5 * atr_pct / 100, 0.015) 
+        entry_high = harga_terakhir * (1 + gap_catch_bonus)
     else:
-        entry_high = harga_terakhir * (1 - 0.3 * atr_pct / 100)
+        entry_high = harga_terakhir * (1 - 0.15 * atr_pct / 100)
 
     if entry_low > entry_high:
         entry_low, entry_high = entry_high, entry_low
-
-    min_entry_width = 0.5 * atr14_val
+    min_entry_width = 0.6 * atr14_val
     if (entry_high - entry_low) < min_entry_width:
         entry_low = max(0, entry_high - min_entry_width)
         entry_high = entry_low + min_entry_width
-        entry_high = min(entry_high, harga_terakhir)
-
-    # Baca entry_error dari v12_mem (parameter thread-safe), fallback ke session_state
     if v12_mem is not None:
         mem_for_entry = v12_mem.get(ticker_raw, {})
     else:
         mem_for_entry = st.session_state.v12_memory.get(ticker_raw, {})
     entry_error = mem_for_entry.get('entry_error_ema', 0.0)
+
     if entry_error > 0:
-        entry_low += entry_error * 0.2
-        entry_high += entry_error * 0.2
-
-    entry_high = min(entry_high, harga_terakhir)
-    entry_low = min(entry_low, entry_high)
-
-    # ── Guard: kalau entry_low/high NaN, fallback ke harga_terakhir ──
+        max_shift = harga_terakhir * 0.015   
+        shift = min(entry_error * 0.15, max_shift)   
+        entry_low += shift
+        entry_high += shift
     if (entry_low is None) or (isinstance(entry_low, float) and math.isnan(entry_low)) or entry_low <= 0:
         entry_low = harga_terakhir * 0.98 if harga_terakhir > 0 else 1
     if (entry_high is None) or (isinstance(entry_high, float) and math.isnan(entry_high)) or entry_high <= 0:
         entry_high = harga_terakhir if harga_terakhir > 0 else 1
     if entry_low > entry_high:
         entry_low, entry_high = entry_high, entry_low
-
     entry_low_f = fraksi_bei(entry_low)
     entry_high_f = fraksi_bei(entry_high)
     entry_zone_f = f"Rp {entry_low_f:,.0f} - Rp {entry_high_f:,.0f}"
-
     # ------------------------------------------------------------------
     # 13. SL & TP
     # ------------------------------------------------------------------
