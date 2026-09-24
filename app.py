@@ -2138,7 +2138,7 @@ def muat_riwayat_actual():
     return data
 
 def hitung_statistik_riwayat_actual(riwayat_actual):
-    """Menghitung statistik Win Rate aktual dari st.session_state.riwayat_actual."""
+    """WR v2 — sertakan NT sebagai non-win (honest metrics)."""
     if not riwayat_actual or not isinstance(riwayat_actual, dict):
         return None
     
@@ -2163,20 +2163,17 @@ def hitung_statistik_riwayat_actual(riwayat_actual):
         
         if outcome == 'Win':
             total_win += 1
-            if gaya == 'SW':
-                win_sw += 1
-            elif gaya == 'DT':
-                win_dt += 1
+            if gaya == 'SW': win_sw += 1
+            elif gaya == 'DT': win_dt += 1
         elif outcome == 'Loss':
             total_loss += 1
-            if gaya == 'SW':
-                loss_sw += 1
-            elif gaya == 'DT':
-                loss_dt += 1
+            if gaya == 'SW': loss_sw += 1
+            elif gaya == 'DT': loss_dt += 1
         elif outcome == 'Not Touched' or val.get('Entry_Miss') == 'Yes':
             total_not_touched += 1
-            
+    
     total_eval = total_win + total_loss
+    total_all = total_eval + total_not_touched
     
     eval_sw = win_sw + loss_sw
     wr_sw = (win_sw / eval_sw * 100) if eval_sw > 0 else None
@@ -2184,18 +2181,24 @@ def hitung_statistik_riwayat_actual(riwayat_actual):
     eval_dt = win_dt + loss_dt
     wr_dt = (win_dt / eval_dt * 100) if eval_dt > 0 else None
     
-    if total_eval == 0:
-        return {
-            'total_eval': 0,
-            'total_win': 0,
-            'total_loss': 0,
-            'total_not_touched': total_not_touched,
-            'win_rate': None,
-            'wr_sw': wr_sw,
-            'eval_sw': eval_sw,
-            'wr_dt': wr_dt,
-            'eval_dt': eval_dt
-        }
+    # ▼ TAMBAHAN BARU
+    win_rate_honest = (total_win / total_all * 100) if total_all > 0 else None
+    nt_rate = (total_not_touched / total_all * 100) if total_all > 0 else None
+    
+    return {
+        'total_eval': total_eval,
+        'total_all': total_all,
+        'total_win': total_win,
+        'total_loss': total_loss,
+        'total_not_touched': total_not_touched,
+        'win_rate': (total_win / total_eval * 100) if total_eval > 0 else None,
+        'win_rate_honest': win_rate_honest,   # ← baru
+        'nt_rate': nt_rate,                    # ← baru
+        'wr_sw': wr_sw,
+        'eval_sw': eval_sw,
+        'wr_dt': wr_dt,
+        'eval_dt': eval_dt,
+    }
         
     win_rate = (total_win / total_eval) * 100
     
@@ -10366,12 +10369,14 @@ else:
             </div>
             """
 
-        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1, sc2, sc3, sc4, sc5 = st.columns(5)
         with sc1:
             st.markdown(_stat_card(
-                "System Win Rate", f"{wr_val:.1f}%",
-                f"{stats_actual['total_eval']} evaluated signals",
-                wr_color, wr_icon), unsafe_allow_html=True)
+                "System Win Rate", 
+                f"{wr_val:.1f}%",
+                f"Honest: {stats_actual.get('win_rate_honest', 0):.1f}% · {stats_actual['total_eval']} eval",
+                wr_color, wr_icon
+            ), unsafe_allow_html=True)
         with sc2:
             st.markdown(_stat_card(
                 "Win / Loss", f"{stats_actual['total_win']} / {stats_actual['total_loss']}",
@@ -10387,6 +10392,10 @@ else:
             dt_sub = f"{stats_actual['eval_dt']} trades" if stats_actual['eval_dt'] > 0 else "No data yet"
             dt_col = "#06b6d4" if stats_actual['wr_dt'] is not None else "#64748b"
             st.markdown(_stat_card("Day Trade Win Rate", dt_txt, dt_sub, dt_col, "⏱️"), unsafe_allow_html=True)
+        nt = stats_actual.get('nt_rate', 0)
+        nt_color = "#ef4444" if nt > 25 else ("#f59e0b" if nt > 15 else "#10b981")
+        with sc5:
+            st.markdown(_stat_card("Not Touched", f"{nt:.1f}%", f"{stats_actual['total_not_touched']} entries missed", nt_color, "🚫"), unsafe_allow_html=True)
     else:
         st.markdown("""
         <div style="background:#1a1d24; border:1px dashed #334155;
