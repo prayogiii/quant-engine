@@ -2210,7 +2210,73 @@ def hitung_statistik_riwayat_actual(riwayat_actual):
         'wr_dt': wr_dt,
         'eval_dt': eval_dt
     }
-
+def diagnose_winrate_trend(riwayat_data, riwayat_actual):
+    """
+    Diagnostik WR: per bulan, per regime, per gaya, per ticker.
+    """
+    from collections import defaultdict
+    
+    seen_ids = set()
+    records = []
+    
+    for r in riwayat_data:
+        waktu = r.get('Waktu', '')
+        saham = r.get('Saham', '')
+        gaya = r.get('Gaya', 'SW')
+        regime = r.get('Rezim', 'unknown')
+        mode_actual = "swing" if gaya == "SW" else "daytrade"
+        
+        actual = (riwayat_actual.get((waktu, saham, gaya)) or
+                  riwayat_actual.get((waktu, saham, mode_actual)) or
+                  riwayat_actual.get((waktu, saham)))
+        if not actual:
+            continue
+        
+        obj_id = id(actual)
+        if obj_id in seen_ids:
+            continue
+        seen_ids.add(obj_id)
+        
+        outcome = actual.get('Outcome', '')
+        entry_miss = actual.get('Entry_Miss') == 'Yes'
+        
+        try:
+            bulan = waktu[:7]
+        except:
+            bulan = 'unknown'
+        
+        records.append({
+            'bulan': bulan,
+            'gaya': gaya,
+            'regime': regime,
+            'saham': saham,
+            'outcome': 'NT' if (entry_miss or outcome == 'Not Touched') 
+                       else (outcome if outcome in ('Win', 'Loss') else 'kosong'),
+        })
+    
+    per_bulan = defaultdict(lambda: {'win': 0, 'loss': 0, 'nt': 0})
+    per_regime = defaultdict(lambda: {'win': 0, 'loss': 0, 'nt': 0})
+    per_gaya = defaultdict(lambda: {'win': 0, 'loss': 0, 'nt': 0})
+    
+    for r in records:
+        for bucket, key in [
+            (per_bulan, r['bulan']),
+            (per_regime, r['regime']),
+            (per_gaya, r['gaya']),
+        ]:
+            if r['outcome'] == 'Win':
+                bucket[key]['win'] += 1
+            elif r['outcome'] == 'Loss':
+                bucket[key]['loss'] += 1
+            elif r['outcome'] == 'NT':
+                bucket[key]['nt'] += 1
+    
+    return {
+        'per_bulan': dict(sorted(per_bulan.items())),
+        'per_regime': dict(per_regime),
+        'per_gaya': dict(per_gaya),
+        'total_records': len(records),
+    }
 def hitung_winrate_ticker_actual(ticker_raw, riwayat_actual):
     """Menghitung Win Rate riwayat_actual khusus untuk 1 ticker saham."""
     if not riwayat_actual or not isinstance(riwayat_actual, dict):
