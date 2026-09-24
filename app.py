@@ -1273,8 +1273,6 @@ def init_sheets():
                   "top_sellers", "summary_narrative", "full_data", "source"]],
                 value_input_option='RAW'
             )
-
-        # ▼ BARU: Sheet foreign_flow_history
         if "foreign_flow_history" not in existing:
             ws = sheet.add_worksheet("foreign_flow_history", rows=5000, cols=7)
             ws.update(
@@ -1283,7 +1281,15 @@ def init_sheets():
                   "foreign_buy", "foreign_sell", "net_foreign", "source"]],
                 value_input_option='RAW'
             )
-
+        if "signal_outcomes" not in existing:
+            ws = sheet.add_worksheet("signal_outcomes", rows=10000, cols=15)
+            ws.update("A1:O1", [[
+                "timestamp", "ticker", "mode", "signal", "signal_category",
+                "regime", "price_at_signal", "horizon_days",
+                "expected_direction", "expected_magnitude",
+                "evaluated", "price_at_horizon", "actual_return",
+                "was_correct", "evaluated_at"
+            ]], value_input_option='RAW')
     except Exception as e:
         st.error(f"❌ Gagal inisialisasi Google Sheets: {e}")
 
@@ -1314,7 +1320,250 @@ def save_v12_memory(mem):
             sheet.update(all_values, value_input_option='RAW')
     except Exception as e:
         st.error(f"Gagal menyimpan V12 memory: {e}")
+def _parse_signal_category(signal_str, regime_str=""):
+    """Parse signal string jadi kategori + expected direction/magnitude."""
+    s = str(signal_str).upper()
+    r = str(regime_str).upper()
+    if 'STRONG BUY' in s:
+        return 'STRONG_BUY', +1, 0.020
+    if 'BUY' in s:
+        return 'BUY', +1, 0.010
+    if 'HOLD' in s:
+        return 'HOLD', 0, 0.025
+    if 'AVOID' in s or 'SKIP' in s:
+        bearish_kw = ['PANIC', 'BEARISH', 'DISTRIBUSI', 'DOWNTREND']
+        is_bearish = any(k in s for k in bearish_kw) or any(k in r for k in bearish_kw)
+        if is_bearish:
+            return 'AVOID_BEARISH', -1, 0.015
+        return 'AVOID_UNCLEAR', 0, 0.030
+    return 'UNKNOWN', 0, 0.030
 
+
+def save_signal_outcome(ticker, mode, signal, regime, price, horizon_days=None):
+    """Simpan setiap signal yang di-generate untuk evaluasi masa depan."""
+    try:
+        ticker_clean = str(ticker).upper().replace('.JK', '').strip()
+        if not ticker_clean:
+            return False
+
+        cat, exp_dir, exp_mag = _parse_signal_category(signal, regime)
+        if cat == 'UNKNOWN':
+            return False
+
+        if horizon_days is None:
+            horizon_days = 1 if mode == 'daytrade' else 5
+
+        sheet = get_gsheet().worksheet("signal_outcomes")
+        today = datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d")
+
+        records = sheet.get_all_records()
+        for i, r in enumerate(records):
+            if (str(r.get('ticker', '')).upper() == ticker_clean
+                and str(r.get('mode', '')) == mode
+                and str(r.get('timestamp', ''))[:10] == today):
+                # Update row existing (hari sama)
+                row_idx = i + 2
+                sheet.update(
+                    f'A{row_idx}:J{row_idx}',
+                    [[
+                        datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"),
+                        ticker_clean, mode, signal, cat, regime,
+                        float(price), int(horizon_days),
+                        int(exp_dir), float(exp_mag)
+                    ]],
+                    value_input_option='RAW'
+                )
+                return True
+
+        sheet.append_row([
+            datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S"),
+            ticker_clean, mode, signal, cat, regime,
+            float(price), int(horizon_days),
+            int(exp_dir), float(exp_mag),
+            False, '', '', '', ''
+        ], value_input_option='RAW')
+        return True
+    except Exception:
+        return False
+
+
+def _update_regime_signal_accuracy(ticker, regime, signal_cat, was_correct):
+    """Update akurasi per (regime, signal_category) dengan EMA."""
+    if ticker not in st.session_state.v12_memory:
+        st.session_state.v12_memory[ticker] = {'weights': {}, 'accuracy': {}, 'error_ema': {}}
+
+    mem = st.session_state.v12_memory[ticker]
+    if 'regime_signal_accuracy' not in mem:
+        mem['regime_signal_accuracy'] = {}
+
+    regime_key = re.sub(r'\s*[\U0001F300-\U0001FAFF\u2600-\u27BF]+\s*', '', str(regime)).strip()
+    if not regime_key:
+        regime_key = 'unknown'
+
+    if regime_key not in mem['regime_signal_accuracy']:
+        mem['regime_signal_accuracy'][regime_key] = {}
+
+    if signal_cat not in mem['regime_signal_accuracy'][regime_key]:
+        mem['regime_signal_accuracy'][regime_key][signal_cat] = {
+            'hits': 0, 'total': 0, 'accuracy': 0.5
+        }
+
+    stats = mem['regime_signal_accuracy'][regime_key][signal_cat]
+    stats['total'] += 1
+    if was_correct:
+        stats['hits'] += 1
+
+    alpha = 0.15
+    hit_val = 1.0 if was_correct else 0.0
+    stats['accuracy'] = stats['accuracy'] * (1 - alpha) + hit_val * alpha
+
+    st.session_state.v12_memory[ticker] = mem
+
+    # Global tracker
+    if '__global__' not in st.session_state.v12_memory:
+        st.session_state.v12_memory['__global__'] = {'regime_signal_accuracy': {}}
+    gm = st.session_state.v12_memory['__global__']
+    if 'regime_signal_accuracy' not in gm:
+        gm['regime_signal_accuracy'] = {}
+    if regime_key not in gm['regime_signal_accuracy']:
+        gm['regime_signal_accuracy'][regime_key] = {}
+    if signal_cat not in gm['regime_signal_accuracy'][regime_key]:
+        gm['regime_signal_accuracy'][regime_key][signal_cat] = {
+            'hits': 0, 'total': 0, 'accuracy': 0.5
+        }
+    gs = gm['regime_signal_accuracy'][regime_key][signal_cat]
+    gs['total'] += 1
+    if was_correct:
+        gs['hits'] += 1
+    gs['accuracy'] = gs['accuracy'] * (1 - alpha) + hit_val * alpha
+
+    save_v12_memory(st.session_state.v12_memory)
+
+
+def get_regime_signal_accuracy(ticker, regime, signal_cat):
+    """Ambil akurasi historis untuk (ticker, regime, signal_category)."""
+    regime_key = re.sub(r'\s*[\U0001F300-\U0001FAFF\u2600-\u27BF]+\s*', '', str(regime)).strip()
+    if not regime_key:
+        regime_key = 'unknown'
+
+    ticker_stats = {'total': 0, 'accuracy': 0.5}
+    mem = st.session_state.v12_memory.get(ticker, {})
+    rsa = mem.get('regime_signal_accuracy', {}).get(regime_key, {}).get(signal_cat)
+    if rsa:
+        ticker_stats = rsa
+
+    global_stats = {'total': 0, 'accuracy': 0.5}
+    gm = st.session_state.v12_memory.get('__global__', {})
+    grs = gm.get('regime_signal_accuracy', {}).get(regime_key, {}).get(signal_cat)
+    if grs:
+        global_stats = grs
+
+    ticker_conf = min(1.0, ticker_stats['total'] / 20)
+    global_conf = min(1.0, global_stats['total'] / 50)
+
+    if ticker_conf + global_conf == 0:
+        return {'accuracy': 0.5, 'total': 0, 'confidence': 0.0,
+                'ticker_accuracy': 0.5, 'global_accuracy': 0.5}
+
+    total_conf = ticker_conf + global_conf
+    blended = (
+        ticker_stats['accuracy'] * ticker_conf +
+        global_stats['accuracy'] * global_conf
+    ) / total_conf
+
+    return {
+        'accuracy': blended,
+        'total': ticker_stats['total'] + global_stats['total'],
+        'ticker_accuracy': ticker_stats['accuracy'],
+        'global_accuracy': global_stats['accuracy'],
+        'confidence': min(1.0, total_conf / 2)
+    }
+def evaluate_pending_signals(max_eval=50):
+    """Evaluasi signal yang sudah lewat horizon. Return dict summary."""
+    result = {'evaluated': 0, 'correct': 0, 'details': []}
+
+    try:
+        sheet = get_gsheet().worksheet("signal_outcomes")
+        records = sheet.get_all_records()
+        if not records:
+            return result
+
+        now = datetime.now(pytz.timezone("Asia/Jakarta"))
+
+        for i, r in enumerate(records):
+            if r.get('evaluated') in (True, 'TRUE', 'True', 'Yes'):
+                continue
+
+            try:
+                ts = pd.to_datetime(str(r['timestamp']))
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize("Asia/Jakarta")
+                horizon = int(r['horizon_days'])
+                eval_time = ts + timedelta(days=int(horizon * 1.5) + 1)
+
+                if now < eval_time:
+                    continue
+
+                ticker = str(r['ticker'])
+                price_at_signal = float(r['price_at_signal'])
+                expected_dir = int(r['expected_direction'])
+                expected_mag = float(r['expected_magnitude'])
+
+                t = f"{ticker}.JK"
+                df = yf.download(t, period='1mo', interval='1d', progress=False)
+                if df is None or df.empty:
+                    continue
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = df.columns.get_level_values(0)
+
+                future = df[df.index >= eval_time.normalize()]
+                if future.empty:
+                    continue
+                price_now = float(future['Close'].iloc[0])
+
+                actual_return = (price_now - price_at_signal) / price_at_signal
+                actual_return = max(-1.0, min(1.0, actual_return))
+
+                if expected_dir == +1:
+                    was_correct = actual_return >= expected_mag
+                elif expected_dir == -1:
+                    was_correct = actual_return <= -expected_mag
+                else:
+                    was_correct = abs(actual_return) <= expected_mag
+
+                row_idx = i + 2
+                sheet.update(
+                    f'K{row_idx}:O{row_idx}',
+                    [[True, price_now, round(actual_return, 6),
+                      was_correct, now.strftime("%Y-%m-%d %H:%M:%S")]],
+                    value_input_option='RAW'
+                )
+
+                result['evaluated'] += 1
+                if was_correct:
+                    result['correct'] += 1
+                result['details'].append({
+                    'ticker': ticker,
+                    'signal': r['signal'],
+                    'regime': r['regime'],
+                    'actual_return': actual_return,
+                    'correct': was_correct
+                })
+
+                _update_regime_signal_accuracy(
+                    ticker, str(r['regime']),
+                    str(r['signal_category']), was_correct
+                )
+
+                if result['evaluated'] >= max_eval:
+                    break
+
+            except Exception:
+                continue
+
+        return result
+    except Exception as e:
+        return {**result, 'error': str(e)}
 def load_v12_predictions(ticker, mode="swing"):
     try:
         sheet = get_gsheet().worksheet("v12_predictions")
@@ -4954,7 +5203,13 @@ if "riwayat" not in st.session_state:
     st.session_state.riwayat = muat_riwayat_dari_sheets()
 if "riwayat_actual" not in st.session_state:
     st.session_state.riwayat_actual = muat_riwayat_actual()
-
+if "signal_eval_done" not in st.session_state:
+    try:
+        _eval_result = evaluate_pending_signals(max_eval=30)
+        st.session_state.last_eval_result = _eval_result
+        st.session_state.signal_eval_done = True
+    except Exception:
+        st.session_state.signal_eval_done = True
 st.markdown("""
     <style>
     .main { background-color: #0f1116; color: #ffffff; }
@@ -8071,7 +8326,19 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         signal = "🚨 AVOID"
         if is_stopping_volume:
             signal += " 🟢 (Watchlist — Absorption Terdeteksi)"
+    _cat, _, _ = _parse_signal_category(signal, regime)
+    _ra = get_regime_signal_accuracy(ticker_raw, regime, _cat)
 
+    if _ra['confidence'] >= 0.5:
+        if _cat in ('AVOID_BEARISH', 'AVOID_UNCLEAR'):
+            if _ra['accuracy'] < 0.40:
+                signal = "⏸️ HOLD / WAIT (AVOID low-accuracy in this regime)"
+                total_score = th_hold + 0.01
+        elif _cat in ('BUY', 'STRONG_BUY'):
+            if _ra['accuracy'] < 0.35:
+                if total_score < th_strong * 1.3:
+                    signal = "⏸️ HOLD / WAIT (BUY low-accuracy in this regime)"
+                    total_score = th_hold + 0.01
     # ------------------------------------------------------------------
     # 12. ENTRY ZONE (v2 — anti-NT, more accommodating)
     # ------------------------------------------------------------------
@@ -9762,6 +10029,18 @@ if run_btn:
             )
         except Exception as e:
             st.warning(f"Gagal menyimpan prediksi {res['mode']}: {e}")
+    for res in [res_swing, res_day]:
+        try:
+            save_signal_outcome(
+                ticker=ticker_raw,
+                mode=res['mode'],
+                signal=res['signal'],
+                regime=res['regime'],
+                price=res['harga_terakhir_asli'],
+                horizon_days=1 if res['mode'] == 'daytrade' else 5
+            )
+        except Exception:
+            pass
     # ----- SIMPAN RIWAYAT UNTUK KEDUA MODE (SWING & DAYTRADE) -----
     simpan_riwayat(
         [res_swing['ringkasan'], res_day['ringkasan']],
@@ -10404,7 +10683,81 @@ else:
             </div>
         </div>
         """, unsafe_allow_html=True)
+    # ═══════════════════════════════════════════════════════════
+    # 🧠 FULL LEARNING DASHBOARD
+    # ═══════════════════════════════════════════════════════════
+    st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div style="margin: 0 0 16px 0;">
+        <span style="color:#f3f4f6; font-size:20px; font-weight:700;">🧠 Full Learning Engine</span>
+        <span style="color:#64748b; font-size:12px; margin-left:10px;">
+            — Engine learns from EVERY signal (BUY, HOLD, AVOID)</span>
+    </div>
+    """, unsafe_allow_html=True)
 
+    with st.expander("📊 Signal Accuracy per Regime", expanded=False):
+        st.caption(
+            "📌 Evaluator jalan otomatis di background saat app dibuka. "
+            "Setiap signal (BUY/HOLD/AVOID) yang sudah melewati horizon-nya "
+            "akan divalidasi terhadap harga aktual → mengupdate accuracy tracker. "
+            "Setelah 10+ sample per kombinasi, filter PART 4 mulai aktif otomatis."
+        )
+        if st.session_state.get('last_eval_result'):
+            lr = st.session_state.last_eval_result
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Signals Evaluated", lr.get('evaluated', 0))
+            c2.metric("Correct", lr.get('correct', 0))
+            if lr.get('evaluated', 0) > 0:
+                acc = lr['correct'] / lr['evaluated'] * 100
+                c3.metric("Accuracy", f"{acc:.1f}%")
+
+        st.markdown("---")
+        st.markdown("**🎯 Accuracy Matrix (Regime × Signal Type)**")
+
+        matrix_data = []
+        for ticker_key, mem in st.session_state.v12_memory.items():
+            if ticker_key == '__global__':
+                continue
+            rsa = mem.get('regime_signal_accuracy', {})
+            for regime, signals in rsa.items():
+                for sig_cat, stats in signals.items():
+                    if stats['total'] >= 3:
+                        matrix_data.append({
+                            'Ticker': ticker_key,
+                            'Regime': regime,
+                            'Signal': sig_cat,
+                            'Hits': stats['hits'],
+                            'Total': stats['total'],
+                            'Accuracy': f"{stats['accuracy']*100:.1f}%"
+                        })
+
+        gm = st.session_state.v12_memory.get('__global__', {})
+        grs = gm.get('regime_signal_accuracy', {})
+        for regime, signals in grs.items():
+            for sig_cat, stats in signals.items():
+                if stats['total'] >= 3:
+                    matrix_data.append({
+                        'Ticker': '🌐 GLOBAL',
+                        'Regime': regime,
+                        'Signal': sig_cat,
+                        'Hits': stats['hits'],
+                        'Total': stats['total'],
+                        'Accuracy': f"{stats['accuracy']*100:.1f}%"
+                    })
+
+        if matrix_data:
+            df_matrix = pd.DataFrame(matrix_data)
+            df_matrix = df_matrix.sort_values(['Ticker', 'Regime', 'Signal'])
+            st.dataframe(df_matrix, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Belum cukup data. Butuh minimal 3 evaluasi per kombinasi regime × signal.")
+
+        st.markdown("---")
+        st.info(
+            "💡 **Cara baca:** Kalau **AVOID_BEARISH di regime Panic Sell** akurasinya "
+            "**< 40%**, artinya sinyal AVOID sering salah di regime itu → "
+            "engine otomatis akan longgarkan AVOID di regime tersebut ke depannya."
+        )
     # ═══════════════════════════════════════════════════════════
     # QUICK START
     # ═══════════════════════════════════════════════════════════
