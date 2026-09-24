@@ -2462,6 +2462,7 @@ def hitung_statistik_riwayat_actual(riwayat_actual):
         'wr_dt': wr_dt,
         'eval_dt': eval_dt
     }
+@st.cache_data(ttl=60, show_spinner=False)
 def diagnose_winrate_trend(riwayat_data, riwayat_actual):
     """
     Diagnostik WR: per bulan, per regime, per gaya, per ticker.
@@ -2769,6 +2770,7 @@ def fetch_actual_data_yfinance(saham, waktu_str):
     except Exception as e:
         return None
 
+@st.cache_data(ttl=60, show_spinner=False)
 def dapatkan_sinyal_perlu_dicatat(riwayat_data, riwayat_actual):
     urgent_items = []
     active_swing_items = []
