@@ -5730,6 +5730,75 @@ with st.sidebar:
     # ═══════════════════════════════════════════════════════════
     # SECTION 7: RIWAYAT ANALISIS
     # ═══════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════
+    # DIAGNOSTIK WR — cek trend & regime
+    # ═══════════════════════════════════════════════════════════
+    with st.expander("🔬 Diagnostik WR (cek trend & regime)", expanded=False):
+        diag = diagnose_winrate_trend(
+            st.session_state.get('riwayat', []),
+            st.session_state.get('riwayat_actual', {})
+        )
+    
+        st.caption(f"Total records dianalisis: **{diag['total_records']}**")
+        
+        # ── Per bulan ──
+        st.markdown("#### 📅 WR per Bulan")
+        bulan_rows = []
+        for b, d in diag['per_bulan'].items():
+            total_eval = d['win'] + d['loss']
+            total_all = total_eval + d['nt']
+            if total_all < 3:
+                continue
+            wr = (d['win'] / total_eval * 100) if total_eval > 0 else 0
+            wr_honest = (d['win'] / total_all * 100) if total_all > 0 else 0
+            nt_rate = (d['nt'] / total_all * 100) if total_all > 0 else 0
+            bulan_rows.append({
+                'Bulan': b,
+                'Win': d['win'],
+                'Loss': d['loss'],
+                'NT': d['nt'],
+                'WR%': f"{wr:.1f}%",
+                'WR_Honest%': f"{wr_honest:.1f}%",
+                'NT%': f"{nt_rate:.1f}%",
+            })
+        if bulan_rows:
+            st.dataframe(pd.DataFrame(bulan_rows), use_container_width=True, hide_index=True)
+            
+            # Chart trend
+            chart_data = {r['Bulan']: float(r['WR_Honest%'].replace('%','')) 
+                        for r in bulan_rows}
+            st.line_chart(pd.Series(chart_data), height=200)
+            st.caption("📈 **WR_Honest** = Win / (Win+Loss+NT). Ini yang jujur.")
+        else:
+            st.info("Belum cukup data per bulan.")
+        
+        # ── Per regime ──
+        st.markdown("#### 🎯 WR per Regime")
+        regime_rows = []
+        for reg, d in diag['per_regime'].items():
+            total_eval = d['win'] + d['loss']
+            if total_eval < 3:
+                continue
+            wr = d['win'] / total_eval * 100
+            icon = "🟢" if wr >= 55 else ("🟡" if wr >= 45 else "🔴")
+            regime_rows.append({
+                'Regime': f"{icon} {reg}",
+                'Win': d['win'],
+                'Loss': d['loss'],
+                'WR%': f"{wr:.1f}%",
+            })
+        if regime_rows:
+            st.dataframe(pd.DataFrame(regime_rows), use_container_width=True, hide_index=True)
+        
+        # ── Per gaya ──
+        st.markdown("#### 📊 WR per Mode")
+        for gaya, d in diag['per_gaya'].items():
+            total_eval = d['win'] + d['loss']
+            if total_eval < 3:
+                continue
+            wr = d['win'] / total_eval * 100
+            icon = "🟢" if wr >= 55 else ("🟡" if wr >= 45 else "🔴")
+            st.caption(f"{icon} **{gaya}**: {wr:.1f}% ({d['win']}W / {d['loss']}L / {d['nt']}NT)")
     st.markdown("""
         <div class="sb-section">
             <span class="sb-section-icon">📜</span>
