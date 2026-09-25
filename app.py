@@ -2778,6 +2778,9 @@ def dapatkan_sinyal_perlu_dicatat(riwayat_data, riwayat_actual):
     today_date = now_jkt.date()
 
     for r in riwayat_data:
+        _sinyal_upper = str(r.get('Sinyal', '')).upper()
+        if 'AVOID' in _sinyal_upper:
+            continue
         waktu_str = r.get('Waktu', '')
         saham = r.get('Saham', '')
         gaya = r.get('Gaya', 'SW')
