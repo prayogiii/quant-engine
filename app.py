@@ -5980,14 +5980,24 @@ def render_sidebar():
                     """, unsafe_allow_html=True)
 
                 else:
-                    st.markdown("""
-                    <div style="background:#1e293b; border-radius:6px; padding:6px 10px;
-                        font-size:10px; color:#94a3b8; text-align:center;
-                        border:1px dashed #334155; margin-bottom:6px;">
-                        ⏳ Outcome belum dicatat · <i>Cek Quick Outcome di atas</i>
-                    </div>
-                    """, unsafe_allow_html=True)
-
+                    _is_avoid = 'AVOID' in str(r.get('Sinyal', '')).upper()
+                    if _is_avoid:
+                        st.markdown("""
+                        <div style="background:#ef444418; border:1px dashed #ef444460;
+                            border-radius:6px; padding:6px 10px;
+                            font-size:10px; color:#f87171; text-align:center;
+                            margin-bottom:6px; font-weight:600;">
+                            🚨 Sinyal AVOID — Sebaiknya dihindari · Engine auto-learn
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown("""
+                        <div style="background:#1e293b; border-radius:6px; padding:6px 10px;
+                            font-size:10px; color:#94a3b8; text-align:center;
+                            border:1px dashed #334155; margin-bottom:6px;">
+                            ⏳ Outcome belum dicatat · <i>Cek Quick Outcome di atas</i>
+                        </div>
+                        """, unsafe_allow_html=True)
                 # ── Tombol Hapus ──
                 del_key = f"del_{idx_key}_{waktu_key}_{saham_key}_{gaya_key}"
                 if st.button("🗑️ Hapus dari Riwayat",
@@ -6593,14 +6603,24 @@ def render_sidebar():
                             </div>
                             """, unsafe_allow_html=True)
                         else:
-                            st.markdown("""
-                            <div style="background:#1e293b; border-radius:6px; padding:8px 12px;
+                            _is_avoid_r = 'AVOID' in str(r.get('Sinyal', '')).upper()
+                            if _is_avoid_r:
+                                st.markdown("""
+                                <div style="background:#ef444418; border:1px dashed #ef444460;
+                                border-radius:6px; padding:8px 12px;
+                                font-size:10px; color:#f87171; text-align:center;
+                                margin-bottom:6px; font-weight:600;">
+                                🚨 Sinyal AVOID — Sebaiknya dihindari · Engine auto-learn dari harga 5 hari kemudian
+                            </div>
+                            """, unsafe_allow_html=True)
+                            else:
+                                st.markdown("""
+                                <div style="background:#1e293b; border-radius:6px; padding:8px 12px;
                                 font-size:10px; color:#94a3b8; text-align:center;
                                 border:1px dashed #334155; margin-bottom:6px;">
                                 ⏳ Outcome belum dicatat · <i>Cek Quick Outcome di atas</i>
                             </div>
                             """, unsafe_allow_html=True)
-
                         ai = r.get("AI_Insight", "").strip()
                         if ai:
                             st.markdown(f"""
@@ -10840,20 +10860,28 @@ else:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-    riwayat_recent = st.session_state.get('riwayat', []) or []
-    by_ticker = {}   # {saham: {'SW': r, 'DT': r}}
-    for r in riwayat_recent:
+    
+    def _has_outcome(r):
+        """Cek apakah signal sudah ada outcome actual."""
+        waktu = r.get('Waktu', '')
         saham = r.get('Saham', '')
         gaya = r.get('Gaya', 'SW')
-        if not saham:
-            continue
-        if saham not in by_ticker:
-            by_ticker[saham] = {}
-        if gaya not in by_ticker[saham]:    # first = latest
-            by_ticker[saham][gaya] = r
-
-    # ── Step 2: Per ticker, pilih mode dengan Score tertinggi ──
+        mode_actual = "swing" if gaya == "SW" else "daytrade"
+        actual = (
+            st.session_state.riwayat_actual.get((waktu, saham, gaya)) or
+            st.session_state.riwayat_actual.get((waktu, saham, mode_actual)) or
+            st.session_state.riwayat_actual.get((waktu, saham))
+        )
+        if not actual:
+            return False
+        return bool(
+            actual.get('Actual_High') or
+            actual.get('Actual_Low') or
+            actual.get('Actual_Close') or
+            actual.get('Outcome') or
+            actual.get('Entry_Miss') == 'Yes'
+        )
+    
     def _parse_score(r):
         if not r:
             return -1.0
@@ -10861,15 +10889,42 @@ else:
             return float(r.get('Score', 0))
         except (ValueError, TypeError):
             return -1.0
-
+    
+    def _parse_datetime(r):
+        """Parse Waktu jadi datetime untuk sort."""
+        try:
+            return datetime.strptime(str(r.get('Waktu', '')), "%Y-%m-%d %H:%M")
+        except Exception:
+            return datetime.min
+    
+    # ── Step 1: Filter yang belum ada outcome ──
+    riwayat_recent = st.session_state.get('riwayat', []) or []
+    riwayat_unevaluated = [r for r in riwayat_recent if not _has_outcome(r)]
+    
+    # ── Step 2: Dedup per ticker, ambil yang TERBARU ──
+    by_ticker = {}
+    for r in riwayat_unevaluated:
+        saham = r.get('Saham', '')
+        if not saham:
+            continue
+        if saham not in by_ticker:
+            by_ticker[saham] = []
+        by_ticker[saham].append(r)
+    
     picks = []
-    for saham, modes in by_ticker.items():
-        r_sw = modes.get('SW')
-        r_dt = modes.get('DT')
+    for saham, entries in by_ticker.items():
+        # Sort by waktu terbaru dulu
+        entries.sort(key=_parse_datetime, reverse=True)
+        
+        # Ambil entry SW & DT terbaru per ticker
+        r_sw = next((e for e in entries if e.get('Gaya') == 'SW'), None)
+        r_dt = next((e for e in entries if e.get('Gaya') == 'DT'), None)
+        
+        # Pilih mode dengan score tertinggi
         best = r_sw if _parse_score(r_sw) >= _parse_score(r_dt) else r_dt
         if best:
             picks.append(best)
-
+    
     # ── Step 3: Sort by Score, ambil top 3 ──
     picks.sort(key=_parse_score, reverse=True)
     top3 = picks[:3]
@@ -10971,12 +11026,15 @@ else:
 
     @st.cache_data(ttl=600, show_spinner=False)
     def _get_top_brokers_week():
-        """Ambil broksum 7 hari terakhir, agregasi top brokers by volume."""
-        try:
-            sheet = get_gsheet().worksheet("broksum_history")
-            records = sheet.get_all_records()
-        except Exception:
-            return None
+        """
+        Ambil broksum 7 hari terakhir, agregasi top brokers by volume.
+        
+        NOTE: Raise exception kalau error → Streamlit TIDAK cache error,
+        jadi bisa retry di rerun berikutnya (fix untuk HP yang sering timeout).
+        """
+        # Raise kalau error — jangan di-cache
+        sheet = get_gsheet().worksheet("broksum_history")
+        records = sheet.get_all_records()
 
         from datetime import datetime as _dt, timedelta as _td
         cutoff = _dt.now() - _td(days=7)
@@ -11020,7 +11078,12 @@ else:
             'n_records': len([r for r in records if str(r.get('upload_date', ''))[:10] >= cutoff_str]),
         }
 
-    _broker_data = _get_top_brokers_week()
+    _broker_data = None
+    _broker_error = None
+    try:
+        _broker_data = _get_top_brokers_week()
+    except Exception as _e:
+        _broker_error = str(_e)
 
     if _broker_data and (_broker_data['buyers'] or _broker_data['sellers']):
         st.caption(f"📊 Aggregated from **{_broker_data['n_records']}** broksum uploads in the last 7 days")
