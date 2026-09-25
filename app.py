@@ -3129,6 +3129,9 @@ def render_notifikasi_evaluasi_riwayat():
                     st.divider()
 
 def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
+    """
+    v3 — Belajar dari OUTCOME TRADE (Win/Loss/NT), bukan cuma close-to-close.
+    """
     try:
         ticker = saham
         last_pred = load_v12_predictions(ticker, mode=mode)
@@ -3143,7 +3146,58 @@ def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
             else:
                 factor_signals[k] = 0.0
 
-        # --- 1) Update arah prediksi berdasarkan Actual Close ---
+        _vol = factor_signals.get('_volatility', 0.02)
+
+        # ═══ PRIORITAS 1: Entry Miss / Not Touched ═══
+        entry_miss = str(actual_data.get('Entry_Miss', '')).strip() == 'Yes'
+        outcome_raw = str(actual_data.get('Outcome', '')).strip().upper()
+
+        if entry_miss or outcome_raw == 'NOT TOUCHED':
+            entry_low = last_pred.get('entry_low')
+            entry_high = last_pred.get('entry_high')
+            if entry_low is not None and entry_high is not None:
+                try:
+                    entry_low_f = safe_float(entry_low, None)
+                    entry_high_f = safe_float(entry_high, None)
+                except Exception:
+                    entry_low_f, entry_high_f = None, None
+
+                if entry_low_f and entry_high_f and entry_low_f < entry_high_f:
+                    gap = None
+                    actual_low_str = actual_data.get('Actual_Low', '')
+                    if actual_low_str:
+                        try:
+                            actual_low_f = float(str(actual_low_str).replace(",", ""))
+                            if actual_low_f > entry_high_f:
+                                gap = actual_low_f - entry_high_f
+                        except Exception:
+                            pass
+
+                    if gap is None:
+                        last_close = safe_float(last_pred.get('close_price'), 0.0)
+                        if last_close > entry_high_f:
+                            gap = last_close - entry_high_f
+                        else:
+                            gap = entry_high_f * 0.01
+
+                    if gap and gap > 0:
+                        mem = st.session_state.v12_memory.get(ticker, {})
+                        mem['entry_error_ema'] = (
+                            mem.get('entry_error_ema', 0.0) * 0.8 + gap * 0.2
+                        )
+                        st.session_state.v12_memory[ticker] = mem
+                        save_v12_memory(st.session_state.v12_memory)
+            return
+
+        # ═══ PRIORITAS 2: Win/Loss → belajar dari trade outcome ═══
+        if outcome_raw == 'WIN':
+            update_v12_memory(ticker, factor_signals, +0.03, volatility=_vol)
+            return
+        elif outcome_raw == 'LOSS':
+            update_v12_memory(ticker, factor_signals, -0.03, volatility=_vol)
+            return
+
+        # ═══ PRIORITAS 3: Fallback close-to-close ═══
         actual_close_str = actual_data.get('Actual_Close', '')
         if actual_close_str:
             try:
@@ -3152,68 +3206,11 @@ def integrate_actual_to_v12(waktu, saham, actual_data, mode="swing"):
                 if last_close > 0:
                     actual_return = (actual_close - last_close) / last_close
                     actual_return = max(-1.0, min(1.0, actual_return))
-                    SIGNAL_NOISE_FLOOR = 0.003   # 0.3%
-                    if abs(actual_return) < SIGNAL_NOISE_FLOOR:
-                        # Tidak ada sinyal riil — jangan update memory
-                        pass
-                    else:
-                        # Volatility adaptif dari data
-                        _vol = factor_signals.get('_volatility', 0.02)
+                    if abs(actual_return) >= 0.003:
                         update_v12_memory(ticker, factor_signals, actual_return, volatility=_vol)
-            except:
-                pass  # gagal parse → arah tidak diupdate
+            except Exception:
+                pass
 
-        # --- 2) Belajar dari Entry Miss / Not Touched ---
-        # Hanya berjalan jika prediksi sebelumnya menyimpan entry_low & entry_high
-        entry_low = last_pred.get('entry_low')
-        entry_high = last_pred.get('entry_high')
-        if entry_low is not None and entry_high is not None:
-            try:
-                entry_low_f = safe_float(entry_low, None)
-                entry_high_f = safe_float(entry_high, None)
-            except:
-                entry_low_f = None
-                entry_high_f = None
-
-            if entry_low_f is not None and entry_high_f is not None and entry_low_f < entry_high_f:
-                gap = None
-
-                # --- Path A: User mengisi Actual Low → hitung gap dari data nyata ---
-                actual_low_str = actual_data.get('Actual_Low', '')
-                if actual_low_str:
-                    try:
-                        actual_low_f = float(str(actual_low_str).replace(",", ""))
-                        # Jika actual low > entry_high, harga tidak pernah menyentuh zona entry
-                        if actual_low_f > entry_high_f:
-                            gap = actual_low_f - entry_high_f
-                    except:
-                        pass
-
-                # --- Path B: User centang "Entry Tidak Tersentuh" (Entry_Miss=Yes)
-                #     tanpa mengisi Actual Low → estimasi gap dari selisih close price
-                #     prediksi terakhir vs entry_high (fallback konservatif) ---
-                if gap is None and actual_data.get('Entry_Miss', '') == 'Yes':
-                    last_close = safe_float(last_pred.get('close_price'), 0.0)
-                    if last_close > entry_high_f:
-                        # Harga penutupan sudah di atas entry_high → gap = selisihnya
-                        gap = last_close - entry_high_f
-                    else:
-                        # Tidak bisa estimasi gap dengan pasti, gunakan nilai kecil
-                        # agar engine tahu ada miss tapi tidak over-koreksi
-                        gap = entry_high_f * 0.01  # 1% dari entry_high sebagai proxy
-
-                if gap is not None and gap > 0:
-                    mem = st.session_state.v12_memory.get(ticker, {})
-                    if 'entry_error_ema' not in mem:
-                        mem['entry_error_ema'] = 0.0
-
-                    alpha = 0.2
-                    mem['entry_error_ema'] = (
-                        mem['entry_error_ema'] * (1 - alpha) + gap * alpha
-                    )
-
-                    st.session_state.v12_memory[ticker] = mem
-                    save_v12_memory(st.session_state.v12_memory)
     except Exception as e:
         st.error(f"Gagal integrasi V12: {e}")
 # ====================== API IDX ======================
@@ -11194,16 +11191,22 @@ else:
                 st.caption("(No seller data)")
 
     else:
-        st.markdown("""
+        _err_msg = ""
+        if _broker_error:
+            _err_msg = (f"<div style='color:#f59e0b; font-size:10px; margin-top:6px;'>"
+                        f"⚠️ Error: {_broker_error[:100]}</div>")
+
+        st.markdown(f"""
         <div style="background:#1a1d24; border:1px dashed #334155;
             border-radius:12px; padding:24px; text-align:center;">
             <div style="font-size:28px; margin-bottom:8px;">🐋</div>
             <div style="color:#cbd5e1; font-size:13px; font-weight:600; margin-bottom:4px;">
-                No broker data this week</div>
+                {"Data broker sedang tidak tersedia" if _broker_error else "No broker data this week"}</div>
             <div style="color:#64748b; font-size:11px; line-height:1.6; max-width:520px; margin:0 auto;">
-                Upload Broksum screenshots via sidebar → <b style="color:#94a3b8;">📸 Scan Broksum</b>
-                to start aggregating broker activity.
+                {"Coba refresh halaman. Sistem akan retry otomatis." if _broker_error else 
+                 'Upload Broksum screenshots via sidebar → <b style="color:#94a3b8;">📸 Scan Broksum</b> untuk mulai aggregasi broker activity.'}
             </div>
+            {_err_msg}
         </div>
         """, unsafe_allow_html=True)
     # ═══════════════════════════════════════════════════════════
