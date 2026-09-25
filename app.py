@@ -1238,7 +1238,40 @@ def get_gsheet():
     )
     client = gspread.authorize(creds)
     return client.open_by_key(st.secrets["google_sheets"]["sheet_id"])
+# SESSION CACHE — BROKSUM HISTORY (hemat Google Sheets quota)
+def get_broksum_cache(force_refresh=False):
+    """
+    Baca broksum_history SEKALI per sesi, cache di session_state.
+    - force_refresh=True → paksa baca ulang dari Sheets
+    - Auto-refresh kalau cache > 30 menit (TTL)
+    """
+    now = time.time()
+    cache_age = now - st.session_state.get('_broksum_cache_time', 0)
+    cache_exists = 'broksum_cache' in st.session_state
 
+    need_refresh = (
+        force_refresh
+        or not cache_exists
+        or cache_age > 1800   # 30 menit TTL
+    )
+
+    if need_refresh:
+        try:
+            sheet = get_gsheet().worksheet("broksum_history")
+            st.session_state.broksum_cache = sheet.get_all_records()
+            st.session_state._broksum_cache_time = now
+        except Exception as e:
+            if not cache_exists:
+                st.session_state.broksum_cache = []
+            st.session_state._broksum_cache_time = now
+            st.session_state._broksum_cache_error = str(e)
+
+    return st.session_state.get('broksum_cache', [])
+
+
+def invalidate_broksum_cache():
+    """Paksa refresh cache broksum di rerun berikutnya."""
+    st.session_state._broksum_cache_time = 0
 def init_sheets():
     """Membuat sheet 'riwayat', 'v12_memory', 'v12_predictions', 'broksum_history', dan 'foreign_flow_history' jika belum ada."""
     try:
@@ -1663,16 +1696,14 @@ def save_broksum_data(ticker, res_json, source="gemini"):
         return False
 
 def load_broksum_history(ticker):
-    """Load semua history broker flow untuk ticker tertentu dari Sheets."""
+    """Filter broksum history dari CACHE session."""
     try:
-        sheet = get_gsheet()
-        ws = sheet.worksheet("broksum_history")
-        records = ws.get_all_records()
-        
-        ticker_upper = ticker.upper()
-        history = [row for row in records if row.get('ticker', '').upper() == ticker_upper]
-        
-        return history  # Return sorted by date (newest first bisa di handle di UI)
+        records = get_broksum_cache()
+        ticker_upper = str(ticker).upper().replace(".JK", "").strip()
+        return [
+            r for r in records
+            if str(r.get('ticker', '')).upper() == ticker_upper
+        ]
     except Exception as e:
         st.error(f"❌ Gagal memuat broker flow history: {e}")
         return []
@@ -4047,10 +4078,11 @@ def render_broksum_scan_ui(api_key="", key_prefix="broksum"):
                             success = save_broksum_data(ticker_input, res_json, source=source)
 
                         if success:
-                            # ▼▼▼ TAMBAH INI ▼▼▼
+                            # ═══ AUTO-REFRESH CACHE setelah upload ═══
+                            get_broksum_cache(force_refresh=True)
+
                             with st.spinner(f"📊 Mengambil foreign flow IDX untuk {ticker_input}..."):
                                 ff_ok = save_foreign_flow_snapshot(ticker_input)
-                            # ▲▲▲ ▲▲▲
 
                             if ff_ok:
                                 st.success(f"✅ Broksum + Foreign Flow IDX **{ticker_input}** tersimpan!")
@@ -5197,6 +5229,8 @@ st.markdown("""
 if "sheets_initialized" not in st.session_state:
     init_sheets()
     st.session_state.sheets_initialized = True
+if 'broksum_cache' not in st.session_state:
+    get_broksum_cache()
 
 if 'v12_memory' not in st.session_state:
     st.session_state.v12_memory = load_v12_memory()
@@ -5245,16 +5279,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-@st.cache_data(ttl=300, show_spinner=False)
 def _get_broksum_for_date(ticker, date_str):
-    """
-    Ambil broksum dari sheet broksum_history untuk ticker + tanggal.
-    Match exact dulu, fallback ±2 hari.
-    Return: dict {status, upload_date, narrative} atau None.
-    """
+    """Ambil broksum dari CACHE session (bukan hit Sheets)."""
     try:
-        sheet = get_gsheet().worksheet("broksum_history")
-        records = sheet.get_all_records()
+        records = get_broksum_cache()
         ticker_clean = str(ticker).upper().replace(".JK", "").strip()
 
         def _parse(rec):
@@ -5279,7 +5307,7 @@ def _get_broksum_for_date(ticker, date_str):
             except Exception:
                 return None
 
-        # ── Exact match ──
+        # Exact match
         for r in records:
             if str(r.get('ticker', '')).upper() != ticker_clean:
                 continue
@@ -5288,7 +5316,7 @@ def _get_broksum_for_date(ticker, date_str):
                 if parsed:
                     return parsed
 
-        # ── Fallback: ±2 hari ──
+        # Fallback ±2 hari
         try:
             target = datetime.strptime(date_str, "%Y-%m-%d")
             for delta in [1, -1, 2, -2]:
@@ -5743,14 +5771,34 @@ def render_sidebar():
             st.session_state['_sb_fee_jual_pct'] = fee_jual_pct
             st.session_state['_sb_run_btn'] = True
             st.rerun()
+        # CACHE MANAGEMENT
+        col_cache1, col_cache2 = st.columns(2)
+        with col_cache1:
+            if st.button("🔄 Refresh Broksum", use_container_width=True,
+                         key="btn_refresh_broksum",
+                         help="Sync data broksum dari device lain"):
+                with st.spinner("📡 Mengambil data terbaru..."):
+                    get_broksum_cache(force_refresh=True)
+                st.success("✅ Cache broksum di-refresh!")
+                st.rerun()
 
-        if st.button("🗑️ Reset Cache Data", use_container_width=True, key="btn_reset_cache"):
-            st.cache_data.clear()
-            st.success("Cache dibersihkan!")
+        with col_cache2:
+            if st.button("🗑️ Reset Cache", use_container_width=True,
+                         key="btn_reset_cache"):
+                st.cache_data.clear()
+                for k in ['broksum_cache', '_broksum_cache_time', '_broksum_cache_error']:
+                    st.session_state.pop(k, None)
+                st.success("Cache dibersihkan!")
+                st.rerun()
 
-        # ═══════════════════════════════════════════════════════════
+        # ── Info status cache ──
+        _cache_time = st.session_state.get('_broksum_cache_time', 0)
+        if _cache_time > 0:
+            _age_min = (time.time() - _cache_time) / 60
+            _n_records = len(st.session_state.get('broksum_cache', []))
+            st.caption(f"💾 Cache: {_n_records} records · {_age_min:.0f} menit lalu")
+
         # SECTION 6: SCANNER SAHAM IDX
-        # ═══════════════════════════════════════════════════════════
         st.markdown("""
             <div class="sb-section">
                 <span class="sb-section-icon">🔍</span>
@@ -11026,23 +11074,15 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    @st.cache_data(ttl=600, show_spinner=False)
     def _get_top_brokers_week():
-        """
-        Ambil broksum 7 hari terakhir, agregasi top brokers by volume.
-        
-        NOTE: Raise exception kalau error → Streamlit TIDAK cache error,
-        jadi bisa retry di rerun berikutnya (fix untuk HP yang sering timeout).
-        """
-        # Raise kalau error — jangan di-cache
-        sheet = get_gsheet().worksheet("broksum_history")
-        records = sheet.get_all_records()
+        """Agregasi top brokers dari CACHE session."""
+        records = get_broksum_cache()
 
         from datetime import datetime as _dt, timedelta as _td
         cutoff = _dt.now() - _td(days=7)
         cutoff_str = cutoff.strftime("%Y-%m-%d")
 
-        buyer_agg = {}   # {broker: {vol, count, tickers:set}}
+        buyer_agg = {}
         seller_agg = {}
 
         for rec in records:
@@ -11070,14 +11110,16 @@ else:
                     agg[code]['count'] += 1
                     agg[code]['tickers'].add(ticker)
 
-        # Sort by volume
         top_buyers = sorted(buyer_agg.items(), key=lambda x: x[1]['vol'], reverse=True)[:5]
         top_sellers = sorted(seller_agg.items(), key=lambda x: x[1]['vol'], reverse=True)[:5]
 
         return {
             'buyers': top_buyers,
             'sellers': top_sellers,
-            'n_records': len([r for r in records if str(r.get('upload_date', ''))[:10] >= cutoff_str]),
+            'n_records': len([
+                r for r in records
+                if str(r.get('upload_date', ''))[:10] >= cutoff_str
+            ]),
         }
 
     _broker_data = None
