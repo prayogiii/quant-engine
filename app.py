@@ -7614,15 +7614,19 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         elif tech_score < -0.18: signal = "SELL ▼"
         else: signal = "NEUTRAL →"
 
-        # --- Regime ---
+        # --- Regime (naming disamakan dengan analyzer) ---
         ema20_ihsg = pd.Series(i_adj).ewm(span=20, adjust=False).mean().iloc[-1]
         sma20_ihsg = np.mean(i_adj[-20:])
         risk_on = ema20_ihsg > sma20_ihsg and i_ret5 > 0
         fast_vc = np.std(s_ret[-3:]) / (np.std(s_ret[-20:]) + 1e-9)
-        if not risk_on and fast_vc >= 1.2: regime = "PANIC"
-        elif risk_on and fast_vc >= 1.0: regime = "VOL UP"
-        elif risk_on: regime = "BULLISH"
-        else: regime = "BEARISH"
+        if not risk_on and fast_vc >= 1.2:
+            regime = "Panic Sell 🚨"
+        elif risk_on and fast_vc >= 1.0:
+            regime = "Bullish 📈"         
+        elif risk_on:
+            regime = "Bullish 📈"
+        else:
+            regime = "Bearish 🔻"
 
         # --- Estimasi return & TP/SL ---
         alpha = np.mean(s_ret) - beta * np.mean(i_ret)
@@ -7680,9 +7684,10 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         else:
             likuiditas_str = f"Rp {avg_value:,.0f}"
 
-        # Risk/Reward
-        risk = last_price - sl_est
-        reward = tp_est - last_price
+        # Risk/Reward — pakai midpoint entry zone sebagai referensi realistis
+        entry_ref = (entry_low + entry_high) / 2.0
+        risk = entry_ref - sl_est
+        reward = tp_est - entry_ref
         rrr = reward / risk if risk > 0 else 0.0
 
         # Confidence
