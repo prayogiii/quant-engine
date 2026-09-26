@@ -10040,8 +10040,12 @@ if scan_btn:
                 if avg_vol * last_price < likuiditas_min:
                     return None
             # Panggil scoring teknikal (adaptasi Kotlin)
-            return score_stock_tech(df, ticker, ihsg_data)
-        except:
+            res = score_stock_tech(df, ticker, ihsg_data)
+            if res is None:
+                st.write(f"⚠️ {ticker}: return None (data OK tapi score None)")
+            return res
+        except Exception as e:
+            st.write(f"🚨 {ticker}: {type(e).__name__} → {e}")   # ← INI KUNCI
             return None
 
     total = len(daftar_saham)
