@@ -878,7 +878,10 @@ def compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85)
         if isinstance(image, str):
             img = Image.open(image)
         elif hasattr(image, 'read'):
-            # Streamlit UploadedFile / BytesIO
+            try:
+                image.seek(0)   # ← rewind pointer
+            except Exception:
+                pass
             img = Image.open(image)
         else:
             # Asumsi sudah PIL Image
@@ -938,12 +941,29 @@ warnings.filterwarnings("ignore")
 
 # GEMINI KEY ROTATOR — auto-switch kalau key kena 429/quota
 def _load_gemini_keys():
-    """Ambil semua Gemini key dari secrets/env, urut prioritas."""
     keys = []
+    
+    # ── Handle GEMINI_API_KEYS (bisa list, string JSON, atau CSV) ──
     try:
-        keys = list(st.secrets.get("GEMINI_API_KEYS", []))
+        raw = st.secrets.get("GEMINI_API_KEYS", None)
+        if isinstance(raw, list):
+            keys = [str(k).strip() for k in raw if k]
+        elif isinstance(raw, str):
+            raw_s = raw.strip()
+            if raw_s.startswith("["):
+                # JSON array string
+                try:
+                    parsed = json.loads(raw_s)
+                    keys = [str(k).strip() for k in parsed if k]
+                except Exception:
+                    keys = [k.strip() for k in raw_s.split(",") if k.strip()]
+            else:
+                # CSV
+                keys = [k.strip() for k in raw_s.split(",") if k.strip()]
     except Exception:
         pass
+
+    # ── Fallback single key ──
     if not keys:
         try:
             single = st.secrets.get("GEMINI_API_KEY", "")
@@ -955,53 +975,157 @@ def _load_gemini_keys():
         env = os.getenv("GEMINI_API_KEY", "")
         if env:
             keys = [env]
-    # Dedup + filter kosong
+
+    # ── Dedup + filter minimal length (key valid ≥ 20 char) ──
     seen, out = set(), []
     for k in keys:
-        if k and k not in seen:
+        k = str(k).strip()
+        if k and len(k) >= 20 and k not in seen:
             seen.add(k)
             out.append(k)
     return out
+# ═══════════════════════════════════════════════════════════════
+# 2D ROTATOR — KEY × MODEL
+# ═══════════════════════════════════════════════════════════════
+
+# Model prioritas (dari yang paling reliable & murah)
+_PREFERRED_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
+    "gemini-1.5-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+]
 
 
 def _get_key_rotator_state():
+    """State rotator 2D: key × model."""
     if "_gemini_rotator" not in st.session_state:
         st.session_state._gemini_rotator = {
             "keys": _load_gemini_keys(),
             "current_idx": 0,
-            "cooldown_until": {},
+            "cooldown_until": {},       # {key_idx: until} — level key
+            "cooldown_combos": {},      # {"key_idx:model": until} — level combo
+            "models_cache": {},         # {key_idx: [models]}
+            "cache_time": {},           # {key_idx: timestamp}
         }
-    return st.session_state._gemini_rotator
+    # Migration — pastikan field baru ada kalau state lama
+    state = st.session_state._gemini_rotator
+    state.setdefault("cooldown_combos", {})
+    state.setdefault("models_cache", {})
+    state.setdefault("cache_time", {})
+    return state
 
 
-def get_active_gemini_key():
-    """Ambil key yang sedang aktif (auto-skip yang cooldown)."""
+def _get_models_for_key(key_idx):
+    """Daftar model yang support generateContent untuk key ini (cache 1 jam)."""
+    state = _get_key_rotator_state()
+    keys = state["keys"]
+    if key_idx >= len(keys):
+        return _PREFERRED_MODELS
+
+    now = time.time()
+    cached_time = state["cache_time"].get(key_idx, 0)
+    if now - cached_time < 3600 and key_idx in state["models_cache"]:
+        return state["models_cache"][key_idx]
+
+    try:
+        genai.configure(api_key=keys[key_idx])
+        models = [
+            m.name.split("/")[-1]
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        # Urutkan: preferred dulu
+        ordered = [m for m in _PREFERRED_MODELS if m in models]
+        ordered += [m for m in models if m not in ordered]
+        state["models_cache"][key_idx] = ordered
+        state["cache_time"][key_idx] = now
+        return ordered
+    except Exception:
+        state["models_cache"][key_idx] = _PREFERRED_MODELS
+        state["cache_time"][key_idx] = now
+        return _PREFERRED_MODELS
+
+
+def _find_next_combo():
     state = _get_key_rotator_state()
     keys = state["keys"]
     if not keys:
-        return None
+        return None, None, None
+
     now = time.time()
-    n = len(keys)
-    for offset in range(n):
-        idx = (state["current_idx"] + offset) % n
-        if now >= state["cooldown_until"].get(idx, 0):
-            state["current_idx"] = idx
-            return keys[idx]
-    # Semua cooldown → pakai yang paling cepat bebas
-    earliest_idx = min(state["cooldown_until"], key=state["cooldown_until"].get)
-    state["current_idx"] = earliest_idx
-    return keys[earliest_idx]
+    n_keys = len(keys)
+
+    for key_offset in range(n_keys):
+        key_idx = (state["current_idx"] + key_offset) % n_keys
+        if now < state["cooldown_until"].get(key_idx, 0):
+            continue
+        models = _get_models_for_key(key_idx)
+        for model_name in models:
+            combo_key = f"{key_idx}:{model_name}"
+            if now < state["cooldown_combos"].get(combo_key, 0):
+                continue
+            return key_idx, model_name, keys[key_idx]
+
+    # ── Semua cooldown → return None, biarkan caller sleep ──
+    return None, None, None
+
+    now = time.time()
+    n_keys = len(keys)
+
+    for key_offset in range(n_keys):
+        key_idx = (state["current_idx"] + key_offset) % n_keys
+
+        # Skip kalau key ini global cooldown
+        if now < state["cooldown_until"].get(key_idx, 0):
+            continue
+
+        models = _get_models_for_key(key_idx)
+        for model_name in models:
+            combo_key = f"{key_idx}:{model_name}"
+            if now < state["cooldown_combos"].get(combo_key, 0):
+                continue
+            return key_idx, model_name, keys[key_idx]
+
+    # Semua cooldown → ambil yang paling cepat bebas
+    if state["cooldown_combos"]:
+        earliest = min(state["cooldown_combos"], key=state["cooldown_combos"].get)
+        key_idx_str, model_name = earliest.split(":", 1)
+        return int(key_idx_str), model_name, keys[int(key_idx_str)]
+
+    return None, None, None
+
+
+def _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70):
+    state = _get_key_rotator_state()
+    state["cooldown_combos"][f"{key_idx}:{model_name}"] = time.time() + cooldown_sec
+    models = _get_models_for_key(key_idx)
+    now = time.time()
+    if all(now < state["cooldown_combos"].get(f"{key_idx}:{m}", 0) for m in models):
+        state["cooldown_until"][key_idx] = now + cooldown_sec
+        state["current_idx"] = (key_idx + 1) % len(state["keys"])
+
+# ── Backward compat — fungsi lama masih dipakai di tempat lain ──
+def get_active_gemini_key():
+    key_idx, _, key = _find_next_combo()
+    if key:
+        return key
+    state = _get_key_rotator_state()
+    return state["keys"][0] if state["keys"] else None
 
 
 def mark_gemini_key_exhausted(cooldown_sec=70):
-    """Tandai key aktif sebagai kena limit, pindah ke berikutnya."""
+    """Backward compat — tandai key aktif cooldown."""
     state = _get_key_rotator_state()
     if not state["keys"]:
         return
     idx = state["current_idx"]
     state["cooldown_until"][idx] = time.time() + cooldown_sec
     state["current_idx"] = (idx + 1) % len(state["keys"])
-
 
 def is_gemini_quota_error(err):
     """Deteksi error 429/quota dari Gemini."""
@@ -3465,35 +3589,77 @@ def dapatkan_model_gemini(api_key=None):
             return None, f"Error: {str(e_outer)}"
 
     return None, "Semua Gemini API key sudah dicoba, gagal semua."
-def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retries=3):
+def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retries=None):
     """
-    Wrapper universal: panggil Gemini dengan auto-rotate kalau kena 429.
-    - prompt: str
-    - image: PIL Image (opsional, untuk vision)
-    - generation_config: dict (opsional)
-    
-    Return: (response_text, error) — response_text str atau None
+    2D rotation wrapper — coba semua kombinasi (key × model) saat kena 429.
+
+    Kuota efektif = jumlah_keys × jumlah_models × 1.500 RPD
+    Contoh: 2 key × 5 model = ~15.000 RPD
+
+    Order cek error (penting supaya cooldown tepat):
+    1. Image/format error  → cooldown 300s, coba model lain
+    2. Model invalid       → cooldown 600s, coba model lain
+    3. Transient 500/503   → retry dengan backoff
+    4. Safety block        → STOP (semua model akan block)
+    5. Unknown             → break
     """
+    if max_retries is None:
+        state = _get_key_rotator_state()
+        n_keys = max(1, len(state["keys"]))
+        max_retries = max(10, n_keys * 5 + 4)
+
     last_err = None
+    tried_combos = set()   # (key_idx, model) yang sudah dicoba di call ini
+
+    # Pattern compile sekali di luar loop (lebih cepat)
+    _image_errs = (
+        "image dimensions", "image size", "image too large",
+        "unsupported mime", "unsupported image", "invalid image",
+        "failed to process image", "image format", "payload size",
+        "request payload size exceeds", "invalid image data",
+    )
+    _model_invalid_errs = (
+        "model not found", "model is not supported",
+        "models/", "does not exist", "model does not exist",
+    )
+    _transient_errs = (
+        "500", "503", "internal error", "overloaded", "temporarily",
+    )
+    _safety_errs = ("safety", "blocked", "prohibited")
 
     for attempt in range(max_retries):
-        model, err = dapatkan_model_gemini()
-        if err or not model:
-            last_err = err
-            # Kalau rotator bilang semua key cooldown, tunggu sebentar
-            if "cooldown" in str(err).lower():
-                time.sleep(2)
-                continue
-            return None, err
+        key_idx, model_name, active_key = _find_next_combo()
+
+        # ── Semua combo cooldown → tunggu sampai ada yang bebas ──
+        if not active_key or not model_name:
+            state = _get_key_rotator_state()
+            if state["cooldown_combos"]:
+                earliest = min(state["cooldown_combos"].values())
+                wait = max(1, min(20, earliest - time.time() + 1))
+            else:
+                wait = 2
+            time.sleep(wait)
+            continue
+
+        combo_id = (key_idx, model_name)
+        if combo_id in tried_combos:
+            # Sudah dicoba di call ini → skip, cooldown combo supaya iterasi
+            # berikutnya `_find_next_combo` pilih yang lain
+            _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70)
+            continue
+        tried_combos.add(combo_id)
 
         try:
-            if image is not None:
-                content = [prompt, image]
-            else:
-                content = prompt
+            genai.configure(api_key=active_key)
+            model = genai.GenerativeModel(model_name)
+
+            content = [prompt, image] if image is not None else prompt
 
             if generation_config:
-                response = model.generate_content(content, generation_config=generation_config)
+                response = model.generate_content(
+                    content,
+                    generation_config=generation_config,
+                )
             else:
                 response = model.generate_content(content)
 
@@ -3501,23 +3667,46 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
 
         except Exception as e:
             err_str = str(e)
+            err_lower = err_str.lower()
             last_err = err_str
 
-            # Quota → rotate key & retry
+            # ── 429 quota → rotate combo ──
             if is_gemini_quota_error(e):
-                mark_gemini_key_exhausted(70)
-                st.toast("🔑 Auto-rotate: pakai Gemini key berikutnya", icon="🔄")
-                time.sleep(1)
+                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70)
+                st.toast(
+                    f"🔄 {model_name} @ key#{key_idx+1} limit → rotate",
+                    icon="🔑",
+                )
+                time.sleep(0.5)
                 continue
 
-            # Transient error (500/503)
-            is_transient = any(x in err_str for x in [
-                "500", "503", "Internal error", "overloaded", "temporarily"
-            ])
-            if is_transient and attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
+            # ═══ Cek #1: Image/format error → coba model lain ═══
+            # Dicek DULU supaya error "invalid image format" tidak
+            # salah-match pattern model-invalid (yang dulu ada "invalid" broad).
+            if any(x in err_lower for x in _image_errs):
+                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=300)
+                st.toast(
+                    f"⚠️ {model_name} tolak image → coba model lain",
+                    icon="🖼️",
+                )
                 continue
 
+            # ═══ Cek #2: Model invalid / tidak tersedia ═══
+            # Pattern spesifik — TIDAK pakai "invalid" broad lagi
+            if any(x in err_lower for x in _model_invalid_errs):
+                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=600)
+                continue
+
+            # ═══ Cek #3: Transient error (500/503) → retry dengan backoff ═══
+            if any(x in err_lower for x in _transient_errs) and attempt < max_retries - 1:
+                time.sleep(2 ** min(attempt, 3))
+                continue
+
+            # ═══ Cek #4: Safety block → semua model akan block → STOP ═══
+            if any(x in err_lower for x in _safety_errs):
+                return None, f"Gambar diblokir safety filter Gemini: {err_str[:120]}"
+
+            # ═══ Cek #5: Error lain (unknown) → break ═══
             break
 
     return None, f"Gagal setelah {max_retries} percobaan: {last_err}"
@@ -3779,49 +3968,17 @@ def _call_gemini_vision_api(model, prompt, image):
     return model.generate_content([prompt, image])
 
 def analisis_broksum_gemini_vision(image, api_key):
-    """
-    Menganalisis screenshot Broker Summary (Broksum) / Trade Flow / Broker Flow menggunakan Gemini Vision AI.
-    - Kompresi gambar untuk hemat token
-    - Retry dengan exponential backoff untuk handle rate limit
-    - Prioritas model: gemini-1.5-flash (cepat & murah)
-    Mengembalikan dict data terstruktur (JSON) & error jika ada.
-    """
+    """Scan Broksum pakai Gemini Vision (2D rotation)."""
     if not PIL_AVAILABLE:
         return None, "Library Pillow (PIL) belum terpasang."
     if not api_key:
         return None, "Gemini API Key belum diisi di sidebar."
 
     try:
-        configure_gemini_with_active_key()
-        
-        # ===== KOMPRESI GAMBAR (Hemat Token) =====
-        compressed_image = compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85)
-        
-        # ===== PILIH MODEL (Prioritas Flash - Gunakan yang Available) =====
-        available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        vision_candidates = [
-            'gemini-3.1-flash-lite',    # ⚡ Paling cepat
-            'gemini-3.5-flash-lite',    # ⚡ Cepat
-            'gemini-1.5-flash-lite',    # ⚡ Lite fallback
-            'gemini-3-flash',           # Regular (jika lite tidak ada)
-            'gemini-3.8-flash',         # 3.8
-            'gemini-3.7-flash',         # 3.7
-            'gemini-2.0-flash',         # Fallback 2.0
-            'gemini-1.5-flash'          # Fallback 1.5
-        ]
-        
-        selected_model_name = None
-        for cand in vision_candidates:
-            if cand in available:
-                selected_model_name = cand
-                break
-        if not selected_model_name:
-            if available:
-                selected_model_name = available[0]
-            else:
-                return None, "Tidak ada model Gemini yang mendukung eksekusi saat ini."
-
-        model = genai.GenerativeModel(selected_model_name)
+        # ── Kompresi gambar ──
+        compressed_image = compress_image_for_gemini(
+            image, max_width=1280, max_height=960, quality=85
+        )
 
         prompt = """
 Anda adalah pakar Bandarmology & Pasar Modal Indonesia (BEI/IDX).
@@ -3866,19 +4023,21 @@ ATURAN EKSTRAKSI:
 5. Kembalikan HANYA JSON yang valid, tanpa teks lain.
 """
 
-        # ===== CALL GEMINI DENGAN RETRY (Exponential Backoff) =====
-        response_text, err = call_gemini_auto_rotate(prompt, image=compressed_image)
+        # ── Semua handle oleh wrapper 2D ──
+        response_text, err = call_gemini_auto_rotate(
+            prompt,
+            image=compressed_image,
+        )
         if err:
             return None, f"Error Gemini Vision: {err}"
         raw_text = response_text
-        
+
         # Pembersihan JSON
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
         elif "```" in raw_text:
             raw_text = raw_text.split("```")[1].split("```")[0].strip()
 
-        # Regex fallback jika JSON mengandung karakter ilegal
         try:
             parsed = json.loads(raw_text, strict=False)
             return parsed, None
