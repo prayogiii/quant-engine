@@ -935,6 +935,95 @@ try: from deep_translator import GoogleTranslator
 except ImportError: TRANSLATOR_AVAILABLE = False
 
 warnings.filterwarnings("ignore")
+
+# GEMINI KEY ROTATOR — auto-switch kalau key kena 429/quota
+def _load_gemini_keys():
+    """Ambil semua Gemini key dari secrets/env, urut prioritas."""
+    keys = []
+    try:
+        keys = list(st.secrets.get("GEMINI_API_KEYS", []))
+    except Exception:
+        pass
+    if not keys:
+        try:
+            single = st.secrets.get("GEMINI_API_KEY", "")
+            if single:
+                keys = [single]
+        except Exception:
+            pass
+    if not keys:
+        env = os.getenv("GEMINI_API_KEY", "")
+        if env:
+            keys = [env]
+    # Dedup + filter kosong
+    seen, out = set(), []
+    for k in keys:
+        if k and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def _get_key_rotator_state():
+    if "_gemini_rotator" not in st.session_state:
+        st.session_state._gemini_rotator = {
+            "keys": _load_gemini_keys(),
+            "current_idx": 0,
+            "cooldown_until": {},
+        }
+    return st.session_state._gemini_rotator
+
+
+def get_active_gemini_key():
+    """Ambil key yang sedang aktif (auto-skip yang cooldown)."""
+    state = _get_key_rotator_state()
+    keys = state["keys"]
+    if not keys:
+        return None
+    now = time.time()
+    n = len(keys)
+    for offset in range(n):
+        idx = (state["current_idx"] + offset) % n
+        if now >= state["cooldown_until"].get(idx, 0):
+            state["current_idx"] = idx
+            return keys[idx]
+    # Semua cooldown → pakai yang paling cepat bebas
+    earliest_idx = min(state["cooldown_until"], key=state["cooldown_until"].get)
+    state["current_idx"] = earliest_idx
+    return keys[earliest_idx]
+
+
+def mark_gemini_key_exhausted(cooldown_sec=70):
+    """Tandai key aktif sebagai kena limit, pindah ke berikutnya."""
+    state = _get_key_rotator_state()
+    if not state["keys"]:
+        return
+    idx = state["current_idx"]
+    state["cooldown_until"][idx] = time.time() + cooldown_sec
+    state["current_idx"] = (idx + 1) % len(state["keys"])
+
+
+def is_gemini_quota_error(err):
+    """Deteksi error 429/quota dari Gemini."""
+    s = str(err).lower()
+    signals = [
+        "429", "quota", "rate limit", "resource_exhausted",
+        "resource has been exhausted", "too many requests",
+        "exceeded your current quota", "quota exceeded",
+    ]
+    return any(sig in s for sig in signals)
+
+
+def configure_gemini_with_active_key():
+    """Configure genai pakai key aktif. Return True kalau sukses."""
+    key = get_active_gemini_key()
+    if not key:
+        return False
+    try:
+        genai.configure(api_key=key)
+        return True
+    except Exception:
+        return False
 def safe_float(value, default=0.0):
     """Konversi aman ke float, kembalikan default jika gagal."""
     try:
@@ -2101,7 +2190,7 @@ def analyze_broksum_insight_with_gemini(ticker, broksum_data, price_data, api_ke
         return None, "API Key Gemini belum diisi."
     
     try:
-        genai.configure(api_key=api_key)
+        configure_gemini_with_active_key()
         model = None
         available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         if available:
@@ -2164,12 +2253,12 @@ Berikan analisis mendalam yang mencakup:
 
 Jadilah singkat, profesional, dan actionable (max 300 kata)."""
 
-        response = model.generate_content(
+        insight, err = call_gemini_auto_rotate(
             prompt,
             generation_config={"max_output_tokens": 500, "temperature": 0.7}
         )
-        
-        insight = response.text.strip() if response else ""
+        if err:
+            return None, err
         return insight, None
         
     except Exception as e:
@@ -3316,29 +3405,127 @@ def fetch_all_idx_stocks():
     """Ambil semua saham BEI non-Pemantauan Khusus."""
     return fetch_idx_stock_list_exclude_monitoring()
 # FUNGSI AI GEMINI
-def dapatkan_model_gemini(api_key):
-    if not api_key: return None, "API key belum diisi."
-    try:
-        genai.configure(api_key=api_key)
-        available = [m.name.split('/')[-1] for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        if not available: return None, "Tidak ada model Gemini."
-        for model_id in available:
-            try:
-                model = genai.GenerativeModel(model_id)
-                model.generate_content("test", generation_config={"max_output_tokens": 1})
-                return model, None
-            except Exception: continue
-        return None, "Model gagal digunakan."
-    except Exception as e:
-        return None, f"Error: {str(e)}"
+def dapatkan_model_gemini(api_key=None):
+    """
+    Return (model, error).
+    Auto-rotate kalau key kena limit.
+    """
+    state = _get_key_rotator_state()
+    # Backward compat: kalau rotator kosong tapi ada api_key manual
+    if not state["keys"] and api_key:
+        state["keys"] = [api_key]
+
+    if not state["keys"]:
+        return None, "API key belum diisi."
+
+    # Try all keys — rotate on quota error
+    tried = 0
+    max_tries = len(state["keys"]) + 1  # +1 buffer kalau semua cooldown
+
+    while tried < max_tries:
+        active = get_active_gemini_key()
+        if not active:
+            return None, "Semua Gemini API key sedang cooldown."
+
+        try:
+            genai.configure(api_key=active)
+            available = [
+                m.name.split('/')[-1]
+                for m in genai.list_models()
+                if 'generateContent' in m.supported_generation_methods
+            ]
+            if not available:
+                return None, "Tidak ada model Gemini."
+
+            for model_id in available:
+                try:
+                    model = genai.GenerativeModel(model_id)
+                    model.generate_content(
+                        "test",
+                        generation_config={"max_output_tokens": 1}
+                    )
+                    return model, None
+                except Exception as e_inner:
+                    if is_gemini_quota_error(e_inner):
+                        mark_gemini_key_exhausted(70)
+                        st.toast("🔄 Gemini key kena limit, rotate", icon="🔑")
+                        break  # break inner loop → coba key berikutnya
+                    continue  # model ini gak cocok, coba model lain
+            else:
+                # Semua model gagal tapi bukan quota → return error
+                return None, "Model gagal digunakan."
+
+            tried += 1  # quota error → coba key berikutnya
+
+        except Exception as e_outer:
+            if is_gemini_quota_error(e_outer):
+                mark_gemini_key_exhausted(70)
+                tried += 1
+                continue
+            return None, f"Error: {str(e_outer)}"
+
+    return None, "Semua Gemini API key sudah dicoba, gagal semua."
+def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retries=3):
+    """
+    Wrapper universal: panggil Gemini dengan auto-rotate kalau kena 429.
+    - prompt: str
+    - image: PIL Image (opsional, untuk vision)
+    - generation_config: dict (opsional)
+    
+    Return: (response_text, error) — response_text str atau None
+    """
+    last_err = None
+
+    for attempt in range(max_retries):
+        model, err = dapatkan_model_gemini()
+        if err or not model:
+            last_err = err
+            # Kalau rotator bilang semua key cooldown, tunggu sebentar
+            if "cooldown" in str(err).lower():
+                time.sleep(2)
+                continue
+            return None, err
+
+        try:
+            if image is not None:
+                content = [prompt, image]
+            else:
+                content = prompt
+
+            if generation_config:
+                response = model.generate_content(content, generation_config=generation_config)
+            else:
+                response = model.generate_content(content)
+
+            return response.text.strip(), None
+
+        except Exception as e:
+            err_str = str(e)
+            last_err = err_str
+
+            # Quota → rotate key & retry
+            if is_gemini_quota_error(e):
+                mark_gemini_key_exhausted(70)
+                st.toast("🔑 Auto-rotate: pakai Gemini key berikutnya", icon="🔄")
+                time.sleep(1)
+                continue
+
+            # Transient error (500/503)
+            is_transient = any(x in err_str for x in [
+                "500", "503", "Internal error", "overloaded", "temporarily"
+            ])
+            if is_transient and attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+
+            break
+
+    return None, f"Gagal setelah {max_retries} percobaan: {last_err}"
 def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
     """
     Analisis saham dengan Gemini AI.
     ticker (optional): untuk fetch broker flow dari database & inject ke analysis
     """
-    model, error = dapatkan_model_gemini(api_key)
-    if error: return None, error
-    
     # ===== FORMAT RIWAYAT (EXISTING) =====
     riwayat_text = ""
     if riwayat:
@@ -3446,36 +3633,13 @@ Berdasarkan data di atas{' (khususnya dominasi Bandar 🐋 vs Retail 🧑 pada b
 - Jika ada pola dari riwayat, sebutkan.
 Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
 """
-        # ── Retry logic untuk handle 500/503 dari Google ──
-    import time as _time
-    max_retries = 3
-    last_error = None
-    
-    for attempt in range(max_retries):
-        try:
-            response = model.generate_content(prompt)
-            return response.text.strip(), None
-        except Exception as e:
-            err_str = str(e)
-            last_error = err_str
-            
-            # Cek apakah error sementara (500/503/overloaded)
-            is_transient = any(x in err_str for x in [
-                "500", "503", "Internal error", 
-                "overloaded", "temporarily", "try again"
-            ])
-            
-            if is_transient and attempt < max_retries - 1:
-                _time.sleep(2 ** attempt)  # 1s, 2s, 4s
-                continue
-            else:
-                break
-    
-    return None, f"Gagal menghasilkan insight AI: {last_error}"
+    # ═══ Auto-rotate key + retry logic di dalam wrapper ═══
+    response_text, err = call_gemini_auto_rotate(prompt)
+    if err:
+        return None, f"Gagal menghasilkan insight AI: {err}"
+    return response_text, None
 
 def analisis_riwayat_global(riwayat_data, riwayat_actual, api_key):
-    model, error = dapatkan_model_gemini(api_key)
-    if error: return None, error
     if not riwayat_data: return None, "Belum ada riwayat."
     prompt = "Berikut adalah riwayat analisis saham yang telah dilakukan (termasuk hasil aktual jika tersedia):\n\n"
     for r in riwayat_data[:30]:
@@ -3511,11 +3675,10 @@ def analisis_riwayat_global(riwayat_data, riwayat_actual, api_key):
         "- Rekomendasi perbaikan strategi\n"
         "- Insight tambahan yang berguna untuk trader\n"
     )
-    try:
-        response = model.generate_content(prompt)
-        return response.text.strip(), None
-    except Exception as e:
-        return None, f"Gagal menghasilkan insight: {str(e)}"
+    response_text, err = call_gemini_auto_rotate(prompt)
+    if err:
+        return None, err
+    return response_text, None
 
 def bersihkan_teks_ai(teks):
     if not teks: return teks
@@ -3529,10 +3692,6 @@ def evaluasi_mode_dengan_ai(res_swing, res_day, ticker_raw, api_key):
     """
     Evaluasi AI Gemini untuk membandingkan kesesuaian mode Swing Trade vs Day Trade (Hybrid Scoring).
     """
-    model, error = dapatkan_model_gemini(api_key)
-    if error or not model:
-        return None, error
-
     prompt = f"""
 Anda adalah analis kuantitatif pasar saham profesional. Evaluasi emiten {ticker_raw} untuk menentukan apakah lebih cocok diperdagangkan secara **Swing Trade (SW)** atau **Day Trade (DT)**.
 
@@ -3561,53 +3720,53 @@ Berikan evaluasi dalam format JSON murni dengan struktur persis seperti ini (tan
   "reasoning": "Alasan singkat 1-2 kalimat tanpa tanda petik ganda."
 }}
 """
+    # ── Panggil wrapper dengan JSON mode ──
+    gen_config = {"response_mime_type": "application/json"}
+    raw_text, err = call_gemini_auto_rotate(prompt, generation_config=gen_config)
+
+    if err or not raw_text:
+        # Fallback tanpa JSON mode
+        raw_text, err = call_gemini_auto_rotate(prompt)
+        if err or not raw_text:
+            return None, f"Gagal memanggil Gemini: {err}"
+
+    # ═══ Parsing JSON — SELALU JALAN (di luar if) ═══
+    # Tier 1: Direct JSON load
     try:
-        gen_config = {"response_mime_type": "application/json"}
-        try:
-            response = model.generate_content(prompt, generation_config=gen_config)
-        except Exception:
-            response = model.generate_content(prompt)
+        data = json.loads(raw_text)
+        if isinstance(data, dict) and 'swing_score' in data:
+            return data, None
+    except Exception:
+        pass
 
-        raw_text = response.text.strip()
+    # Tier 2: Extract specific JSON object using regex
+    match = re.search(r'\{[^{}]*"swing_score"[^{}]*\}', raw_text, re.DOTALL)
+    if not match:
+        match = re.search(r'\{.*\}', raw_text, re.DOTALL)
 
-        # Tier 1: Direct JSON load
+    if match:
+        json_str = match.group(0)
         try:
-            data = json.loads(raw_text)
+            data = json.loads(json_str, strict=False)
             if isinstance(data, dict) and 'swing_score' in data:
                 return data, None
         except Exception:
             pass
 
-        # Tier 2: Extract specific JSON object using regex
-        match = re.search(r'\{[^{}]*"swing_score"[^{}]*\}', raw_text, re.DOTALL)
-        if not match:
-            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+    # Tier 3: Regex fallbacks for fields
+    swing_match = re.search(r'"swing_score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
+    day_match = re.search(r'"day_score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
+    reason_match = re.search(r'"reasoning"\s*:\s*"([^"]+)"', raw_text)
 
-        if match:
-            json_str = match.group(0)
-            try:
-                data = json.loads(json_str, strict=False)
-                if isinstance(data, dict) and 'swing_score' in data:
-                    return data, None
-            except Exception:
-                pass
+    if swing_match and day_match:
+        data = {
+            "swing_score": float(swing_match.group(1)),
+            "day_score": float(day_match.group(1)),
+            "reasoning": reason_match.group(1) if reason_match else "Evaluasi AI Gemini untuk kesesuaian mode."
+        }
+        return data, None
 
-        # Tier 3: Regex fallbacks for fields
-        swing_match = re.search(r'"swing_score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
-        day_match = re.search(r'"day_score"\s*:\s*(\d+(?:\.\d+)?)', raw_text)
-        reason_match = re.search(r'"reasoning"\s*:\s*"([^"]+)"', raw_text)
-
-        if swing_match and day_match:
-            data = {
-                "swing_score": float(swing_match.group(1)),
-                "day_score": float(day_match.group(1)),
-                "reasoning": reason_match.group(1) if reason_match else "Evaluasi AI Gemini untuk kesesuaian mode."
-            }
-            return data, None
-
-        return None, "Format JSON AI tidak dapat diparse"
-    except Exception as e:
-        return None, str(e)
+    return None, "Format JSON AI tidak dapat diparse"
 # FUNGSI BANDARMOLOGY & BROKSUM (GEMINI VISION)
 @retry(
     stop=stop_after_attempt(3),
@@ -3633,7 +3792,7 @@ def analisis_broksum_gemini_vision(image, api_key):
         return None, "Gemini API Key belum diisi di sidebar."
 
     try:
-        genai.configure(api_key=api_key)
+        configure_gemini_with_active_key()
         
         # ===== KOMPRESI GAMBAR (Hemat Token) =====
         compressed_image = compress_image_for_gemini(image, max_width=1280, max_height=960, quality=85)
@@ -3708,13 +3867,11 @@ ATURAN EKSTRAKSI:
 """
 
         # ===== CALL GEMINI DENGAN RETRY (Exponential Backoff) =====
-        try:
-            response = _call_gemini_vision_api(model, prompt, compressed_image)
-        except Exception as e:
-            return None, f"Error Gemini Vision (after 3 retries): {str(e)}"
+        response_text, err = call_gemini_auto_rotate(prompt, image=compressed_image)
+        if err:
+            return None, f"Error Gemini Vision: {err}"
+        raw_text = response_text
         
-        raw_text = response.text.strip()
-
         # Pembersihan JSON
         if "```json" in raw_text:
             raw_text = raw_text.split("```json")[1].split("```")[0].strip()
@@ -5614,14 +5771,11 @@ def render_sidebar():
             ticker_input = ticker_raw
         # ── Load Gemini API Key lebih awal (dibutuhkan untuk Scan Broksum di bawah) ──
         def _get_api_key_early():
-            try:
-                return st.secrets["GEMINI_API_KEY"]
-            except Exception:
-                pass
-            env_key = os.getenv("GEMINI_API_KEY")
-            if env_key:
-                return env_key
-            return st.session_state.get("gemini_api_key", "")
+            """Ambil key pertama dari rotator (untuk status display)."""
+            keys = _load_gemini_keys()
+            if keys:
+                return keys[0]
+            return ""
         if not st.session_state.get("gemini_api_key"):
             st.session_state.gemini_api_key = _get_api_key_early()
         # ── Harga Pasar Manual ──
@@ -6657,19 +6811,43 @@ def render_sidebar():
         """, unsafe_allow_html=True)
 
         def get_api_key():
-            try: return st.secrets["GEMINI_API_KEY"]
-            except Exception: pass
-            env_key = os.getenv("GEMINI_API_KEY")
-            if env_key: return env_key
-            return st.session_state.get("gemini_api_key", "")
+            keys = _load_gemini_keys()
+            return keys[0] if keys else ""
 
         api_key_loaded = get_api_key()
         st.session_state.gemini_api_key = api_key_loaded
 
-        if api_key_loaded:
-            st.markdown('<div class="sb-api-ok">🟢 Gemini API Key Terhubung</div>', unsafe_allow_html=True)
+        # ── Status display dengan info jumlah key + cooldown ──
+        keys = _load_gemini_keys()
+        n_keys = len(keys)
+
+        if n_keys > 0:
+            state = _get_key_rotator_state()
+            now = time.time()
+            active_count = sum(
+                1 for i in range(n_keys)
+                if now >= state["cooldown_until"].get(i, 0)
+            )
+            if active_count == n_keys:
+                st.markdown(
+                    f'<div class="sb-api-ok">🟢 Gemini Aktif · {n_keys} key siap</div>',
+                    unsafe_allow_html=True
+                )
+            elif active_count > 0:
+                st.markdown(
+                    f'<div class="sb-api-ok">🟡 Gemini Aktif · {active_count}/{n_keys} key ready</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    f'<div class="sb-api-off">🔴 Semua {n_keys} key cooldown · tunggu ~1 menit</div>',
+                    unsafe_allow_html=True
+                )
         else:
-            st.markdown('<div class="sb-api-off">⚠️ Gemini API Key belum ada</div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="sb-api-off">⚠️ Gemini API Key belum ada</div>',
+                unsafe_allow_html=True
+            )
 
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
         if st.button("📊 Analisis Riwayat dgn AI", use_container_width=True, key="btn_ai_riwayat"):
