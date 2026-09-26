@@ -7520,6 +7520,7 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         if sigma_price < 1e-6:
             sigma_price = sma20 * 0.02
         z_score_val = float(np.clip((last_price - sma20) / sigma_price, -5.0, 5.0))
+        mr_norm = np.clip(-z_score_val / 0.05, -1, 1)
 
         # --- RSI ---
         rsi_ch = s_ret[-14:]
@@ -10040,12 +10041,8 @@ if scan_btn:
                 if avg_vol * last_price < likuiditas_min:
                     return None
             # Panggil scoring teknikal (adaptasi Kotlin)
-            res = score_stock_tech(df, ticker, ihsg_data)
-            if res is None:
-                st.write(f"⚠️ {ticker}: return None (data OK tapi score None)")
-            return res
-        except Exception as e:
-            st.write(f"🚨 {ticker}: {type(e).__name__} → {e}")   # ← INI KUNCI
+            return score_stock_tech(df, ticker, ihsg_data)
+        except:
             return None
 
     total = len(daftar_saham)
