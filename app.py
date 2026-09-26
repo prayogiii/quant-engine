@@ -24,9 +24,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import streamlit.components.v1 as components
 
-# ═══════════════════════════════════════════════════════════════
 # REALTIME PLOTLY HELPER
-# ═══════════════════════════════════════════════════════════════
 def render_plotly_realtime(fig, height=420, haptic=True):
     """
     Embed Plotly.js ala Stockbit (v3):
@@ -373,13 +371,13 @@ def render_plotly_realtime(fig, height=420, haptic=True):
     </body>
     </html>
     """
-        # ── Hitung tinggi iframe dinamis ──
+    # ── Hitung tinggi iframe dinamis ──
     # Legend HTML bisa wrap ke beberapa baris tergantung jumlah trace & lebar layar
     # Di iOS (layar sempit) worst case ~2-3 item per baris
     n_traces = len(fig.data)
-    legend_rows = max(2, (n_traces + 2) // 3)   # ceil(n/3), min 2 baris
-    legend_h = legend_rows * 28 + 20            # ~28px per baris + padding
-    iframe_h = height + legend_h + 10           # +10 buffer iOS safe area
+    legend_rows = max(2, (n_traces + 2) // 3)   
+    legend_h = legend_rows * 28 + 20            
+    iframe_h = height + legend_h + 10           
 
     components.html(html, height=iframe_h, scrolling=False)
 def render_sankey_interactive(fig, height=520):
@@ -784,9 +782,7 @@ def render_sankey_interactive(fig, height=520):
                     else resetAll();
                 }}
 
-                // ═══════════════════════════════════════════════════
                 // INITIAL RENDER 
-                // ═══════════════════════════════════════════════════
                 var initNodes = {{}};
                 for (var ii = 0; ii < labels.length; ii++) initNodes[ii] = true;
                 var initTrace = buildTrace(initNodes, null);
@@ -813,9 +809,7 @@ def render_sankey_interactive(fig, height=520):
                     console.error('[Sankey] newPlot error:', err);
                 }});
 
-                // ═══════════════════════════════════════════════════
                 // EVENT DELEGATION — attach ke document, bukan chip
-                // ═══════════════════════════════════════════════════
                 document.addEventListener('click', function(ev) {{
                     var target = ev.target;
                     if (!target) return;
@@ -998,9 +992,7 @@ def _parse_broker_list(raw):
         except Exception:
             return []
     return []
-# ═══════════════════════════════════════════════════════════════
 # KLASIFIKASI BROKER — RETAIL vs BANDAR
-# ═══════════════════════════════════════════════════════════════
 RETAIL_BROKERS = {
     "YP",  # Mirae Asset (banyak retail)
     "PD",  # Indo Premier (Stockbit-heavy retail)
@@ -1166,9 +1158,7 @@ def format_broker_list_for_ai(broker_list):
     summary_str = " | ".join(cat_summary) if cat_summary else "N/A"
     list_str = "\n".join(lines) if lines else "- (tidak ada data)"
     return list_str, summary_str
-# ═══════════════════════════════════════════════════════════════
 # V12 ADAPTIVE ENGINE – KONSTANTA & STATE
-# ═══════════════════════════════════════════════════════════════
 FACTOR_KEYS   = ["Momentum","AI_Senti","MeanRev","Beta_IHSG","Coppock","OFI", "Bandar_Flow", "Foreign_ZScore"]
 WEIGHT_MIN    = 0.08
 WEIGHT_MAX    = 0.40
@@ -1745,7 +1735,6 @@ def compute_multi_day_bandar_score(ticker, days=10):
        → indikasi akumulasi/distribusi sistematis (bukan noise 1 hari)
     5. Retail panic detection: retail mendominasi seller 3+ hari
        → contrarian bullish (retail sudah cutloss, potensi bottom)
-
     Return dict:
         score                 : float -1..+1 (siap pakai sebagai bandar_flow_val)
         raw_weighted          : float -1..+1 (weighted average murni tanpa bonus)
@@ -2307,9 +2296,7 @@ def update_v12_memory(ticker, factor_signals, actual_return, volatility=0.02):
     st.session_state.v12_memory[ticker] = mem
     save_v12_memory(st.session_state.v12_memory)
 
-# ==========================================
 # KONFIGURASI FILE RIWAYAT & SESSION STATE
-# ==========================================
 def bersihkan_untuk_json(obj):
     if isinstance(obj, (np.integer,)): return int(obj)
     elif isinstance(obj, (np.floating,)): return float(obj)
@@ -3328,9 +3315,7 @@ def fetch_idx_stock_list_exclude_monitoring():
 def fetch_all_idx_stocks():
     """Ambil semua saham BEI non-Pemantauan Khusus."""
     return fetch_idx_stock_list_exclude_monitoring()
-# ==========================================
 # FUNGSI AI GEMINI
-# ==========================================
 def dapatkan_model_gemini(api_key):
     if not api_key: return None, "API key belum diisi."
     try:
@@ -3623,10 +3608,7 @@ Berikan evaluasi dalam format JSON murni dengan struktur persis seperti ini (tan
         return None, "Format JSON AI tidak dapat diparse"
     except Exception as e:
         return None, str(e)
-
-# ==========================================
 # FUNGSI BANDARMOLOGY & BROKSUM (GEMINI VISION)
-# ==========================================
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -3753,10 +3735,7 @@ ATURAN EKSTRAKSI:
     except Exception as e:
         return None, f"Error Gemini Vision: {str(e)}"
 
-
-# ==========================================
 # FUNGSI BANDARMOLOGY & BROKSUM (OCR METODE LOCAL)
-# ==========================================
 EASYOCR_AVAILABLE = False
 PYTESSERACT_AVAILABLE = False
 
@@ -5183,9 +5162,7 @@ def display_bandarmology_tab(ticker):
     else:
         st.caption("(Tidak ada data buyer/seller yang cukup untuk diagram )")
 
-    # ═══════════════════════════════════════════════
     # RIWAYAT UPLOAD
-    # ═══════════════════════════════════════════════
     if len(data['history']) > 1:
         with st.expander(f"📜 Riwayat Upload ({len(data['history'])} entri)"):
             for h in data['history'][:10]:
@@ -5194,13 +5171,9 @@ def display_bandarmology_tab(ticker):
                     f"{h.get('bandarmology_status', 'N/A')}"
                 )
 
-# ==========================================
 # KONFIGURASI HALAMAN & STYLING
-# ==========================================
 st.set_page_config(page_title="Quant Risk Engine Pro v2", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
-# ═══════════════════════════════════════════════════════════
 # 🔒 FORCE DARK MODE + HIDE THEME SWITCHER
-# ═══════════════════════════════════════════════════════════
 st.markdown("""
     <style>
     /* Kunci color-scheme browser */
@@ -5433,9 +5406,7 @@ def _render_broksum_net_insight(bs_data):
 @st.fragment
 def render_sidebar():
     with st.sidebar:
-        # ═══════════════════════════════════════════════════════════
         # SIDEBAR CUSTOM STYLING
-        # ═══════════════════════════════════════════════════════════
         st.markdown("""
             <style>
             /* Sidebar container */
@@ -5614,9 +5585,7 @@ def render_sidebar():
             </style>
         """, unsafe_allow_html=True)
 
-        # ═══════════════════════════════════════════════════════════
         # BRAND HEADER
-        # ═══════════════════════════════════════════════════════════
         st.markdown("""
             <div class="sb-brand">
                 <div class="sb-brand-title">QuantRisk <span>Pro</span></div>
@@ -5624,9 +5593,8 @@ def render_sidebar():
             </div>
         """, unsafe_allow_html=True)
         st.caption("⚙️ Analisis otomatis **Swing (harian)** + **Daytrade (intraday)**")
-        # ═══════════════════════════════════════════════════════════
+
         # SECTION 1: ANALYSIS INPUT
-        # ═══════════════════════════════════════════════════════════
         st.markdown("""
             <div class="sb-section first">
                 <span class="sb-section-icon">🎯</span>
@@ -5687,17 +5655,13 @@ def render_sidebar():
                     harga_beli_float = float(harga_beli_str.replace(",", ""))
                 except:
                     st.error("Format harga beli salah")
-        # ═══════════════════════════════════════════════════════════
         # SECTION 2: SCAN BROKSUM (expander)
-        # ═══════════════════════════════════════════════════════════
         with st.expander("📸 Scan Broksum (Gemini AI / OCR)", expanded=False):
             render_broksum_scan_ui(
                 api_key=st.session_state.get("gemini_api_key", ""),
                 key_prefix="sb_broksum"
             )
-        # ═══════════════════════════════════════════════════════════
         # SECTION 3: ACTIVE SWING DETECTION
-        # ═══════════════════════════════════════════════════════════
         ticker_clean = ticker_raw.replace(".JK", "").strip().upper()
         dict_active_swings = dapatkan_dict_swing_aktif()
         aksi_simpan_mode = "simpan_baru"
@@ -5732,9 +5696,7 @@ def render_sidebar():
                 aksi_simpan_mode = "simpan_baru"
 
         st.session_state['aksi_simpan_mode'] = aksi_simpan_mode
-        # ═══════════════════════════════════════════════════════════
         # SECTION 4: FEE BROKER (expander)
-        # ═══════════════════════════════════════════════════════════
         with st.expander("⚙️ Fee Broker (Beli & Jual)", expanded=False):
             st.caption("Digunakan untuk hitung nett profit DT & backtest.")
             col_f1, col_f2 = st.columns(2)
@@ -5751,9 +5713,7 @@ def render_sidebar():
                     key="fee_jual_pct"
                 )
 
-        # ═══════════════════════════════════════════════════════════
         # SECTION 5: ACTION BUTTONS
-        # ═══════════════════════════════════════════════════════════
         st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
         if st.button(
@@ -6052,12 +6012,8 @@ def render_sidebar():
                     hapus_riwayat_item(waktu_key, saham_key, gaya=gaya_key)
                     st.rerun()
 
-        # ═══════════════════════════════════════════════════════════
         # SECTION 7: RIWAYAT ANALISIS
-        # ═══════════════════════════════════════════════════════════
-        # ═══════════════════════════════════════════════════════════
         # DIAGNOSTIK WR — cek trend & regime
-        # ═══════════════════════════════════════════════════════════
         with st.expander("🔬 Diagnostik WR (cek trend & regime)", expanded=False):
             diag = diagnose_winrate_trend(
                 st.session_state.get('riwayat', []),
@@ -6692,9 +6648,7 @@ def render_sidebar():
                     st.caption(f"❌ Tidak ada hasil untuk '{search_query}'.")
                 else:
                     st.caption("Belum ada riwayat.")
-        # ═══════════════════════════════════════════════════════════
         # SECTION 8: AI GEMINI
-        # ═══════════════════════════════════════════════════════════
         st.markdown("""
             <div class="sb-section">
                 <span class="sb-section-icon">🧠</span>
@@ -6729,10 +6683,7 @@ def render_sidebar():
                 st.success("Riwayat dihapus!")
             except Exception as e:
                 st.error(f"Gagal menghapus riwayat: {e}")
-
-        # ═══════════════════════════════════════════════════════════
         # SECTION 9: KALENDER BURSA
-        # ═══════════════════════════════════════════════════════════
         st.markdown("""
             <div class="sb-section">
                 <span class="sb-section-icon">📅</span>
@@ -6784,9 +6735,7 @@ def render_sidebar():
         else:
             st.caption("Tidak ada libur dalam 2 minggu.")
 
-        # ═══════════════════════════════════════════════════════════
         # FOOTER
-        # ═══════════════════════════════════════════════════════════
         st.markdown("---")
         st.caption("📡 Data dari Yahoo Finance · Bukan rekomendasi investasi")
 
@@ -6847,108 +6796,62 @@ def load_ihsg_data(period="2y", interval="1d"):
 def get_daftar_saham(mode):
     """Mengembalikan list kode saham (tanpa .JK) berdasarkan mode scan."""
     # Daftar statis fallback (contoh, kamu bisa lengkapi sendiri)
-    lq45 = ["AADI", "ADMR", "ADRO", "AKRA", "AMMN", "AMRT", "ANTM", "ASII", "BBCA", "BBNI",
-            "BBRI", "BBTN", "BMRI", "BRPT", "BUMI", "CPIN", "CUAN", "DEWA", "EMTK", "ESSA",
-            "EXCL", "GOTO", "HRTA", "ICBP", "INCO", "INDF", "INDY", "INKP", "ISAT", "ITMG",
-            "JPFA", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "NCKL", "PGAS", "PGEO", "PTBA",
-            "SCMA", "TLKM", "UNTR", "UNVR", "WIFI"]
+    lq45 = ["AADI", "ADMR", "ADRO", "AKRA", "AMMN", "AMRT", "ANTM", "ASII", "BBCA", "BBNI", "BBRI", "BBTN", "BMRI", "BRPT", "BUMI", "CPIN", "CUAN", "DEWA", "EMTK", "ESSA",
+            "EXCL", "HRTA", "ICBP", "INCO", "INDF", "INDY", "INKP", "ISAT", "ITMG", "JPFA", "KLBF", "MAPI", "MBMA", "MDKA", "MEDC", "PGAS", "PGEO", "PTBA", "SCMA", "TLKM",
+            "UNTR", "UNVR", "WIFI", "GOTO", "NCKL"]
     
-    papan_utama = lq45 + ["AALI", "ABMM", "ACES", "ADHI", "AISA", "ALDO", "AMAG", "APLN", "ARNA", "ARTO",
-                          "ASGR", "ASRI", "ASSA", "AUTO", "BACA", "BALI", "BAYU", "BBHI", "BBMD", "BBYB",
-                          "BCAP", "BDMN", "BEST", "BFIN", "BGTG", "BINA", "BIRD", "BISI", "BJBR", "BJTM",
-                          "BKSL", "BMTR", "BNGA", "BNII", "BNLI", "BRMS", "BSDE", "BSIM", "BSSR", "BTPN",
-                          "BUDI", "BVIC", "BWPT", "BYAN", "CASS", "CFIN", "CITA", "CMNP", "CTRA", "DILD",
-                          "DKFT", "DLTA", "DMAS", "DNET", "DSNG", "DSSA", "ELSA", "ENRG", "EPMT", "ERAA",
-                          "FISH", "GEMS", "GGRM", "GJTL", "GZCO", "HERO", "HEXA", "HMSP", "HRUM", "IMAS",
-                          "IMPC", "INPC", "INTP", "ISSP", "JIHD", "JKON", "JRPT", "JSMR", "JSPT", "JTPE",
-                          "KBLI", "KIJA", "KKGI", "KPIG", "LPCK", "LPKR", "LPPF", "LSIP", "LTLS", "MAIN",
-                          "MAYA", "MBSS", "MCOR", "MEGA", "MERK", "MIDI", "MIKA", "MLBI", "MLPL", "MNCN",
-                          "MPMX", "MTDL", "MTLA", "MYOR", "NISP", "NOBU", "PADI", "PALM", "PANS", "PNBN",
-                          "PNIN", "PNLF", "PTPP", "PTRO", "PWON", "RAJA", "RALS", "SAME", "SGRO", "SIDO",
-                          "SILO", "SIMP", "SMAR", "SMBR", "SMDR", "SMGR", "SMRA", "SMSM", "SRTG", "SSIA",
-                          "SSMS", "TBIG", "TBLA", "TINS", "TKIM", "TMAS", "TOBA", "TOTL", "TOTO", "TOWR",
-                          "TPIA", "TPMA", "TRIM", "TSPC", "ULTJ", "UNIC", "VICO", "WIIM", "WINS", "WTON",
-                          "SHIP", "POWR", "PRDA", "BRIS", "PORT", "CARS", "CLEO", "WOOD", "MARK", "PSSI",
-                          "MORA", "PBID", "IPCM", "BTPS", "SPTO", "HEAL", "TUGU", "MSIN", "MAPA", "IPCC",
-                          "FILM", "PANI", "GOOD", "SKRN", "BOLA", "KOTA", "HDIT", "KEEN", "TEBE", "KEJU",
-                          "PSGO", "UCID", "GLVA", "AMAR", "DMND", "SAMF", "SGER", "BBSI", "VICI", "TAPG",
-                          "MASB", "BMHS", "MCOL", "MTEL", "CMRY", "STAA", "TLDN", "MTMH", "TRGU", "HATM",
-                          "JARR", "ELPI", "PRAY", "CBUT", "MKTR", "OMED", "SUNI", "BDKR", "SMIL", "MAHA",
-                          "ERAL", "BREN", "MSTI", "ALII", "GOLF", "DAAZ", "MDIY", "DGWG", "CBDK", "BLOG",
-                          "YUPI", "MDLA", "RAAM", "JECX", "BACH", "RMKE", "AVIA", "DRMA", "AGRO"]
-                        
-    
-    pengembangan = papan_utama + ["ABDA", "AKPI", "AKSI", "AMFG", "AMIN", "ANJT", "APEX", "APIC", "APII", "APLI",
-                                  "ARGO", "ARII", "ARTA", "ASBI", "ASDM", "ASJT", "ASRM", "ATIC", "BABP", "BAJA",
-                                  "BAPA", "BBKP", "BBLD", "BBRM", "BCIC", "BCIP", "BIPI", "BIPP", "BKDP", "BKSW",
-                                  "BMAS", "BMSR", "BNBA", "BNBR", "BOLT", "BPFI", "BPII", "BRAM", "BRNA", "BTON",
-                                  "BUKK", "BULL", "BUVA", "CEKA", "CENT", "CINT", "CLPI", "CPRO", "CSAP", "CTBN",
-                                  "CTTH", "DART", "DEFI", "DGIK", "DNAR", "DOID", "DPNS", "DSFI", "DVLA", "DYAN",
-                                  "ECII", "EKAD", "EMDE", "ERTX", "ESTI", "FAST", "FMII", "FORU", "FPNI", "GDST",
-                                  "GDYR", "GEMA", "GIAA", "GMTD", "GOLD", "GPRA", "GSMF", "GTBO", "GWSA", "HDFA",
-                                  "IATA", "ICON", "IGAR", "IKBI", "IMJS", "INAI", "INCI", "INDR", "INDS", "INDX",
-                                  "INPP", "INTD", "IPOL", "ITMA", "JAWA", "JECC", "KAEF", "KBLM", "KBLV", "KDSI",
-                                  "KICI", "KOBX", "KONI", "KOPI", "KRAS", "LAPD", "LEAD", "LINK", "LION", "LMPI",
-                                  "LPGI", "LPIN", "LPLI", "LPPS", "LRNA", "MBAP", "MBTO", "MDIA", "MDLN", "META",
-                                  "MGNA", "MICE", "MITI", "MKPI", "MLPT", "MMLP", "MRAT", "MREI", "MSKY", "MYOH",
-                                  "NELY", "NIKL", "NIRO", "NRCA", "OKAS", "OMRE", "PANR", "PDES", "PEGE", "PGLI",
-                                  "PICO", "PJAA", "PKPK", "PNBS", "PSAB", "PSDN", "PSKT", "PTIS", "PTSN", "PTSP",
-                                  "PUDP", "PYFA", "RANC", "RBMS", "RDTX", "RELI", "RICY", "RIGS", "RODA", "ROTI",
-                                  "RUIS", "SAFE", "SCCO", "SDMU", "SDPC", "SDRA", "SHID", "SIPD", "SKBM", "SKLT",
-                                  "SMDM", "SMMA", "SMMT", "SOCI", "SPMA", "SQMI", "SRAJ", "SRSN", "SSTM", "STAR",
-                                  "STTP", "SULI", "TALF", "TBMS", "TCID", "TGKA", "TIFA", "TIRA", "TMPO", "TRIS",
-                                  "TRST", "TRUS", "UNIT", "VINS", "VOKS", "VRNA", "WAPO", "WEHA", "WOMF", "YPAS",
-                                  "YULE", "CASA", "DAYA", "DPUM", "IDPR", "JGLE", "KINO", "OASA", "PBSA", "BOGA",
-                                  "MINA", "CSIS", "FIRE", "KMTR", "HOKI", "MPOW", "MDKI", "BELL", "KIOS", "GMFI",
-                                  "MTWI", "MCAS", "PPRE", "WEGE", "DWGL", "JMAS", "CAMP", "LCKM", "HELI", "GHON",
-                                  "DFAM", "NICK", "PRIM", "TRUK", "PZZA", "TNCA", "TCPI", "RISE", "BPTR", "NFCX",
-                                  "MGRO", "LAND", "MOLI", "CITY", "SAPX", "SURE", "MPRO", "YELO", "CAKK", "SATU",
-                                  "POLA", "DIVA", "LUCK", "SOTS", "ZONE", "PEHA", "BEEF", "POLI", "CLAY", "NATO",
-                                  "JAYA", "COCO", "JAST", "FITT", "CCSI", "SFAN", "POLU", "KJEN", "ITIC", "PAMG",
-                                  "BLUE", "EAST", "LIFE", "FUJI", "INOV", "SMKL", "TFAS", "GGRP", "OPMS", "NZIA",
-                                  "SLIS", "IRRA", "DMMX", "WOWS", "ESIP", "REAL", "IFII", "PMJS", "CSRA", "INDO",
-                                  "AMOR", "TRIN", "PTPW", "TAMA", "IKAN", "RONY", "CSMI", "BBSS", "BHAT", "EPAC",
-                                  "UANG", "PGUN", "TRJA", "SCNP", "KMDS", "PURI", "SOHO", "HOMI", "ROCK", "ENZO",
-                                  "ATAP", "BANK", "WMUU", "EDGE", "UNIQ", "SNLK", "ZYRX", "NPGF", "ADCP", "HOPE",
-                                  "TRUE", "LABA", "ARCI", "NICL", "UVCR", "HAIS", "OILS", "GPSO", "RSGK", "SBMA",
-                                  "CMNT", "GTSI", "KUAS", "BOBA", "DEPO", "BINO", "TAYS", "SEMA", "ASLC", "NETV",
-                                  "ENAK", "NTBK", "BIKE", "WIRG", "SICO", "GOTO", "ASHA", "SWID", "ARKO", "CHEM",
-                                  "DEWI", "AXIO", "KRYA", "GULA", "TOOL", "BUAH", "CRAB", "MEDS", "COAL", "BELI",
-                                  "BSBK", "PDPP", "KDTN", "ZATA", "MMIX", "PADA", "VTNY", "ELIT", "BEER", "CBPE",
-                                  "CBRE", "WINE", "PEVE", "LAJU", "FWCT", "IRSX", "VAST", "HALO", "FUTR", "PTMP",
-                                  "TRON", "NSSS", "GTRA", "JATI", "TYRE", "MPXL", "KLAS", "MAXI", "VKTR", "CRSN",
-                                  "INET", "RMKO", "CNMA", "FOLK", "GRIA", "PPRI", "CYBR", "MUTU", "HUMI", "RSCH",
-                                  "BABY", "IOTF", "KOCI", "PTPS", "STRK", "KOKA", "RGAS", "IKPM", "AYAM", "SURI",
-                                  "ASLI", "GRPH", "SMGA", "UNTD", "TOSK", "MPIX", "MKAP", "LIVE", "HYGN", "BAIK",
-                                  "VISI", "AREA", "MHKI", "ATLA", "DATA", "SOLA", "BATR", "PART", "ISEA", "BLES",
-                                  "GUNA", "LABS", "DOSS", "NEST", "VERN", "BOAT", "NAIK", "KSIX", "RATU", "YOII",
-                                  "HGII", "BRRC", "OBAT", "MINE", "ASPR", "PSAT", "COIN", "CDIA", "MERI", "KAQI",
-                                  "FORE", "DKHH", "AYLS", "DADA", "ASPI", "ESTA", "BESS", "AMAN", "CARE", "PIPA",
-                                  "NCKL", "AWAN", "DOOH", "CGAS", "NICE", "MSJA", "SMLE", "ACRO", "WIFI", "FAPA",
-                                  "DCII", "KETR", "DGNS", "UFOE", "CHEK", "PMUI", "EMAS", "PJHB", "RLCO", "SUPA",
-                                  "WBSA", "JELI", "EMMI", "PRDL", "RANS", "OBMD", "NASI", "BSML", "ADMF", "ADMG",
-                                  "AGII", "AGRS", "AHAP", "AIMS", "PNSE"]
-    akselerasi_ekonomi = ["CASH", "SOFA", "PPGL", "PLAN", "LFLO", "LUCY", "MGLV", "IPAC", "FLMC", "RUNS",
-                          "IDEA", "WGSH", "SMKM", "NANO", "IBOS", "OLIV", "RCCC", "AMMS", "EURO", "KLIN",
-                          "NINE", "ISAP", "SOUL", "BMBL", "NAYZ", "PACK", "CHIP", "KING", "HAJJ", "RELF",
-                          "GRPM", "WIDI", "HBAT", "LMAX", "MSIE", "AEGS", "LOPI", "UDNG", "MEJA", "SPRE",
-                          "MANG", "BUKA"]
-    pemantauan_khusus = ["ABBA", "ACST", "ADES", "AKKU", "ALKA", "ALMI", "ALTO", "ARTI", "ASMI",
-                         "BATA", "BEKS", "BHIT", "BIKA", "BIMA", "BLTA", "BLTZ", "BSWD", "BTEK", "BTEL",
-                         "CANI", "CMPP", "CNKO", "COWL", "DUTI", "ELTY", "ETWA", "FASW", "GAMA", "GLOB",
-                         "GOLL", "HADE", "HITS", "HOME", "HOTL", "IBFN", "IBST", "IIKP", "IKAI", "INAF",
-                         "INRU", "INTA", "KARW", "KBRI", "KIAS", "KOIN", "KREN", "LCGP", "LMAS", "LMSH",
-                         "MAGP", "MDRN", "MFMI", "MIRA", "MLIA", "MPPA", "MTFN", "MTSM", "MYTX", "OCAP",
-                         "PBRX", "PLAS", "PLIN", "RIMO", "SCPI", "SIMA", "SKYB", "SMCB", "SMRU", "SONA",
-                         "SRIL", "SUGI", "SUPR", "TARA", "TAXI", "TELE", "TFCO", "TIRT", "TRAM", "TRIL",
-                         "TRIO", "UNSP", "VIVA", "WICO", "WIKA", "WSKT", "ZBRA", "MARI", "MKNT", "MTRA",
-                         "INCF", "WSBP", "TAMU", "TGRA", "TOPS", "ARMY", "MAPB", "MABA", "NASA", "ZINC",
-                         "PCAR", "BOSS", "JSKY", "INPS", "TDPM", "SWAT", "POLL", "NUSA", "ANDI", "DIGI",
-                         "HKMU", "DUCK", "SOSS", "DEAL", "URBN", "FOOD", "MTPS", "CPRI", "HRME", "POSA",
-                         "KAYU", "IPTV", "ENVY", "ARKA", "BAPI", "PURE", "SINI", "IFSH", "PGJO", "PURA",
-                         "SBAT", "KBAG", "CBMF", "TECH", "TOYS", "PNGO", "PTDU", "PMMP", "BEBS", "FIMP",
-                         "BAUT", "WINR", "RAFI", "KKES", "HILL", "SAGE", "TGUK", "RGAS", "PTMR", "MENN",
-                         "WMPP", "IPPE", "POLY", "POOL", "PPRO"]
+    papan_utama = lq45 + ["AALI", "ABMM", "ACES", "ADHI", "AISA", "ALDO", "AMAG", "APLN", "ARNA", "ARTO", "ASGR", "ASRI", "ASSA", "AUTO", "BACA", "BALI", "BAYU", "BBHI", "BBMD", "BBYB",
+                          "BCAP", "BDMN", "BEST", "BFIN", "BGTG", "BINA", "BIRD", "BISI", "BJBR", "BJTM", "BKSL", "BMTR", "BNGA", "BNII", "BNLI", "BRMS", "BSDE", "BSIM", "BSSR", "BTPN",
+                          "BUDI", "BVIC", "BWPT", "BYAN", "CASS", "CFIN", "CITA", "CMNP", "CTRA", "DILD", "DKFT", "DLTA", "DMAS", "DNET", "DSNG", "DSSA", "ELSA", "ENRG", "EPMT", "ERAA",
+                          "FISH", "GEMS", "GGRM", "GJTL", "GZCO", "HERO", "HEXA", "HMSP", "HRUM", "IMAS", "IMPC", "INPC", "INTP", "ISSP", "JIHD", "JKON", "JRPT", "JSMR", "JSPT", "JTPE",
+                          "KBLI", "KIJA", "KKGI", "KPIG", "LPCK", "LPKR", "LPPF", "LSIP", "LTLS", "MAIN", "MAYA", "MBSS", "MCOR", "MEGA", "MERK", "MIDI", "MIKA", "MLBI", "MLPL", "MNCN",
+                          "MPMX", "MTDL", "MTLA", "MYOR", "NISP", "NOBU", "PADI", "PALM", "PANS", "PNBN", "PNIN", "PNLF", "PTPP", "PTRO", "PWON", "RAJA", "RALS", "SAME", "SGRO", "SIDO",
+                          "SILO", "SIMP", "SMAR", "SMBR", "SMDR", "SMGR", "SMRA", "SMSM", "SRTG", "SSIA", "SSMS", "TBIG", "TBLA", "TINS", "TKIM", "TMAS", "TOBA", "TOTL", "TOTO", "TOWR",
+                          "TPIA", "TPMA", "TRIM", "TSPC", "ULTJ", "UNIC", "VICO", "WIIM", "WINS", "WTON", "SHIP", "POWR", "PRDA", "BRIS", "PORT", "CARS", "CLEO", "WOOD", "MARK", "PSSI",
+                          "MORA", "PBID", "IPCM", "BTPS", "SPTO", "HEAL", "TUGU", "MSIN", "MAPA", "IPCC", "MLIA", "PNGO", "FILM", "PANI", "GOOD", "SKRN", "BOLA", "KOTA", "HDIT", "KEEN", 
+                          "TEBE", "KEJU", "SMCB", "BHIT", "IPTV", "PSGO", "UCID", "GLVA", "AMAR", "DMND", "SAMF", "SGER", "BBSI", "VICI", "TAPG", "ADES", "MASB", "BMHS", "MCOL", "MTEL", 
+                          "CMRY", "STAA", "TLDN", "MTMH", "TRGU", "HATM", "PLIN", "JARR", "ELPI", "PRAY", "CBUT", "MKTR", "OMED", "SUNI", "BDKR", "SMIL", "MAHA", "WMPP", "ERAL", "BREN", 
+                          "MSTI", "ALII", "GOLF", "DAAZ", "MDIY", "DGWG", "CBDK", "BLOG", "ASMI", "YUPI", "MDLA", "RAAM", "JECX", "BACH", "RMKE", "AVIA", "DRMA", "AGRO", "PBRX", "ALTO",
+                          "BLTA", "GAMA", "IKAI", "TARA", "TAXI", "KREN", "PPRO", "FASW", "WINR", "IBST", "WSKT"]
+
+    pengembangan = papan_utama + ["ABDA", "AKPI", "AKSI", "AMFG", "AMIN", "ANJT", "APEX", "APIC", "APII", "APLI", "ARGO", "ARII", "ARTA", "ASBI", "ASDM", "ASJT", "ASRM", "ATIC", "BABP", "BAJA",
+                                  "BAPA", "BBKP", "BBLD", "BBRM", "BCIC", "BCIP", "BIPI", "BIPP", "BKDP", "BKSW", "BMAS", "BMSR", "BNBA", "BNBR", "BOLT", "BPFI", "BPII", "BRAM", "BRNA", "BTON",
+                                  "BUKK", "BULL", "BUVA", "CEKA", "CENT", "CINT", "CLPI", "CPRO", "CSAP", "CTBN", "CTTH", "DART", "DEFI", "DGIK", "DNAR", "DOID", "DPNS", "DSFI", "DVLA", "DYAN",
+                                  "ECII", "EKAD", "EMDE", "ERTX", "ESTI", "FAST", "FMII", "FORU", "FPNI", "GDST", "GDYR", "GEMA", "GIAA", "GMTD", "GOLD", "GPRA", "GSMF", "GTBO", "GWSA", "HDFA",
+                                  "IATA", "ICON", "IGAR", "IKBI", "IMJS", "INAI", "INCI", "INDR", "INDS", "INDX", "INPP", "INTD", "IPOL", "ITMA", "JAWA", "JECC", "KAEF", "KBLM", "KBLV", "KDSI",
+                                  "KICI", "KOBX", "KONI", "KOPI", "KRAS", "LAPD", "LEAD", "LINK", "LION", "LMPI", "LPGI", "LPIN", "LPLI", "LPPS", "LRNA", "MBAP", "MBTO", "MDIA", "MDLN", "META",
+                                  "MGNA", "MICE", "MITI", "MKPI", "MLPT", "MMLP", "MRAT", "MREI", "MSKY", "MYOH", "NELY", "NIKL", "NIRO", "NRCA", "OKAS", "OMRE", "PANR", "PDES", "PEGE", "PGLI",
+                                  "PICO", "PJAA", "PKPK", "PNBS", "PSAB", "PSDN", "PSKT", "PTIS", "PTSN", "PTSP", "PUDP", "PYFA", "RANC", "RBMS", "RDTX", "RELI", "RICY", "RIGS", "RODA", "ROTI",
+                                  "RUIS", "SAFE", "SCCO", "SDMU", "SDPC", "SDRA", "SHID", "SIPD", "SKBM", "SKLT", "SMDM", "SMMA", "SMMT", "SOCI", "SPMA", "SQMI", "SRAJ", "SRSN", "SSTM", "STAR",
+                                  "STTP", "SULI", "TALF", "TBMS", "TCID", "TGKA", "TIFA", "TIRA", "TMPO", "TRIS", "TRST", "TRUS", "UNIT", "VINS", "VOKS", "VRNA", "WAPO", "WEHA", "WOMF", "YPAS",
+                                  "YULE", "CASA", "DAYA", "DPUM", "IDPR", "JGLE", "KINO", "OASA", "PBSA", "BOGA", "MINA", "CSIS", "FIRE", "KMTR", "HOKI", "MPOW", "MDKI", "BELL", "KIOS", "GMFI",
+                                  "MTWI", "MCAS", "PPRE", "WEGE", "DWGL", "JMAS", "CAMP", "LCKM", "HELI", "GHON", "DFAM", "NICK", "PRIM", "TRUK", "PZZA", "TNCA", "TCPI", "RISE", "BPTR", "NFCX",
+                                  "MGRO", "LAND", "MOLI", "CITY", "SAPX", "SURE", "MPRO", "YELO", "CAKK", "SATU", "POLA", "DIVA", "LUCK", "SOTS", "ZONE", "PEHA", "BEEF", "POLI", "CLAY", "NATO",
+                                  "JAYA", "COCO", "JAST", "FITT", "CCSI", "SFAN", "POLU", "KJEN", "ITIC", "PAMG", "BLUE", "EAST", "LIFE", "FUJI", "INOV", "SMKL", "TFAS", "GGRP", "OPMS", "NZIA",
+                                  "SLIS", "IRRA", "DMMX", "WOWS", "ESIP", "REAL", "IFII", "PMJS", "CSRA", "INDO", "AMOR", "TRIN", "PTPW", "TAMA", "IKAN", "RONY", "CSMI", "BBSS", "BHAT", "EPAC",
+                                  "UANG", "PGUN", "TRJA", "SCNP", "KMDS", "PURI", "SOHO", "HOMI", "ROCK", "ENZO", "ATAP", "BANK", "WMUU", "EDGE", "UNIQ", "SNLK", "ZYRX", "NPGF", "ADCP", "HOPE",
+                                  "TRUE", "LABA", "ARCI", "NICL", "UVCR", "HAIS", "OILS", "GPSO", "RSGK", "SBMA", "CMNT", "GTSI", "KUAS", "BOBA", "DEPO", "BINO", "TAYS", "SEMA", "ASLC", "NETV",
+                                  "ENAK", "NTBK", "BIKE", "WIRG", "SICO", "GOTO", "ASHA", "SWID", "ARKO", "CHEM", "PCAR", "INRU", "PTMR", "WIKA", "DEWI", "AXIO", "KRYA", "GULA", "TOOL", "BUAH", 
+                                  "BSBK", "PDPP", "KDTN", "ZATA", "MMIX", "PADA", "VTNY", "ELIT", "BEER", "CBPE", "RAFI", "SAGE", "DUTI", "CRAB", "MEDS", "COAL", "BELI", "MAPB", "SOSS", "MTSM",
+                                  "CBRE", "WINE", "PEVE", "LAJU", "FWCT", "IRSX", "VAST", "HALO", "FUTR", "PTMP", "TRON", "NSSS", "GTRA", "JATI", "TYRE", "MPXL", "KLAS", "MAXI", "VKTR", "CRSN",
+                                  "INET", "RMKO", "CNMA", "FOLK", "GRIA", "PPRI", "CYBR", "MUTU", "HUMI", "RSCH", "MFMI", "BABY", "IOTF", "KOCI", "PTPS", "STRK", "KOKA", "RGAS", "IKPM", "AYAM",
+                                  "ASLI", "GRPH", "SMGA", "UNTD", "TOSK", "MPIX", "MKAP", "LIVE", "HYGN", "BAIK", "IPPE", "ALMI", "SURI", "IFSH", "VISI", "AREA", "MHKI", "ATLA", "DATA", "LMSH",
+                                  "SOLA", "BATR", "PART", "ISEA", "BLES", "INCF", "GUNA", "LABS", "DOSS", "NEST", "VERN", "BOAT", "NAIK", "KSIX", "RATU", "YOII", "HRME", "HGII", "SUPA", "PURA",
+                                  "BRRC", "OBAT", "MINE", "ASPR", "PSAT", "COIN", "CDIA", "MERI", "KAQI", "BEBS", "FORE", "DKHH", "AYLS", "DADA", "ASPI", "ESTA", "BESS", "AMAN", "CARE", "PIPA",
+                                  "NCKL", "AWAN", "DOOH", "CGAS", "NICE", "MSJA", "SMLE", "ACRO", "WIFI", "FAPA", "BAUT", "DCII", "KETR", "DGNS", "UFOE", "CHEK", "PMUI", "EMAS", "PJHB", "RLCO",
+                                  "WBSA", "JELI", "EMMI", "PRDL", "RANS", "OBMD", "NASI", "BSML", "ADMF", "ADMG", "NASA", "AGII", "AGRS", "AHAP", "AIMS", "PNSE", "POLL", "TECH", "SUPR", "ARKA",
+                                  "ANDI", "ARMY", "BAPI", "BLTZ", "BSWD", "BTEK", "CPRI", "DUCK", "ELTY", "HADE", "CBMF", "HOME", "IIKP", "KIAS", "LCGP", "MAGP", "MIRA", "NUSA", "PLAS", "POOL",
+                                  "SCPI", "SKYB", "SONA", "SUGI", "TAMU", "TFCO", "TRAM", "TRIL", "VIVA", "HITS", "SWAT", "AKKU", "KBAG", "RIMO", "BEKS"]
+
+    akselerasi_ekonomi = ["CASH", "SOFA", "PPGL", "PLAN", "LFLO", "LUCY", "MGLV", "IPAC", "FLMC", "RUNS", "IDEA", "WGSH", "SMKM", "NANO", "IBOS", "OLIV", "RCCC", 
+                          "AMMS", "EURO", "KLIN", "NINE", "ISAP", "SOUL", "BMBL", "NAYZ", "PACK", "CHIP", "KING", "HAJJ", "RELF", "GRPM", "WIDI", "HBAT", "LMAX", 
+                          "MSIE", "AEGS", "LOPI", "UDNG", "MEJA", "SPRE", "MANG", "BUKA", "FIMP", "MENN"]
+
+    pemantauan_khusus = ["ABBA", "ACST", "ALKA", "ARTI","BATA", "BIKA", "BIMA", "BTEL","CANI", "CMPP", "CNKO", "COWL", "ETWA", "GLOB","GOLL", 
+                         "HOTL", "IBFN", "INAF","INTA", "KARW", "KBRI", "KOIN", "LMAS","MDRN", "MPPA", "MTFN", "MYTX", "OCAP", "SIMA", "SMRU",
+                         "SRIL", "TELE", "TIRT","TRIO", "UNSP", "WICO", "ZBRA", "MARI", "MKNT", "MTRA","WSBP", "TGRA", "TOPS", "MABA", "ZINC",
+                         "BOSS", "JSKY", "INPS", "TDPM", "DIGI","HKMU", "DEAL", "URBN", "FOOD", "MTPS", "POSA","KAYU", "ENVY", "PURE", "SINI", 
+                         "PGJO","SBAT", "TOYS", "PTDU", "PMMP","KKES", "HILL", "TGUK", "RGAS","POLY"]
     # Set untuk filter cepat
     pemantauan_khusus_set = set(pemantauan_khusus)
     # Gabungan dasar semua emiten statis (non-khusus)
@@ -7292,11 +7195,7 @@ def filter_relevant(news_list, ticker, ticker_info=None):
     ticker_clean = str(ticker).upper().replace(".JK", "").strip()
     if not ticker_clean:
         return news_list
-
-    # ═══════════════════════════════════════════════════════════
     # FIX: Helper untuk strip ' - Nama Media' dari judul
-    # Contoh: "Putri Anwar Menikah - Tempo.co" → "Putri Anwar Menikah"
-    # ═══════════════════════════════════════════════════════════
     def _strip_source_suffix(title):
         """Strip suffix ' - Nama Media' dari judul Google News."""
         # Format umum: "Judul Berita - Nama Media"
@@ -7317,10 +7216,7 @@ def filter_relevant(news_list, ticker, ticker_info=None):
         title = n.get('title', '') or ''
         title_clean = _strip_source_suffix(title)
         return title_clean.lower()
-
-    # ═══════════════════════════════════════════════════════════
     # Bangun 2 tier keyword
-    # ═══════════════════════════════════════════════════════════
     strong_keywords = {ticker_clean.lower()}
     weak_keywords = {ticker_clean.lower()}
 
@@ -7370,11 +7266,7 @@ def filter_relevant(news_list, ticker, ticker_info=None):
 
     return combined
 
-# ═══════════════════════════════════════════════════════════════
 # IDX FIN-LEXICON — Kamus Pasar Modal Indonesia
-# Menggantikan ketergantungan penuh pada VADER (kamus bahasa Inggris umum)
-# yang tidak mengenali istilah seperti PKPU, suspensi, buyback, UMA, dll.
-# ═══════════════════════════════════════════════════════════════
 IDX_FIN_LEXICON = {
     # ── Katalis Positif ──
     "dividen jumbo": +0.85,
@@ -7810,9 +7702,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     Menjalankan analisis lengkap untuk satu mode (swing/daytrade).
     Mengembalikan dictionary hasil atau None jika data tidak cukup.
     """
-    # ------------------------------------------------------------------
     # 1. AMBIL DATA
-    # ------------------------------------------------------------------
     bars_per_day_map = {"5m": 54, "15m": 18, "30m": 9, "60m": 5}
 
     if is_daytrade:
@@ -7854,9 +7744,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     except Exception:
         pass
 
-    # ------------------------------------------------------------------
     # 1.5. MULTI-TIMEFRAME (MTF) ANCHOR
-    # ------------------------------------------------------------------
     is_mtf_bullish = True
     mtf_status_text = "N/A"
     
@@ -7895,9 +7783,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         mtf_status_text = f"Error MTF: {str(e)}"
         is_mtf_bullish = True
 
-    # ------------------------------------------------------------------
     # 1.6. VSA (VOLUME SPREAD ANALYSIS) & MARKING CLOSE DETECTOR
-    # ------------------------------------------------------------------
     is_marking_close = False
     is_no_demand = False
     is_stopping_volume = False
@@ -7961,9 +7847,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     except Exception as e:
         vsa_status_text = f"VSA Error: {str(e)}"
 
-    # ------------------------------------------------------------------
     # 2. PERHITUNGAN DASAR
-    # ------------------------------------------------------------------
     harga_terakhir_asli = float(df['Close'].iloc[-1])
     harga_terakhir = harga_terakhir_manual if harga_terakhir_manual else harga_terakhir_asli
 
@@ -7975,9 +7859,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     if len(returns) < 20:
         return None
 
-    # ------------------------------------------------------------------
     # 3. INDIKATOR TEKNIKAL
-    # ------------------------------------------------------------------
     df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['ADX'] = compute_adx_series(df)
@@ -8029,9 +7911,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         vwap_now = None
         vwap_bias = "N/A"
 
-    # ------------------------------------------------------------------
     # 4. FUNDAMENTAL
-    # ------------------------------------------------------------------
     @st.cache_data(ttl=3600, show_spinner=False)
     def _safe_ticker_info(ticker):
         try:
@@ -8046,9 +7926,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     roe = ticker_info.get('returnOnEquity')
     de = ticker_info.get('debtToEquity')
 
-    # ------------------------------------------------------------------
     # 4.5. BANDARMOLOGY & FOREIGN FLOW (V12)
-    # ------------------------------------------------------------------
     ticker_raw = ticker_input.replace('.JK', '')
     bandar_flow_val = 0.0
     foreign_zscore_val = 0.0
@@ -8092,9 +7970,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
                 z = (recent_5_mean - mean_20) / std_20
                 foreign_zscore_val = float(np.clip(z / 2.0, -1.0, 1.0)) # z=2 -> 1.0
 
-    # ------------------------------------------------------------------
     # 5. BERITA & SENTIMEN
-    # ------------------------------------------------------------------
     news_pool = []
     translator_en = GoogleTranslator(source='auto', target='en') if TRANSLATOR_AVAILABLE else None
     translator_id = GoogleTranslator(source='auto', target='id') if TRANSLATOR_AVAILABLE else None
@@ -8109,10 +7985,10 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             _long_name = _ln
 
     _queries = [
-        f'{_ticker} saham',                # query 1: ticker + konteks
+        f'{_ticker} saham',
     ]
     if _long_name:
-        _queries.append(f'"{_long_name}" saham')  # query 2: nama panjang + konteks
+        _queries.append(f'"{_long_name}" saham')
 
     rss_all = []
     for _q in _queries:
@@ -8194,9 +8070,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             translated.append("")
     sentimen_status = "Positif 🟢" if avg_sentiment >= 0.05 else ("Negatif 🔴" if avg_sentiment <= -0.05 else "Netral ⚪")
 
-    # ------------------------------------------------------------------
     # 6. THRESHOLD & DISTRIBUSI
-    # ------------------------------------------------------------------
     if is_daytrade:
         backtest_bars = 100
         if len(df) < 200:
@@ -8230,9 +8104,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     )
     df_est, t_loc, t_scale = res_opt.x if res_opt.success else (5, returns_thresh.mean(), returns_thresh.std())
 
-    # ------------------------------------------------------------------
     # 7. REGIME
-    # ------------------------------------------------------------------
     def get_regime_row(row):
         h, e20, e50, a, z, m = row['Close'], row['EMA20'], row['EMA50'], row['ADX'], row['ZScore'], row['Mom5D']
         if a > adx_threshold:
@@ -8261,9 +8133,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     regime, ihsg_cond = get_regime_row(df.iloc[-1])
     adx = df['ADX'].iloc[-1]
 
-    # ------------------------------------------------------------------
     # 8. BETA
-    # ------------------------------------------------------------------
     beta_ihsg = 1.0
     ihsg_ret = pd.Series(dtype=float)
     try:
@@ -8275,9 +8145,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     except:
         pass
 
-    # ------------------------------------------------------------------
     # 9. ATR & RSI
-    # ------------------------------------------------------------------
     df['TR'] = pd.concat([
         df['High'] - df['Low'],
         (df['High'] - df['Close'].shift()).abs(),
@@ -8302,9 +8170,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     else:
         rsi14 = 100.0 - (100.0 / (1.0 + (avg_gain / avg_loss)))
 
-    # ------------------------------------------------------------------
     # 10. PIVOT
-    # ------------------------------------------------------------------
     if is_daytrade:
         today_jkt = datetime.now(pytz.timezone("Asia/Jakarta")).date()
         if not df_daily.empty:
@@ -8360,9 +8226,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
             r1 = 2 * pp - lo; s1 = 2 * pp - hi
             r2 = pp + (hi - lo); s2 = pp - (hi - lo)
 
-    # ------------------------------------------------------------------
     # 11. V12 ADAPTIVE SIGNAL
-    # ------------------------------------------------------------------
     adaptive_w = get_adaptive_weights(ticker_raw, regime, v12_mem=v12_mem)
     coppock_val, coppock_prev = coppock_curve(df['Close'].values)
     factor_signals = {
@@ -8444,9 +8308,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
                 if total_score < th_strong * 1.3:
                     signal = "⏸️ HOLD / WAIT (BUY low-accuracy in this regime)"
                     total_score = th_hold + 0.01
-    # ------------------------------------------------------------------
     # 12. ENTRY ZONE (v2 — anti-NT, more accommodating)
-    # ------------------------------------------------------------------
     if s1 >= harga_terakhir * 0.98:
         entry_low = s1
     else:
@@ -8484,9 +8346,8 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     entry_low_f = fraksi_bei(entry_low)
     entry_high_f = fraksi_bei(entry_high)
     entry_zone_f = f"Rp {entry_low_f:,.0f} - Rp {entry_high_f:,.0f}"
-    # ------------------------------------------------------------------
+
     # 13. SL & TP
-    # ------------------------------------------------------------------
     sl_mult = 1.0
     if adx > 30 and 30 < rsi14 < 70:
         sl_mult = 0.75
@@ -8581,7 +8442,6 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     else:
         entry_ideal_f = fraksi_bei(entry_low)
 
-
     # Breakout
     if is_daytrade:
         bars_per_day = bars_per_day_map.get(actual_interval, 54)
@@ -8599,12 +8459,10 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         breakout_label = "Breakout 20 Hari"
     breakout = f"YES (🔥)" if harga_terakhir > res20 else "NO"
 
-    # ------------------------------------------------------------------
     # 14. BACKTEST — V12-Synced Engine
     # Menggunakan factor_signals yang IDENTIK dengan Section 11 (total_score)
     # agar Win Rate & Profit Factor benar-benar mencerminkan performa model V12.
     # + Biaya riil: fee beli 0.15%, jual 0.25%, slippage 1 fraksi BEI.
-    # ------------------------------------------------------------------
     _fee_beli  = fee_beli_pct  / 100.0   # default 0.0015
     _fee_jual  = fee_jual_pct  / 100.0   # default 0.0025
 
@@ -8715,9 +8573,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     else:
         win_bt = pf_bt = avg_bt = max_dd_bt = sharpe_bt = trades_bt = 0
 
-    # ------------------------------------------------------------------
     # 15. KELLY & DRAWDOWN
-    # ------------------------------------------------------------------
     roll_max_th = df_thresh['Close'].cummax()
     drawdown_th = (df_thresh['Close'] - roll_max_th) / roll_max_th
     max_dd = float(drawdown_th.min() * 100)
@@ -8741,19 +8597,14 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     target_risk_pct = 1.5
     risk_adjusted_alloc = min(kelly_adj * 100, (target_risk_pct / sl_pct) * 100) if sl_pct > 0 else kelly_adj * 100
 
-
-    # ------------------------------------------------------------------
     # 16. MONTE CARLO — Regime-Switching (GBM untuk trending, OU untuk sideways)
-    #
     # Problem lama: OU murni memaksa proyeksi kembali ke mean 20 hari untuk
     # SEMUA kondisi, termasuk saham yang baru saja breakout ATH / super-trend.
     # Akibatnya prob_bull dan estimasi harga besok terlalu pesimistis.
-    #
     # Solusi:
     #  • BULLISH / STRONG BUY / Breakout  → GBM drift positif (momentum-based)
     #  • BEARISH / PANIC / AVOID          → GBM drift negatif
     #  • SIDEWAYS / CONSOLIDATION / HOLD  → OU mean-reverting (seperti sebelumnya)
-    # ------------------------------------------------------------------
     if is_daytrade:
         n_sim   = 2000
         n_steps = max(1, bars_remaining)
@@ -8883,9 +8734,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     hit_tp = (np.any(paths >= r1, axis=0).sum() / n_sim) * 100
     hit_sl = (np.any(paths <= s2, axis=0).sum() / n_sim) * 100
 
-    # ------------------------------------------------------------------
     # 17. METRIK TAMBAHAN
-    # ------------------------------------------------------------------
     if "STRONG BUY" in signal:
         signal_score = 0.7 + (prob_bull / 200)
     elif "BUY" in signal:
@@ -8970,9 +8819,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     low_est_30d_f    = fraksi_bei(low_est_30d)
     up_est_30d_f     = fraksi_bei(up_est_30d)
 
-    # ------------------------------------------------------------------
     # 18. RINGKASAN UNTUK RIWAYAT
-    # ------------------------------------------------------------------
     ringkasan = {
         "Waktu": datetime.now(pytz.timezone("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M"),
         "Saham": ticker_raw,
@@ -9015,9 +8862,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "Floating_PL": f"{floating_pl_pct:+.2f}%" if floating_pl_pct is not None else ""
     }
 
-    # ------------------------------------------------------------------
     # 19. KUMPULKAN RESULT
-    # ------------------------------------------------------------------
     result = {
         "df": df,
         "df_back": df_back,
@@ -9092,7 +8937,7 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
         "is_stopping_volume": is_stopping_volume,
         "vsa_status_text": vsa_status_text
     }
-        # Tambahan untuk UI
+    # Tambahan untuk UI
     result["ticker_info"] = ticker_info
     result["adx_threshold"] = adx_threshold
     result["hit_tp"] = hit_tp
@@ -9100,9 +8945,9 @@ def analyze_stock(ticker_input, harga_manual, sudah_beli, harga_beli_float, is_d
     result["estimasi_label"] = estimasi_label
     result["prob_label"] = prob_label
     result["backtest_window"] = backtest_window
-    result["ofi_now"] = df['OFI_Enhanced'].iloc[-1]  # Enhanced OFI dengan shadow weighting
+    result["ofi_now"] = df['OFI_Enhanced'].iloc[-1]  
     result["adaptive_w"] = adaptive_w
-    result["mc_regime_label"] = mc_regime_label   # label model MC: GBM Bullish/Bearish / OU
+    result["mc_regime_label"] = mc_regime_label   
     result["returns"] = returns
     result["mom_median_th"] = mom_median_th
     result["coppock_rising"] = coppock_rising
@@ -9276,9 +9121,7 @@ def display_analysis_result(res):
         fig.update_layout(template="plotly_dark", height=450, margin=dict(l=10, r=10, t=20, b=10), dragmode='pan')
         st.plotly_chart(fig, use_container_width=True)
 
-    # ═══════════════════════════════════════════════════════════
     # RINGKASAN EKSEKUTIF — REDESIGN v2 (Visual & Interaktif)
-    # ═══════════════════════════════════════════════════════════
     st.markdown("---")
     st.header("📋 Ringkasan Eksekutif & Rekomendasi")
 
@@ -9601,9 +9444,7 @@ def display_analysis_result(res):
         pr2.metric("Prob. Sentuh R1 (30H)", f"{hit_tp:.1f}%")
         pr3.metric("Prob. Sentuh S2 (30H)", f"{hit_sl:.1f}%")
 
-    # ══════════════════════════════════════════════════════════
     # V12 ADAPTIVE ENGINE – EXPANDER & LOGIC (DENGAN INSIGHT)
-    # ══════════════════════════════════════════════════════════
     with st.expander("🧬 V12 Adaptive Engine (Coppock, Self‑Learning)"):
         st.info(
             "⚙️ **Bagian ini adalah otak adaptif dari QuantRisk Pro.** "
@@ -10230,8 +10071,7 @@ if scan_btn:
 
     # Urutkan berdasarkan techScore
     hasil_scan.sort(key=lambda x: x['techScore'], reverse=True)
-
-        # --- Pisahkan Beli dan Jual ---
+    # --- Pisahkan Beli dan Jual ---
     buy_signals = [r for r in hasil_scan if r['techScore'] > 0.05]
     sell_signals = [r for r in hasil_scan if r['techScore'] < -0.05]
     # TOP BUY: ambil 10 terkuat (techScore tertinggi)
@@ -10590,9 +10430,7 @@ if st.session_state.get('scan_results'):
                 )
 # ==================== TAMPILAN AWAL (SEBELUM ANALISIS) ====================
 else:
-    # ═══════════════════════════════════════════════════════════
     # HERO SECTION
-    # ═══════════════════════════════════════════════════════════
     st.markdown("""
     <div style="
         background: linear-gradient(135deg, #0f1116 0%, #1a1d24 50%, #0f1116 100%);
@@ -10659,9 +10497,7 @@ else:
     </div>
     """, unsafe_allow_html=True)
 
-    # ═══════════════════════════════════════════════════════════
     # CAPABILITIES GRID
-    # ═══════════════════════════════════════════════════════════
     st.markdown("""
     <div style="margin: 0 0 16px 0;">
         <span style="color:#f3f4f6; font-size:20px; font-weight:700;">Capabilities</span>
@@ -10715,9 +10551,7 @@ else:
             "IDX Fin-Lexicon + VADER hybrid scoring, filtered for ticker relevance.",
             "#06b6d4"), unsafe_allow_html=True)
 
-    # ═══════════════════════════════════════════════════════════
     # PERFORMANCE METRICS
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="margin: 0 0 16px 0;">
@@ -10788,9 +10622,7 @@ else:
             </div>
         </div>
         """, unsafe_allow_html=True)
-    # ═══════════════════════════════════════════════════════════
     # 🧠 FULL LEARNING DASHBOARD
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="margin: 0 0 16px 0;">
@@ -10863,9 +10695,7 @@ else:
             "**< 40%**, artinya sinyal AVOID sering salah di regime itu → "
             "engine otomatis akan longgarkan AVOID di regime tersebut ke depannya."
         )
-    # ═══════════════════════════════════════════════════════════
     # QUICK START
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="margin: 0 0 16px 0;">
@@ -10897,9 +10727,7 @@ else:
                 <div style="color:#94a3b8; font-size:12px; line-height:1.5;">{desc}</div>
             </div>
             """, unsafe_allow_html=True)
-        # ═══════════════════════════════════════════════════════════
     # RECENT SIGNALS — Last 6 analyses
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="margin: 0 0 16px 0; display:flex; justify-content:space-between; align-items:baseline;">
@@ -11062,9 +10890,7 @@ else:
                 Run your first analysis to see recent signals here.</div>
         </div>
         """, unsafe_allow_html=True)
-    # ═══════════════════════════════════════════════════════════
     # TOP BROKERS THIS WEEK — Aggregate from broksum_history
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="margin: 0 0 16px 0;">
@@ -11256,9 +11082,7 @@ else:
             {_err_msg}
         </div>
         """, unsafe_allow_html=True)
-    # ═══════════════════════════════════════════════════════════
     # MARKET SNAPSHOT (IHSG) — Keep existing functionality
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 32px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="margin: 0 0 16px 0;">
@@ -11428,9 +11252,7 @@ else:
     except Exception as e:
         st.error(f"Gagal memuat data IHSG: {e}")
 
-    # ═══════════════════════════════════════════════════════════
     # FOOTER DISCLAIMER
-    # ═══════════════════════════════════════════════════════════
     st.markdown('<div style="height: 24px;"></div>', unsafe_allow_html=True)
     st.markdown("""
     <div style="background:#1a1d24; border-left:3px solid #64748b;
