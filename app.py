@@ -7514,9 +7514,12 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
 
         # --- Mean Reversion (Z-Score) ---
         sigma20 = robust_std(s_ret[-20:])
+        sigma20 = max(sigma20, 0.005)              
         sma20 = np.mean(s_adj[-20:])
-        z_score_val = (last_price - sma20) / (sigma20 * sma20 + 1e-9)
-        mr_norm = np.clip(-z_score_val / 0.05, -1, 1)
+        sigma_price = sigma20 * sma20
+        if sigma_price < 1e-6:
+            sigma_price = sma20 * 0.02
+        z_score_val = float(np.clip((last_price - sma20) / sigma_price, -5.0, 5.0))
 
         # --- RSI ---
         rsi_ch = s_ret[-14:]
@@ -7534,7 +7537,7 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         # --- Volume Surge ---
         vol_ma20 = np.mean(volumes[-20:]) if len(volumes) >= 20 else volumes[-20:].mean()
         vol5 = np.mean(volumes[-5:]) if len(volumes) >= 5 else 0
-        vol_surge = np.clip((vol5 / (vol_ma20 + 1) - 1.0), -1, 1)
+        vol_surge = np.clip((vol5 / max(vol_ma20, 1.0) - 1.0), -1, 1)
 
         # --- Breakout bonus ---
         res20 = np.max(highs[-21:-1]) if len(highs) >= 21 else np.max(highs)
@@ -7558,15 +7561,15 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         ema20_ihsg = pd.Series(i_adj).ewm(span=20, adjust=False).mean().iloc[-1]
         sma20_ihsg = np.mean(i_adj[-20:])
         risk_on = ema20_ihsg > sma20_ihsg and i_ret5 > 0
-        fast_vc = np.std(s_ret[-3:]) / (np.std(s_ret[-20:]) + 1e-9)
+        fast_vc = np.std(i_ret[-3:]) / (np.std(i_ret[-20:]) + 1e-9)
         if not risk_on and fast_vc >= 1.2:
-            regime = "Panic Sell 🚨"
+            regime = "Market Panic 🚨"
         elif risk_on and fast_vc >= 1.0:
-            regime = "Bullish 📈"         
+            regime = "Market Bullish 📈"         
         elif risk_on:
-            regime = "Bullish 📈"
+            regime = "Market Bullish 📈"
         else:
-            regime = "Bearish 🔻"
+            regime = "Market Bearish 🔻"
 
         # --- Estimasi return & TP/SL ---
         alpha = np.mean(s_ret) - beta * np.mean(i_ret)
@@ -7577,7 +7580,7 @@ def score_stock_tech(df_stock, ticker, ihsg_data):
         std20 = np.std(s_adj[-20:])
         upper_bb = sma20 + 2*std20
         lower_bb = sma20 - 2*std20
-        bb_pct = np.clip((last_price - lower_bb) / (upper_bb - lower_bb + 1e-9), 0, 1)
+        bb_pct = np.clip((last_price - lower_bb) / (upper_bb - lower_bb + 1e-9), -0.5, 1.5)
 
         # Trend Consistency
         ema20 = pd.Series(closes).ewm(span=20, adjust=False).mean().iloc[-1]
