@@ -3553,7 +3553,9 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
     if max_retries is None:
         state = _get_key_rotator_state()
         n_keys = max(1, len(state["keys"]))
-        max_retries = max(10, n_keys * 5 + 4)
+        n_models = len(_PREFERRED_MODELS)
+        # Harus cukup untuk semua combo (keys × models) + overhead sleep attempts
+        max_retries = max(20, n_keys * n_models + n_keys + 4)
 
     last_err = None
     tried_combos = set()   # (key_idx, model) yang sudah dicoba di call ini
@@ -3617,14 +3619,24 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
             err_lower = err_str.lower()
             last_err = err_str
 
-            # ── 429 quota → rotate combo ──
+            # ── 429 quota → parse retry_delay dari error, lalu rotate combo ──
             if is_gemini_quota_error(e):
-                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70)
+                # Coba parse retry_delay dari pesan error Gemini
+                # Format: "retry in 48.317130221s" atau "seconds: 48"
+                import re as _re
+                cooldown_sec = 70  # default
+                m1 = _re.search(r'retry in ([\d\.]+)s', err_lower)
+                m2 = _re.search(r'seconds:\s*(\d+)', err_lower)
+                if m1:
+                    cooldown_sec = max(10, int(float(m1.group(1))) + 5)
+                elif m2:
+                    cooldown_sec = max(10, int(m2.group(1)) + 5)
+                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=cooldown_sec)
                 st.toast(
-                    f"🔄 {model_name} @ key#{key_idx+1} limit → rotate",
+                    f"🔄 {model_name} @ key#{key_idx+1} limit ({cooldown_sec}s) → rotate",
                     icon="🔑",
                 )
-                time.sleep(0.5)
+                time.sleep(0.3)
                 continue
 
             # ═══ Cek #1: Image/format error → coba model lain ═══
