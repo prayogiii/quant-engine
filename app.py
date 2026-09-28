@@ -989,22 +989,25 @@ def _load_gemini_keys():
 # ═══════════════════════════════════════════════════════════════
 
 # Model prioritas (dari yang paling reliable & murah)
+# Model prioritas — urut dari paling murah & besar quota
+# Update 2026: gemini-2.5.x sudah deprecated untuk user baru
 _PREFERRED_MODELS = [
-    # ── Tier 1: RPD besar (~1000-1500) ──
-    "gemini-1.5-flash",             # ~1500 RPD (kalau masih tersedia)
-    "gemini-1.5-flash-lite",        # ~1500 RPD
-    "gemini-2.5-flash-lite",        # ~1000 RPD
-    "gemini-flash-lite-latest",     # alias ~1000
-    "gemini-2.0-flash-exp",         # experiment, quota terpisah
+    # ── Tier 1: Model terbaru, RPD besar ──
+    "gemini-3.5-flash-lite",        # ⭐ pengganti 2.5-flash-lite
+    "gemini-flash-lite-latest",     # alias otomatis ke versi terbaru
+    "gemini-3.5-flash",             # flagship flash terbaru
 
-    # ── Tier 2: RPD sedang (~250-500) ──
-    "gemini-2.5-flash",             # ~250
-    "gemini-flash-latest",          # ~250
-    "gemini-2.0-flash-001",         # versi pinned, quota mungkin terpisah
+    # ── Tier 2: Model sebelumnya (kalau masih accessible) ──
+    "gemini-2.5-flash-lite",        # deprecated tapi mungkin masih ada
+    "gemini-2.5-flash",
+    "gemini-flash-latest",          # alias
 
-    # ── Tier 3: RPD kecil (~200) ──
-    "gemini-2.0-flash",
+    # ── Tier 3: Legacy fallback ──
     "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-1.5-flash-lite",
+    "gemini-1.5-flash",
 ]
 
 
