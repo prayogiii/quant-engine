@@ -10693,7 +10693,7 @@ if st.session_state.get('scan_results'):
                                     try:
                                         raw_s, err_s = call_gemini_auto_rotate(sell_prompt)
                                         if raw_s:
-                                        start_s = raw_s.rfind('[')
+                                            start_s = raw_s.rfind('[')
                                         if start_s != -1:
                                             json_s = raw_s[start_s:].strip()
                                             if json_s.startswith("```json"): json_s = json_s[7:]
