@@ -1111,9 +1111,39 @@ def _find_next_combo():
     return None, None, None
 
 
-def _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70):
+def _detect_quota_type(err_str):
+    """
+    Deteksi tipe quota dari pesan error.
+    Return: ('rpm'|'rpd'|'unknown', cooldown_seconds)
+    """
+    s = str(err_str).lower()
+    # RPD (per day)
+    if any(k in s for k in ["per day", "daily", "requests per day", "rpd", "quota per day"]):
+        # Reset tengah malam Pacific Time → sekitar 14:00-16:00 WIB
+        # Simpel: cooldown 3 jam (cukup aman)
+        return 'rpd', 3 * 3600
+    # RPM (per minute)
+    if any(k in s for k in ["per minute", "rpm", "requests per minute"]):
+        return 'rpm', 70
+    # Tidak jelas → default RPM
+    return 'unknown', 70
+
+
+def _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70, err_str=""):
+    """
+    Tandai (key_idx, model_name) cooldown.
+    Kalau err_str menunjukkan RPD, cooldown otomatis panjang.
+    """
     state = _get_key_rotator_state()
+
+    # Auto-detect quota type kalau ada err_str
+    if err_str:
+        _qtype, detected_cd = _detect_quota_type(err_str)
+        cooldown_sec = max(cooldown_sec, detected_cd)
+
     state["cooldown_combos"][f"{key_idx}:{model_name}"] = time.time() + cooldown_sec
+
+    # Kalau SEMUA model di key ini cooldown, set cooldown_until level key
     models = _get_models_for_key(key_idx)
     now = time.time()
     if all(now < state["cooldown_combos"].get(f"{key_idx}:{m}", 0) for m in models):
@@ -3683,9 +3713,12 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
 
             # ── 429 quota → rotate combo ──
             if is_gemini_quota_error(e):
-                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70)
+                _qtype, _cd = _detect_quota_type(str(e))
+                _mark_combo_exhausted(key_idx, model_name, cooldown_sec=_cd, err_str=str(e))
+                _label = "RPD (harian)" if _qtype == 'rpd' else "RPM (per-menit)"
                 st.toast(
-                    f"🔄 {model_name} @ key#{key_idx+1} limit → rotate",
+                    f"🔄 {model_name} @ key#{key_idx+1} limit {_label} → rotate "
+                    f"(cooldown {_cd//60}m)",
                     icon="🔑",
                 )
                 time.sleep(0.5)
@@ -6994,10 +7027,34 @@ def render_sidebar():
         if n_keys > 0:
             state = _get_key_rotator_state()
             now = time.time()
-            active_count = sum(
-                1 for i in range(n_keys)
-                if now >= state["cooldown_until"].get(i, 0)
-            )
+
+            # Hitung key yang benar-benar bebas (tidak cooldown_until,
+            # DAN punya minimal 1 model yang tidak cooldown_combos)
+            active_count = 0
+            next_ready_time = None
+            for i in range(n_keys):
+                if now < state["cooldown_until"].get(i, 0):
+                    # Key-level cooldown masih aktif
+                    t_ready = state["cooldown_until"][i]
+                    if next_ready_time is None or t_ready < next_ready_time:
+                        next_ready_time = t_ready
+                        continue
+                    # Cek apakah ada model yang bebas di key ini
+                    models = _get_models_for_key(i)
+                    has_free_model = any(
+                        now >= state["cooldown_combos"].get(f"{i}:{m}", 0)
+                        for m in models
+                    )
+                    if has_free_model:
+                        active_count += 1
+                    else:
+                        # Semua model di key ini cooldown → ambil yang paling cepat bebas
+                        earliest = min(
+                            state["cooldown_combos"].get(f"{i}:{m}", 0) for m in models
+                        )
+                        if next_ready_time is None or earliest < next_ready_time:
+                            next_ready_time = earliest
+
             if active_count == n_keys:
                 st.markdown(
                     f'<div class="sb-api-ok">🟢 Gemini Aktif · {n_keys} key siap</div>',
@@ -7009,10 +7066,23 @@ def render_sidebar():
                     unsafe_allow_html=True
                 )
             else:
-                st.markdown(
-                    f'<div class="sb-api-off">🔴 Semua {n_keys} key cooldown · tunggu ~1 menit</div>',
-                    unsafe_allow_html=True
-                )
+                # Semua key cooldown → tampilkan countdown
+                if next_ready_time:
+                    wait_min = max(0, int((next_ready_time - now) / 60))
+                    if wait_min >= 60:
+                        wait_str = f"{wait_min//60}j {wait_min%60}m"
+                    else:
+                        wait_str = f"{wait_min}m"
+                    st.markdown(
+                        f'<div class="sb-api-off">🔴 Semua {n_keys} key cooldown · '
+                        f'ready dalam ~{wait_str}</div>',
+                        unsafe_allow_html=True
+                    )
+                else:
+                    st.markdown(
+                        f'<div class="sb-api-off">🔴 Semua {n_keys} key cooldown</div>',
+                        unsafe_allow_html=True
+                    )
         else:
             st.markdown(
                 '<div class="sb-api-off">⚠️ Gemini API Key belum ada</div>',
