@@ -990,9 +990,14 @@ def _load_gemini_keys():
 
 # Model prioritas (dari yang paling reliable & murah)
 _PREFERRED_MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.0-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
     "gemini-2.5-flash-lite",
     "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
     "gemini-2.5-flash",
     "gemini-1.5-flash-lite",
     "gemini-1.5-flash",
@@ -3570,6 +3575,7 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
     _model_invalid_errs = (
         "model not found", "model is not supported",
         "models/", "does not exist", "model does not exist",
+        "no longer available",
     )
     _transient_errs = (
         "500", "503", "internal error", "overloaded", "temporarily",
