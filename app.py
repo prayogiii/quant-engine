@@ -10450,11 +10450,9 @@ if st.session_state.get('scan_results'):
                         f"Berita: {'; '.join(headlines)}\n"
                     )
 
-                model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
-                if model and not err:
+                raw, err = call_gemini_auto_rotate(prompt)
+                if raw and not err:
                     try:
-                        response = model.generate_content(prompt)
-                        raw = response.text.strip()
 
                         start_idx = raw.rfind('[')
                         ai_data = []
@@ -10655,11 +10653,9 @@ if st.session_state.get('scan_results'):
                             headlines = headlines_map.get(tick, ["(tidak ada berita)"])
                             prompt += f"{tick} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Berita: {'; '.join(headlines)}\n"
 
-                        model, err = dapatkan_model_gemini(st.session_state.gemini_api_key)
-                        if model and not err:
+                        raw, err = call_gemini_auto_rotate(prompt)
+                        if raw and not err:
                             try:
-                                response = model.generate_content(prompt)
-                                raw = response.text.strip()
                                 start_idx = raw.rfind('[')
                                 sentiments = []
                                 if start_idx != -1:
@@ -10695,8 +10691,8 @@ if st.session_state.get('scan_results'):
                                         sell_prompt += f"{tick} | Tech Score: {r['techScore']:.3f} | Est Return: {r['muEst']*100:.2f}% | Berita: {'; '.join(headlines)}\n"
 
                                     try:
-                                        resp_s = model.generate_content(sell_prompt)
-                                        raw_s = resp_s.text.strip()
+                                        raw_s, err_s = call_gemini_auto_rotate(sell_prompt)
+                                        if raw_s:
                                         start_s = raw_s.rfind('[')
                                         if start_s != -1:
                                             json_s = raw_s[start_s:].strip()
