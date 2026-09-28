@@ -991,24 +991,24 @@ def _load_gemini_keys():
 # Model prioritas (dari yang paling reliable & murah)
 # Model prioritas — urut dari paling murah & besar quota
 # Update 2026: gemini-2.5.x sudah deprecated untuk user baru
+# Model prioritas — HANYA model yang masih aktif di Google AI Studio
+# Update: hapus 2.5.x dan 1.5.x yang sudah deprecated untuk user baru
 _PREFERRED_MODELS = [
-    # ── Tier 1: Model terbaru, RPD besar ──
-    "gemini-3.5-flash-lite",        # ⭐ pengganti 2.5-flash-lite
-    "gemini-flash-lite-latest",     # alias otomatis ke versi terbaru
-    "gemini-3.5-flash",             # flagship flash terbaru
+    # ── Tier 1: Model terbaru (paling reliable) ──
+    "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",     # alias otomatis
+    "gemini-3.5-flash",
 
-    # ── Tier 2: Model sebelumnya (kalau masih accessible) ──
-    "gemini-2.5-flash-lite",        # deprecated tapi mungkin masih ada
-    "gemini-2.5-flash",
+    # ── Tier 2: Fallback ──
     "gemini-flash-latest",          # alias
 
-    # ── Tier 3: Legacy fallback ──
-    "gemini-2.0-flash-lite",
+    # ── Tier 3: Last resort ──
     "gemini-2.0-flash",
-    "gemini-2.0-flash-001",
-    "gemini-1.5-flash-lite",
-    "gemini-1.5-flash",
+    "gemini-2.0-flash-lite",
 ]
+
+# ═══ CACHE VERSION — bump angka ini tiap kali PREFERRED_MODELS diubah ═══
+_MODELS_CACHE_VERSION = "v3.5-2026-09"   # ← ganti tiap kali update list
 
 
 def _get_key_rotator_state():
@@ -1030,8 +1030,31 @@ def _get_key_rotator_state():
     return state
 
 
+# ═══ Blacklist model yang PERNAH 404 "no longer available" ═══
+# Cache global (persist di rotator state)
+def _get_model_blacklist():
+    state = _get_key_rotator_state()
+    if "_model_blacklist" not in state:
+        state["_model_blacklist"] = set()
+    return state["_model_blacklist"]
+
+
+def _blacklist_model(model_name):
+    """Tandai model sebagai permanently unavailable untuk project ini."""
+    bl = _get_model_blacklist()
+    bl.add(model_name)
+    # Invalidate semua cache model list biar ke-filter di request berikutnya
+    state = _get_key_rotator_state()
+    state["models_cache"] = {}
+    state["cache_time"] = {}
+
+
 def _get_models_for_key(key_idx):
-    """Daftar model yang support generateContent untuk key ini (cache 1 jam)."""
+    """
+    Daftar model aktif untuk key ini (cache 1 jam).
+    - Filter deprecated via version tag
+    - Filter model yang sudah di-blacklist
+    """
     state = _get_key_rotator_state()
     keys = state["keys"]
     if key_idx >= len(keys):
@@ -1039,8 +1062,18 @@ def _get_models_for_key(key_idx):
 
     now = time.time()
     cached_time = state["cache_time"].get(key_idx, 0)
-    if now - cached_time < 3600 and key_idx in state["models_cache"]:
+    cached_ver = state.get("cache_version", "")
+
+    # Cache invalid kalau: umur > 1 jam ATAU version tag beda
+    cache_valid = (
+        now - cached_time < 3600
+        and key_idx in state["models_cache"]
+        and cached_ver == _MODELS_CACHE_VERSION
+    )
+    if cache_valid:
         return state["models_cache"][key_idx]
+
+    blacklist = _get_model_blacklist()
 
     try:
         genai.configure(api_key=keys[key_idx])
@@ -1048,17 +1081,26 @@ def _get_models_for_key(key_idx):
             m.name.split("/")[-1]
             for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
+            and m.name.split("/")[-1] not in blacklist    # ← filter blacklist
         ]
-        # Urutkan: preferred dulu
+        # Preferred dulu, sisanya append
         ordered = [m for m in _PREFERRED_MODELS if m in models]
         ordered += [m for m in models if m not in ordered]
+
+        # Kalau kosong (semua deprecated), fallback ke preferred
+        if not ordered:
+            ordered = [m for m in _PREFERRED_MODELS if m not in blacklist]
+
         state["models_cache"][key_idx] = ordered
         state["cache_time"][key_idx] = now
+        state["cache_version"] = _MODELS_CACHE_VERSION
         return ordered
     except Exception:
-        state["models_cache"][key_idx] = _PREFERRED_MODELS
+        fallback = [m for m in _PREFERRED_MODELS if m not in blacklist]
+        state["models_cache"][key_idx] = fallback
         state["cache_time"][key_idx] = now
-        return _PREFERRED_MODELS
+        state["cache_version"] = _MODELS_CACHE_VERSION
+        return fallback
 
 
 def _find_next_combo():
@@ -3715,6 +3757,9 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
             # ═══ Cek #2: Model invalid / tidak tersedia ═══
             # Pattern spesifik — TIDAK pakai "invalid" broad lagi
             if any(x in err_lower for x in _model_invalid_errs):
+                # Model deprecated ("no longer available to new users") → BLACKLIST permanen
+                if "no longer available" in err_lower or "no longer supported" in err_lower:
+                    _blacklist_model(model_name)
                 _mark_combo_exhausted(key_idx, model_name, cooldown_sec=600)
                 continue
 
@@ -7054,12 +7099,19 @@ def render_sidebar():
                         next_ready_time = t_ready
                     continue
 
-                # Key-level TIDAK cooldown → cek apakah ada model yang bebas
-                models = _get_models_for_key(i)
+                # ▼ TIDAK fetch model list di sidebar — pakai cache saja
+                # Kalau cache belum ada, anggap semua model bebas
+                cached_models = state.get("models_cache", {}).get(i, None)
+                if cached_models is None:
+                    # Belum pernah fetch — assume ready (biar gak block sidebar)
+                    active_count += 1
+                    continue
+
                 has_free_model = any(
                     now >= state["cooldown_combos"].get(f"{i}:{m}", 0)
-                    for m in models
+                    for m in cached_models
                 )
+                
                 if has_free_model:
                     active_count += 1
                 else:
