@@ -990,14 +990,21 @@ def _load_gemini_keys():
 
 # Model prioritas (dari yang paling reliable & murah)
 _PREFERRED_MODELS = [
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash-lite",
+    # ── Tier 1: RPD besar (~1000-1500) ──
+    "gemini-1.5-flash",             # ~1500 RPD (kalau masih tersedia)
+    "gemini-1.5-flash-lite",        # ~1500 RPD
+    "gemini-2.5-flash-lite",        # ~1000 RPD
+    "gemini-flash-lite-latest",     # alias ~1000
+    "gemini-2.0-flash-exp",         # experiment, quota terpisah
+
+    # ── Tier 2: RPD sedang (~250-500) ──
+    "gemini-2.5-flash",             # ~250
+    "gemini-flash-latest",          # ~250
+    "gemini-2.0-flash-001",         # versi pinned, quota mungkin terpisah
+
+    # ── Tier 3: RPD kecil (~200) ──
     "gemini-2.0-flash",
-    "gemini-2.5-flash",
-    "gemini-1.5-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-flash-lite-latest",
-    "gemini-flash-latest",
+    "gemini-2.0-flash-lite",
 ]
 
 
