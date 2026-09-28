@@ -1052,12 +1052,28 @@ def _get_models_for_key(key_idx):
 
 
 def _find_next_combo():
+    """
+    Cari kombinasi (key, model) berikutnya yang belum cooldown.
+    Urutan: model di LUAR, key di DALAM → load balance antar key.
+    """
     state = _get_key_rotator_state()
     keys = state["keys"]
     if not keys:
         return None, None, None
 
-    all_models = _get_models_for_key(0) or _PREFERRED_MODELS
+    now = time.time()
+    n_keys = len(keys)                                
+
+
+    all_models = []
+    for ki in range(min(n_keys, 2)):
+        for m in (_get_models_for_key(ki) or []):
+            if m not in all_models:
+                all_models.append(m)
+    if not all_models:
+        all_models = list(_PREFERRED_MODELS)
+
+    # Iterasi model di luar, key di dalam → load balance
     for model_name in all_models:
         for key_offset in range(n_keys):
             key_idx = (state["current_idx"] + key_offset) % n_keys
@@ -1068,9 +1084,7 @@ def _find_next_combo():
                 continue
             return key_idx, model_name, keys[key_idx]
 
-    # ── Semua cooldown → return None, biarkan caller sleep ──
     return None, None, None
-
     now = time.time()
     n_keys = len(keys)
 
