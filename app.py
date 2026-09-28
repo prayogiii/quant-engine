@@ -1076,15 +1076,7 @@ def _find_next_combo():
                 continue
             return key_idx, model_name, keys[key_idx]
 
-    # ── Semua cooldown → ambil combo yang paling cepat bebas ──
-    # (FIX: dead code dipindah ke sini supaya selalu dieksekusi)
-    if state["cooldown_combos"]:
-        earliest = min(state["cooldown_combos"], key=state["cooldown_combos"].get)
-        key_idx_str, model_name = earliest.split(":", 1)
-        key_idx = int(key_idx_str)
-        if key_idx < len(keys):
-            return key_idx, model_name, keys[key_idx]
-
+    # ── Semua cooldown → return None, biarkan caller sleep ──
     return None, None, None
 
 
@@ -3674,7 +3666,9 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
             # ═══ Cek #5: Error lain (unknown) → break ═══
             break
 
-    return None, f"Gagal setelah {max_retries} percobaan: {last_err}"
+    state = _get_key_rotator_state()
+    n_loaded = len(state.get("keys", []))
+    return None, f"Gagal setelah percobaan limit (Total keys loaded: {n_loaded}). Error terakhir: {last_err}"
 def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
     """
     Analisis saham dengan Gemini AI.
