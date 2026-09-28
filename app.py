@@ -1092,30 +1092,6 @@ def _find_next_combo():
             return key_idx, model_name, keys[key_idx]
 
     return None, None, None
-    now = time.time()
-    n_keys = len(keys)
-
-    for key_offset in range(n_keys):
-        key_idx = (state["current_idx"] + key_offset) % n_keys
-
-        # Skip kalau key ini global cooldown
-        if now < state["cooldown_until"].get(key_idx, 0):
-            continue
-
-        models = _get_models_for_key(key_idx)
-        for model_name in models:
-            combo_key = f"{key_idx}:{model_name}"
-            if now < state["cooldown_combos"].get(combo_key, 0):
-                continue
-            return key_idx, model_name, keys[key_idx]
-
-    # Semua cooldown → ambil yang paling cepat bebas
-    if state["cooldown_combos"]:
-        earliest = min(state["cooldown_combos"], key=state["cooldown_combos"].get)
-        key_idx_str, model_name = earliest.split(":", 1)
-        return int(key_idx_str), model_name, keys[int(key_idx_str)]
-
-    return None, None, None
 
 
 def _detect_quota_type(err_str):
@@ -1176,15 +1152,37 @@ def mark_gemini_key_exhausted(cooldown_sec=70):
     state["current_idx"] = (idx + 1) % len(state["keys"])
 
 def is_gemini_quota_error(err):
-    """Deteksi error 429/quota dari Gemini."""
+    """
+    Deteksi HANYA quota yang benar-benar habis.
+    Jangan false-positive di transient 429 (server overload / RPM sesaat).
+    """
     s = str(err).lower()
-    signals = [
-        "429", "quota", "rate limit", "resource_exhausted",
-        "resource has been exhausted", "too many requests",
-        "exceeded your current quota", "quota exceeded",
-    ]
-    return any(sig in s for sig in signals)
 
+    # ── Filter FALSE POSITIVE dulu ──
+    transient_signals = [
+        "overloaded",
+        "try again later",
+        "temporarily unavailable",
+        "server error",
+        "internal error",
+        "service unavailable",
+        "deadline exceeded",
+    ]
+    if any(t in s for t in transient_signals):
+        return False
+
+    # ── HANYA sinyal quota BENAR ──
+    true_quota_signals = [
+        "exceeded your current quota",
+        "quota exceeded for",
+        "quota metric",
+        "requests per day",
+        "requests per minute",
+        "free_tier_requests",
+        "generate_content_free_tier",
+        "resource_exhausted",
+    ]
+    return any(t in s for t in true_quota_signals)
 
 def configure_gemini_with_active_key():
     """Configure genai pakai key aktif. Return True kalau sukses."""
@@ -3579,10 +3577,11 @@ def fetch_all_idx_stocks():
 # FUNGSI AI GEMINI
 def dapatkan_model_gemini(api_key=None):
     """
-    Return (model, error).
-    Auto-rotate kalau key kena limit.
+    Ambil model TANPA test call — biar hemat quota.
+    Test validasi dilakukan di call_gemini_auto_rotate saat actual call.
     """
     state = _get_key_rotator_state()
+
     # Backward compat: kalau rotator kosong tapi ada api_key manual
     if not state["keys"] and api_key:
         state["keys"] = [api_key]
@@ -3590,53 +3589,22 @@ def dapatkan_model_gemini(api_key=None):
     if not state["keys"]:
         return None, "API key belum diisi."
 
-    # Try all keys — rotate on quota error
-    tried = 0
-    max_tries = len(state["keys"]) + 1  # +1 buffer kalau semua cooldown
+    key_idx, model_name, active_key = _find_next_combo()
 
-    while tried < max_tries:
-        active = get_active_gemini_key()
-        if not active:
-            return None, "Semua Gemini API key sedang cooldown."
+    if not model_name or not active_key:
+        return None, "Semua kombinasi sedang cooldown. Tunggu ~1 menit."
 
-        try:
-            genai.configure(api_key=active)
-            available = [
-                m.name.split('/')[-1]
-                for m in genai.list_models()
-                if 'generateContent' in m.supported_generation_methods
-            ]
-            if not available:
-                return None, "Tidak ada model Gemini."
-
-            for model_id in available:
-                try:
-                    model = genai.GenerativeModel(model_id)
-                    model.generate_content(
-                        "test",
-                        generation_config={"max_output_tokens": 1}
-                    )
-                    return model, None
-                except Exception as e_inner:
-                    if is_gemini_quota_error(e_inner):
-                        mark_gemini_key_exhausted(70)
-                        st.toast("🔄 Gemini key kena limit, rotate", icon="🔑")
-                        break  # break inner loop → coba key berikutnya
-                    continue  # model ini gak cocok, coba model lain
-            else:
-                # Semua model gagal tapi bukan quota → return error
-                return None, "Model gagal digunakan."
-
-            tried += 1  # quota error → coba key berikutnya
-
-        except Exception as e_outer:
-            if is_gemini_quota_error(e_outer):
-                mark_gemini_key_exhausted(70)
-                tried += 1
-                continue
-            return None, f"Error: {str(e_outer)}"
-
-    return None, "Semua Gemini API key sudah dicoba, gagal semua."
+    try:
+        genai.configure(api_key=active_key)
+        model = genai.GenerativeModel(model_name)
+        return model, None        # ← NO TEST CALL (hemat quota)
+    except Exception as e:
+        if is_gemini_quota_error(e):
+            _qtype, _cd = _detect_quota_type(str(e))
+            _mark_combo_exhausted(
+                key_idx, model_name, cooldown_sec=_cd, err_str=str(e)
+            )
+        return None, f"Error init model: {e}"
 def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retries=None):
     """
     2D rotation wrapper — coba semua kombinasi (key × model) saat kena 429.
@@ -3691,9 +3659,8 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
 
         combo_id = (key_idx, model_name)
         if combo_id in tried_combos:
-            # Sudah dicoba di call ini → skip, cooldown combo supaya iterasi
-            # berikutnya `_find_next_combo` pilih yang lain
-            _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70)
+            # Sudah dicoba di call ini → skip TANPA mark cooldown.
+            # Cooldown hanya di-set kalau benar-benar quota error (429).
             continue
         tried_combos.add(combo_id)
 
@@ -3761,18 +3728,59 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
             break
 
     return None, f"Gagal setelah {max_retries} percobaan: {last_err}"
+@st.cache_data(ttl=900, show_spinner=False)   # cache 15 menit
+def _cached_analisis_saham_ai(ticker, data_saham_json, riwayat_json):
+    """
+    Wrapper cache — input di-JSON-stringify supaya hashable & stabil.
+    Cache 15 menit. Auto-invalidate kalau data berubah.
+    """
+    data_saham = json.loads(data_saham_json)
+    riwayat = json.loads(riwayat_json)
+    return _analisis_saham_dengan_ai_internal(data_saham, riwayat, ticker=ticker)
 def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
     """
-    Analisis saham dengan Gemini AI.
-    ticker (optional): untuk fetch broker flow dari database & inject ke analysis
+    Public API — TETAP punya signature sama dengan kode lama.
+    Internal: JSON-stringify input → delegate ke cache wrapper.
+    Cache auto-hit kalau data tidak berubah dalam 15 menit.
     """
-    # ===== FORMAT RIWAYAT (EXISTING) =====
+    # ── Sanitasi: pastikan semua value bisa di-JSON ──
+    def _clean(d):
+        if isinstance(d, dict):
+            return {k: _clean(v) for k, v in d.items()}
+        elif isinstance(d, (list, tuple)):
+            return [_clean(x) for x in d]
+        elif isinstance(d, (str, int, float, bool)) or d is None:
+            return d
+        else:
+            return str(d)
+
+    try:
+        data_clean = _clean(data_saham)
+        riwayat_clean = _clean(riwayat)
+
+        # Batasi 20 riwayat terakhir — biar hash stabil & prompt tidak kepanjangan
+        if isinstance(riwayat_clean, list):
+            riwayat_clean = riwayat_clean[:20]
+
+        data_json = json.dumps(data_clean, sort_keys=True, ensure_ascii=False)
+        riwayat_json = json.dumps(riwayat_clean, sort_keys=True, ensure_ascii=False)
+    except Exception as e:
+        # Fallback: panggil langsung tanpa cache kalau serialisasi gagal
+        return _analisis_saham_dengan_ai_internal(data_saham, riwayat, ticker=ticker)
+
+    return _cached_analisis_saham_ai(ticker or "", data_json, riwayat_json)
+
+def _analisis_saham_dengan_ai_internal(data_saham, riwayat, ticker=None):
+    """
+    Fungsi ASLI analisis AI (rename dari analisis_saham_dengan_ai).
+    Dipanggil oleh wrapper cache. JANGAN panggil langsung dari UI.
+    """
+    # ===== FORMAT RIWAYAT =====
     riwayat_text = ""
     if riwayat:
         riwayat_text = "Riwayat analisis sebelumnya (termasuk hasil aktual jika tersedia):\n"
-        for r in riwayat:  # sudah difilter per emiten oleh pemanggil
+        for r in riwayat:
             base = f"- {r['Waktu']} | {r['Saham']} | Sinyal: {r['Sinyal']} | RRR: {r['RRR']} | Rezim: {r['Rezim']}"
-            # Tambahkan data aktual
             if r.get('Actual_High') or r.get('Actual_Outcome'):
                 base += " | Hasil Aktual: "
                 if r.get('Actual_High'):
@@ -3799,14 +3807,11 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
         try:
             history = load_broksum_history(ticker)
             if history:
-                # Sort terbaru dulu
                 history_sorted = sorted(
                     history,
                     key=lambda r: str(r.get('upload_date', '')),
                     reverse=True
                 )
-
-                # Ambil maks 5 terbaru
                 broksum_entries = []
                 for h in history_sorted[:5]:
                     buyers_list = json.loads(h.get('top_buyers', '[]')) if isinstance(h.get('top_buyers'), str) else h.get('top_buyers', [])
@@ -3834,7 +3839,7 @@ def analisis_saham_dengan_ai(data_saham, riwayat, api_key, ticker=None):
                         f"Bandingkan perubahan dominasi Bandar 🐋 vs Retail 🧑 antar waktu "
                         f"untuk mendeteksi pola akumulasi atau distribusi secara presisi."
                     )
-        except Exception as e:
+        except Exception:
             pass
 
     prompt = f"""
@@ -3873,7 +3878,6 @@ Berdasarkan data di atas{' (khususnya dominasi Bandar 🐋 vs Retail 🧑 pada b
 - Jika ada pola dari riwayat, sebutkan.
 Gunakan bahasa mudah dipahami trader, maksimal 4 paragraf pendek.
 """
-    # ═══ Auto-rotate key + retry logic di dalam wrapper ═══
     response_text, err = call_gemini_auto_rotate(prompt)
     if err:
         return None, f"Gagal menghasilkan insight AI: {err}"
@@ -7040,27 +7044,28 @@ def render_sidebar():
             active_count = 0
             next_ready_time = None
             for i in range(n_keys):
+                # Key-level cooldown masih aktif → skip semua cek model
                 if now < state["cooldown_until"].get(i, 0):
-                    # Key-level cooldown masih aktif
                     t_ready = state["cooldown_until"][i]
                     if next_ready_time is None or t_ready < next_ready_time:
                         next_ready_time = t_ready
-                        continue
-                    # Cek apakah ada model yang bebas di key ini
-                    models = _get_models_for_key(i)
-                    has_free_model = any(
-                        now >= state["cooldown_combos"].get(f"{i}:{m}", 0)
-                        for m in models
+                    continue
+
+                # Key-level TIDAK cooldown → cek apakah ada model yang bebas
+                models = _get_models_for_key(i)
+                has_free_model = any(
+                    now >= state["cooldown_combos"].get(f"{i}:{m}", 0)
+                    for m in models
+                )
+                if has_free_model:
+                    active_count += 1
+                else:
+                    # Semua model di key ini cooldown → ambil paling cepat bebas
+                    earliest = min(
+                        state["cooldown_combos"].get(f"{i}:{m}", 0) for m in models
                     )
-                    if has_free_model:
-                        active_count += 1
-                    else:
-                        # Semua model di key ini cooldown → ambil yang paling cepat bebas
-                        earliest = min(
-                            state["cooldown_combos"].get(f"{i}:{m}", 0) for m in models
-                        )
-                        if next_ready_time is None or earliest < next_ready_time:
-                            next_ready_time = earliest
+                    if next_ready_time is None or earliest < next_ready_time:
+                        next_ready_time = earliest
 
             if active_count == n_keys:
                 st.markdown(
