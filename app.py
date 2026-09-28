@@ -1057,15 +1057,12 @@ def _find_next_combo():
     if not keys:
         return None, None, None
 
-    now = time.time()
-    n_keys = len(keys)
-
-    for key_offset in range(n_keys):
-        key_idx = (state["current_idx"] + key_offset) % n_keys
-        if now < state["cooldown_until"].get(key_idx, 0):
-            continue
-        models = _get_models_for_key(key_idx)
-        for model_name in models:
+    all_models = _get_models_for_key(0) or _PREFERRED_MODELS
+    for model_name in all_models:
+        for key_offset in range(n_keys):
+            key_idx = (state["current_idx"] + key_offset) % n_keys
+            if now < state["cooldown_until"].get(key_idx, 0):
+                continue
             combo_key = f"{key_idx}:{model_name}"
             if now < state["cooldown_combos"].get(combo_key, 0):
                 continue
