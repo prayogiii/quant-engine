@@ -1071,31 +1071,14 @@ def _find_next_combo():
                 continue
             return key_idx, model_name, keys[key_idx]
 
-    # ── Semua cooldown → return None, biarkan caller sleep ──
-    return None, None, None
-
-    now = time.time()
-    n_keys = len(keys)
-
-    for key_offset in range(n_keys):
-        key_idx = (state["current_idx"] + key_offset) % n_keys
-
-        # Skip kalau key ini global cooldown
-        if now < state["cooldown_until"].get(key_idx, 0):
-            continue
-
-        models = _get_models_for_key(key_idx)
-        for model_name in models:
-            combo_key = f"{key_idx}:{model_name}"
-            if now < state["cooldown_combos"].get(combo_key, 0):
-                continue
-            return key_idx, model_name, keys[key_idx]
-
-    # Semua cooldown → ambil yang paling cepat bebas
+    # ── Semua cooldown → ambil combo yang paling cepat bebas ──
+    # (FIX: dead code dipindah ke sini supaya selalu dieksekusi)
     if state["cooldown_combos"]:
         earliest = min(state["cooldown_combos"], key=state["cooldown_combos"].get)
         key_idx_str, model_name = earliest.split(":", 1)
-        return int(key_idx_str), model_name, keys[int(key_idx_str)]
+        key_idx = int(key_idx_str)
+        if key_idx < len(keys):
+            return key_idx, model_name, keys[key_idx]
 
     return None, None, None
 
@@ -3533,6 +3516,7 @@ def dapatkan_model_gemini(api_key=None):
     """
     Return (model, error).
     Auto-rotate kalau key kena limit.
+    FIX: Tidak lagi melakukan API test call — cukup resolve key & model via rotator.
     """
     state = _get_key_rotator_state()
     # Backward compat: kalau rotator kosong tapi ada api_key manual
@@ -3542,53 +3526,16 @@ def dapatkan_model_gemini(api_key=None):
     if not state["keys"]:
         return None, "API key belum diisi."
 
-    # Try all keys — rotate on quota error
-    tried = 0
-    max_tries = len(state["keys"]) + 1  # +1 buffer kalau semua cooldown
+    key_idx, model_name, active_key = _find_next_combo()
+    if not active_key or not model_name:
+        return None, "Semua Gemini API key sedang cooldown."
 
-    while tried < max_tries:
-        active = get_active_gemini_key()
-        if not active:
-            return None, "Semua Gemini API key sedang cooldown."
-
-        try:
-            genai.configure(api_key=active)
-            available = [
-                m.name.split('/')[-1]
-                for m in genai.list_models()
-                if 'generateContent' in m.supported_generation_methods
-            ]
-            if not available:
-                return None, "Tidak ada model Gemini."
-
-            for model_id in available:
-                try:
-                    model = genai.GenerativeModel(model_id)
-                    model.generate_content(
-                        "test",
-                        generation_config={"max_output_tokens": 1}
-                    )
-                    return model, None
-                except Exception as e_inner:
-                    if is_gemini_quota_error(e_inner):
-                        mark_gemini_key_exhausted(70)
-                        st.toast("🔄 Gemini key kena limit, rotate", icon="🔑")
-                        break  # break inner loop → coba key berikutnya
-                    continue  # model ini gak cocok, coba model lain
-            else:
-                # Semua model gagal tapi bukan quota → return error
-                return None, "Model gagal digunakan."
-
-            tried += 1  # quota error → coba key berikutnya
-
-        except Exception as e_outer:
-            if is_gemini_quota_error(e_outer):
-                mark_gemini_key_exhausted(70)
-                tried += 1
-                continue
-            return None, f"Error: {str(e_outer)}"
-
-    return None, "Semua Gemini API key sudah dicoba, gagal semua."
+    try:
+        genai.configure(api_key=active_key)
+        model = genai.GenerativeModel(model_name)
+        return model, None
+    except Exception as e:
+        return None, f"Error membuat model: {str(e)}"
 def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retries=None):
     """
     2D rotation wrapper — coba semua kombinasi (key × model) saat kena 429.
@@ -3643,9 +3590,9 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
 
         combo_id = (key_idx, model_name)
         if combo_id in tried_combos:
-            # Sudah dicoba di call ini → skip, cooldown combo supaya iterasi
-            # berikutnya `_find_next_combo` pilih yang lain
-            _mark_combo_exhausted(key_idx, model_name, cooldown_sec=70)
+            # Sudah dicoba di call ini → skip dengan cooldown pendek (5s)
+            # supaya key/model lain bisa langsung dipilih tanpa nunggu 70s
+            _mark_combo_exhausted(key_idx, model_name, cooldown_sec=5)
             continue
         tried_combos.add(combo_id)
 
