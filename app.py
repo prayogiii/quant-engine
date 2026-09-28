@@ -3688,19 +3688,33 @@ def call_gemini_auto_rotate(prompt, image=None, generation_config=None, max_retr
     )
     _safety_errs = ("safety", "blocked", "prohibited")
 
+        # ── Track berapa kali combo tried, biar bisa early-exit ──
+    all_combos_count = None
+    failed_permanent = False
+
     for attempt in range(max_retries):
         key_idx, model_name, active_key = _find_next_combo()
 
-        # ── Semua combo cooldown → tunggu sampai ada yang bebas ──
+        # ═══ EARLY EXIT: semua combo cooldown → langsung return ═══
         if not active_key or not model_name:
-            state = _get_key_rotator_state()
-            if state["cooldown_combos"]:
-                earliest = min(state["cooldown_combos"].values())
-                wait = max(1, min(20, earliest - time.time() + 1))
+            # Jangan sleep — semua combo sudah dicoba/gagal.
+            # Return error langsung biar UI tidak stuck 5 menit.
+            if tried_combos:
+                # Sudah ada yang dicoba tapi semua gagal → give up
+                err_msg = last_err or "Semua kombinasi key×model gagal"
+                return None, f"Semua kombinasi habis (cooldown): {err_msg[:200]}"
             else:
-                wait = 2
-            time.sleep(wait)
-            continue
+                # Tidak ada yang dicoba sama sekali — kemungkinan cold start
+                # dengan semua key sudah cooldown dari sesi lain.
+                # Sleep singkat sekali, lalu give up.
+                state = _get_key_rotator_state()
+                if state.get("cooldown_combos"):
+                    earliest = min(state["cooldown_combos"].values())
+                    wait = max(1, min(5, int(earliest - time.time() + 1)))
+                else:
+                    wait = 1
+                time.sleep(wait)
+                return None, "Semua kombinasi sedang cooldown. Coba lagi nanti."
 
         combo_id = (key_idx, model_name)
         if combo_id in tried_combos:
